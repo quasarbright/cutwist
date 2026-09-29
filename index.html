@@ -816,7 +816,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     function readShared() {
       try {
-        const p = new URLSearchParams(location.search).get("p");
+        const q = new URLSearchParams(location.search), p = q.get("design") ?? q.get("p"); // (p: older links)
         if (!p) return null;
         const c = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
         if (!SOLID_NAMES[c.solid]) return null;
@@ -833,11 +833,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return { ...custom, solid: c.solid, truncate, cuts: threeSets(cuts), blackout };
       } catch { return null; }
     }
-    function shareLink() {
-      const json = JSON.stringify(design());
-      const p = btoa(json).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      return `${location.origin}${location.pathname}?p=${p}`;
-    }
+    // a custom design as URL-safe base64 JSON
+    const designCode = () => btoa(JSON.stringify(design())).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    function shareLink() { return `${location.origin}${location.pathname}?puzzle=custom&design=${designCode()}`; }
 
     // Blacking out: while painting, a click on a piece toggles its whole type (see
     // pieceTypes) in custom.blackout. Types are numbered per cut design, so any change to the
@@ -1263,6 +1261,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
       if (hoverType !== null && !isPlanar()) setHover(hoverType); // meshes were rebuilt
       renderTape();
+      writeURL();
     }
 
     MENU.forEach((p, i) => $("preset").append(new Option(p.name, i)));
@@ -1283,9 +1282,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       catch { prompt("copy this link", shareLink()); }
       setTimeout(() => { $("bShare").textContent = "copy link"; }, 1500);
     };
-    const shared = readShared();
-    if (shared) { custom = shared; presetIdx = "custom"; size = custom.size; renderBuilder(); computeSnaps(); }
-    $("preset").value = presetIdx;
+    // (the puzzle in the URL is applied at startup, below: see applyURL)
     $("preset").onchange = () => {
       const v = $("preset").value;
       presetIdx = v === "custom" ? v : +v;
@@ -1332,6 +1329,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (!showAxes) setHoverSeg(null);
       $("axes").classList.toggle("is-active", showAxes);
       $("axes").setAttribute("aria-pressed", String(showAxes));
+      writeURL();
     };
     // ---------- algorithms ----------
     // Recorded and kept by History (session.mjs). Playback turns the same layers of the puzzle,
@@ -1386,6 +1384,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     $("textures").onclick = () => {
       textureChoice = !showTextures;
       renderTexturesButton();
+      writeURL();
     };
     // moves: a given scramble (the tests use this); by default a random one
     function scramble(moves = randomScramble()) {
@@ -1650,6 +1649,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (isPlanar()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
       planeBox = "";
       placeCamera();
+      writeURL();
     }
     // one view always stays on: unchecking the last one puts it back
     $("viewFlat").onchange = () => { viewFlat = $("viewFlat").checked || !view3D; applyViews(); };
@@ -1898,9 +1898,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       usePicture = true;
       renderLook();
     };
-    $("labels").onchange = () => { showLabels = $("labels").checked; renderLook(); };
-    $("reflectLabels").onchange = () => { reflectLabels = $("reflectLabels").checked; };
-    $("planarTextures").onchange = () => { planarTextures = $("planarTextures").checked; };
+    $("labels").onchange = () => { showLabels = $("labels").checked; renderLook(); writeURL(); };
+    $("reflectLabels").onchange = () => { reflectLabels = $("reflectLabels").checked; writeURL(); };
+    $("planarTextures").onchange = () => { planarTextures = $("planarTextures").checked; writeURL(); };
     renderLook();
 
     // ---------- loop ----------
@@ -1960,6 +1960,68 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (axisGroup) axisGroup.visible = showAxes;
       updatePieces();
       root.updateMatrixWorld(true);
+    }
+
+    // ---------- the puzzle in the URL ----------
+    // ?puzzle=<id> first, then its numbers (size, or a family's own: a/b/c, sides/cuts/rows,
+    // width/height), a custom puzzle's design, and any settings changed from their defaults
+    // (axes, textures, flat, 3d, labels, mirrored-labels). Reloading gives the same puzzle,
+    // started fresh: no scramble, moves, timer or algorithms, and no picture. Rewritten in
+    // place (replaceState) as things change, so it adds nothing to the back button.
+    function writeURL() {
+      if (!P) return;
+      const spec = currentSpec(), q = new URLSearchParams();
+      q.set("puzzle", isCustom() ? "custom" : spec.id);
+      if (isCustom()) q.set("design", designCode());
+      else {
+        if (!spec.fixed) q.set("size", size);
+        for (const p of spec.params || []) q.set(p.key, spec[p.key]);
+      }
+      if (!showAxes) q.set("axes", "off");
+      if (isPlanar()) {
+        if (planarTextures) q.set("textures", "on");
+        if (!viewFlat) q.set("flat", "off");
+        if (!view3D) q.set("3d", "off");
+        if (!showLabels) q.set("labels", "off");
+        if (!reflectLabels) q.set("mirrored-labels", "off");
+      } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
+      const url = `${location.pathname}?${q}`;
+      // (window.history: this module's own `history` is the undo history)
+      if (url !== location.pathname + location.search) window.history.replaceState(null, "", url);
+    }
+    function applyURL() {
+      const q = new URLSearchParams(location.search), id = q.get("puzzle");
+      const shared = !id || id === "custom" ? readShared() : null;
+      if (shared) { custom = shared; presetIdx = "custom"; size = custom.size; renderBuilder(); computeSnaps(); }
+      else {
+        const i = MENU.findIndex((p) => p.id === id);
+        if (i >= 0) {
+          const spec = MENU[i];
+          presetIdx = i;
+          size = spec.size;
+          for (const p of spec.params || []) {
+            const v = Math.round(Number(q.get(p.key)));
+            if (q.has(p.key) && Number.isFinite(v)) paramVals[p.key] = Math.max(p.min, Math.min(p.max ?? Infinity, v));
+          }
+          const n = Math.round(Number(q.get("size")));
+          if (!spec.fixed && q.has("size") && Number.isFinite(n)) size = snapSize(spec, n, 1);
+        }
+      }
+      $("preset").value = presetIdx;
+      const off = (k) => q.get(k) === "off", on = (k) => q.get(k) === "on";
+      showAxes = !off("axes");
+      $("axes").classList.toggle("is-active", showAxes);
+      $("axes").setAttribute("aria-pressed", String(showAxes));
+      if (q.has("textures")) {
+        if (currentSpec().rule === "planar") planarTextures = on("textures");
+        else textureChoice = on("textures");
+      }
+      viewFlat = !off("flat"); view3D = !off("3d");
+      if (!viewFlat && !view3D) viewFlat = true;
+      showLabels = !off("labels");
+      reflectLabels = !off("mirrored-labels");
+      renderLook();
+      $("viewFlat").checked = viewFlat; $("view3D").checked = view3D;
     }
 
     // ---------- test hook ----------
@@ -2064,6 +2126,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     if (document.documentElement.clientWidth < 700) $("panel").setAttribute("collapsed", "");
     resize();
+    applyURL();
     renderParams();
     load();
     requestAnimationFrame(frame);
