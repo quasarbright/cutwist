@@ -178,3 +178,77 @@ test("planar: with the axes button off, the arrows are gone", async ({ page }) =
   await finish(page);
   expect((await info(page)).moves).toBe(0);
 });
+
+// ---- planar puzzles: the 3D surface ----
+// a visible cell whose given spots (fractions across it) are all visible, or null
+async function visibleCell(page, spots) {
+  return page.evaluate((spots) => {
+    const c = window.cutwist, { width, height } = c.info();
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        const pts = spots.map(([fx, fy]) => c.surfacePoint(x, y, fx, fy));
+        if (pts.every((p) => p && document.elementFromPoint(p.x, p.y)?.id === "c")) return { x, y, pts };
+      }
+    return null;
+  }, spots);
+}
+
+test("3D surface: clicking near a cell's right edge slides its row one cell right", async ({ page }) => {
+  await loadGrid(page, { topology: "torus" });
+  const found = await visibleCell(page, [[0.9, 0.5]]);
+  expect(found, "a cell with its right edge in view").toBeTruthy();
+  await page.mouse.click(found.pts[0].x, found.pts[0].y);
+  await finish(page);
+  expect((await info(page)).moves).toBe(1);
+  const clicked = await state(page);
+  expect(clicked).toEqual(await slideState(page, 0, found.y, 1));
+});
+
+test("3D surface: clicking near a cell's top edge slides its column up; the middle does nothing", async ({ page }) => {
+  await loadGrid(page, { topology: "klein" });
+  const mid = await visibleCell(page, [[0.5, 0.5]]);
+  await page.mouse.click(mid.pts[0].x, mid.pts[0].y);
+  await finish(page);
+  expect((await info(page)).moves).toBe(0);
+  const found = await visibleCell(page, [[0.5, 0.1]]);
+  await page.mouse.click(found.pts[0].x, found.pts[0].y);
+  await finish(page);
+  const clicked = await state(page);
+  expect(clicked).toEqual(await slideState(page, 1, found.x, -1));
+});
+
+test("3D surface: dragging a cell along its row slides the row", async ({ page }) => {
+  await loadGrid(page, { topology: "torus" });
+  // from a cell's middle to one cell over along its row (both in view)
+  const found = await page.evaluate(() => {
+    const c = window.cutwist;
+    for (let y = 0; y < 5; y++)
+      for (let x = 0; x < 4; x++) {
+        const a = c.surfacePoint(x, y), b = c.surfacePoint(x + 1, y);
+        if (a && b && Math.hypot(b.x - a.x, b.y - a.y) > 25) return { x, y, a, b };
+      }
+    return null;
+  });
+  expect(found, "two neighbors along a row in view").toBeTruthy();
+  const { a, b } = found;
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 12 });
+  await page.mouse.up();
+  await finish(page);
+  expect((await info(page)).moves).toBe(1);
+  const dragged = await state(page);
+  expect(dragged).toEqual(await slideState(page, 0, found.y, 1));
+});
+
+test("3D surface: dragging empty space turns the view without sliding anything", async ({ page }) => {
+  await loadGrid(page, { topology: "rp2" });
+  const v0 = await page.evaluate(() => window.cutwist.view());
+  const vw = page.viewportSize().width;
+  await page.mouse.move(vw - 60, 420);
+  await page.mouse.down();
+  await page.mouse.move(vw - 180, 460, { steps: 10 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.cutwist.view())).not.toEqual(v0);
+  expect((await info(page)).moves).toBe(0);
+});

@@ -46,7 +46,8 @@
        zoom still works. Buttons get it too in case an ancestor rule changes. */
     html, body, button, input, select { touch-action: manipulation; }
     #c, #plane { position: fixed; top: 0; left: 0; z-index: 1; display: block; touch-action: none; }
-    #c[hidden], #plane[hidden] { display: none; }
+    #c[hidden], #plane[hidden], #refPlane[hidden] { display: none; }
+    #refPlane { position: absolute; inset: 0; width: 100%; height: 100%; }
 
     .tw-title {
       position: fixed; top: 18px; left: 22px; z-index: 3; pointer-events: none;
@@ -259,7 +260,7 @@
 <body>
   <canvas id="c"></canvas>
   <canvas id="plane" hidden></canvas>
-  <div class="tw-reference" id="reference" title="the solved puzzle, turned to match your view"><span>SOLVED</span></div>
+  <div class="tw-reference" id="reference" title="the solved puzzle, turned to match your view"><span>SOLVED</span><canvas id="refPlane" hidden></canvas></div>
 
   <div class="tw-title">
     <h1>CUTWIST</h1>
@@ -287,6 +288,11 @@
     <!-- planar puzzles: how the cells look. What fills a cell is a choice of two (a segmented
          bar, like the editor's); everything else is on/off (checkboxes), with an option that
          depends on another indented under it and grayed out when it doesn't apply. -->
+    <div class="control tw-look" id="planarViews" hidden>
+      <div class="control-head"><span class="name" title="the flat grid, the surface it glues into, or both side by side (one is always on)">view</span></div>
+      <label class="check" title="the grid laid flat, its glued edges shown as faint copies past each side"><input type="checkbox" id="viewFlat" checked /> flat</label>
+      <label class="check" title="the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way"><input type="checkbox" id="view3D" checked /> 3D surface</label>
+    </div>
     <div class="control tw-look" id="planarControls" hidden>
       <div class="control-head"><span class="name" title="how the cells are marked">look</span></div>
       <div class="tw-seg tw-fill" role="radiogroup" aria-label="fill cells with">
@@ -384,6 +390,7 @@
       PLANAR_PRESETS, buildPlanar, solvedPlanarState, isPlanarSolved, applyPlanarMove, inversePlanarMove, planarScrambleMoves,
     } from "./planar.mjs";
     import { PlanarView } from "./planar-view.mjs";
+    import { surfacePoint } from "./surfaces.mjs";
 
     const $ = (id) => document.getElementById(id);
     const TAU = Math.PI * 2;
@@ -466,18 +473,28 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       W = document.documentElement.clientWidth;
       H = document.documentElement.clientHeight;
       renderer.setSize(W, H);
-      if (typeof sizePlane === "function") sizePlane();
+      planeBox = ""; // re-place the flat view's canvas on the next frame
       texturePeriod.value = TEXTURE_PX * renderer.getPixelRatio();
       camera.aspect = W / H;
       placeCamera();
     }
     function placeCamera() {
-      // fit a unit sphere (plus margin) in the narrower direction
       const vHalf = (camera.fov * Math.PI) / 360;
-      const half = camera.aspect >= 1 ? vHalf : Math.atan(Math.tan(vHalf) * camera.aspect);
-      camera.position.set(0, 0, (1.3 / Math.sin(half)) * zoom);
-      // center the puzzle in the space above the tape and control bar
-      camera.setViewOffset(W, H, 0, 45, W, H);
+      const region = typeof cameraRegion === "function" ? cameraRegion() : null;
+      if (region) {
+        // a planar puzzle's 3D surface: fit a unit sphere (plus margin) in its part of the
+        // screen, centered there
+        const w = region.right - region.left, h = region.bottom - region.top, tv = Math.tan(vHalf);
+        const half = Math.atan(Math.min((tv * h) / H, (tv * w) / H));
+        camera.position.set(0, 0, (1.15 / Math.sin(half)) * zoom);
+        camera.setViewOffset(W, H, W / 2 - (region.left + w / 2), H / 2 - (region.top + h / 2), W, H);
+      } else {
+        // fit a unit sphere (plus margin) in the narrower direction
+        const half = camera.aspect >= 1 ? vHalf : Math.atan(Math.tan(vHalf) * camera.aspect);
+        camera.position.set(0, 0, (1.3 / Math.sin(half)) * zoom);
+        // center the puzzle in the space above the tape and control bar
+        camera.setViewOffset(W, H, 0, 45, W, H);
+      }
       camera.updateProjectionMatrix();
     }
     addEventListener("resize", resize);
@@ -1212,9 +1229,19 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       history.reset(); renderAlgorithms(); // algorithms belong to this puzzle
       timer.clear(); renderTimer();
       // a planar puzzle draws on its own 2D canvas; the 3D scene waits, hidden
-      $("c").hidden = isPlanar();
-      $("plane").hidden = !isPlanar();
+      $("c").hidden = isPlanar() && !view3D;
+      $("plane").hidden = !isPlanar() || !viewFlat;
       $("planarControls").hidden = !isPlanar();
+      $("planarViews").hidden = !isPlanar();
+      $("refPlane").hidden = !isPlanar();
+      if (puzzleGroup) puzzleGroup.visible = !isPlanar();
+      surfaceGroup.visible = isPlanar();
+      if (isPlanar()) {
+        buildSurface();
+        if (resetView) root.quaternion.copy(surfaceView());
+      }
+      planeBox = "";
+      placeCamera();
       $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
       $("textures").hidden = isPlanar(); // planar cells always carry their column's texture
       if (!isPlanar()) {
@@ -1454,6 +1481,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return;
       }
       if (pointers.size > 2) return;
+      if (isPlanar()) {
+        // the 3D surface: press a cell to slide its line (or click near an edge); anywhere else turns the view
+        const hit = e.button === 0 && !e.shiftKey ? surfaceHit(e.clientX, e.clientY) : null;
+        if (hit) { flush(); drag = { mode: "spress", x: e.clientX, y: e.clientY, ...hit }; }
+        else drag = { mode: "orbit", x: e.clientX, y: e.clientY };
+        return;
+      }
       // a click (no drag) on an axis segment turns its layer; see endPointer
       const seg = (e.button === 0 || e.button === 2) && !e.shiftKey && !painting ? pickSegment(e.clientX, e.clientY) : null;
       if (seg) { drag = { mode: "segment", x: e.clientX, y: e.clientY, seg, clockwise: e.button === 0 }; return; }
@@ -1475,6 +1509,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     canvas.addEventListener("pointermove", (e) => {
       if (!pointers.has(e.pointerId)) {
+        if (isPlanar()) { canvas.style.cursor = surfaceHit(e.clientX, e.clientY) ? "grab" : ""; return; }
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
           const hit = pick(e.clientX, e.clientY);
@@ -1502,6 +1537,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return;
       }
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (drag.mode === "spress") {
+        if (Math.hypot(dx, dy) < 8) return; // still a click, so far
+        flush();
+        Object.assign(drag, { mode: "sslide", ...surfaceSlide(drag, dx, dy) });
+        anim = { live: true, axis: drag.axis, layer: drag.layer, move: null, theta: 0 };
+        canvas.style.cursor = "grabbing";
+      }
+      if (drag.mode === "sslide") {
+        // cells moved = the drag's length along the line's on-screen direction, in cell steps
+        if (anim && anim.live) anim.theta = (dx * drag.T[0] + dy * drag.T[1]) / (drag.T[0] ** 2 + drag.T[1] ** 2 || 1);
+        return;
+      }
       if (drag.mode === "press") {
         if (Math.hypot(dx, dy) < 16) return; // long enough that the direction isn't jitter
         const t = chooseTurn(drag, dx, dy);
@@ -1533,6 +1580,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function endPointer(e) {
       pointers.delete(e.pointerId);
       if (drag && drag.mode === "turn") releaseTurn();
+      if (drag && drag.mode === "sslide" && anim && anim.live) { releaseSlide(); canvas.style.cursor = ""; }
+      if (drag && drag.mode === "spress") edgeClick(drag);
       if (drag && drag.mode === "paint") toggleType(drag.piece);
       if (drag && drag.mode === "segment") turnSegment(drag.seg, drag.clockwise);
       if (!pointers.size || (drag && drag.mode === "pinch")) drag = null;
@@ -1555,12 +1604,6 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     const plane = $("plane"), planeView = new PlanarView(plane);
     // look: planarPicture stays loaded after switching back to colors, so picture needs no re-upload
     let showLabels = true, reflectLabels = true, planarTextures = false, planarPicture = null, usePicture = false, hoverArrow = null, pdrag = null;
-    function sizePlane() {
-      const dpr = Math.min(devicePixelRatio, 2);
-      plane.width = Math.round(W * dpr); plane.height = Math.round(H * dpr);
-      plane.style.width = W + "px"; plane.style.height = H + "px";
-    }
-    // the part of the screen no control covers
     function safeRect() {
       const pad = 16, r = (sel) => document.querySelector(sel).getBoundingClientRect();
       const panel = $("panel").getBoundingClientRect(), open = !$("panel").hasAttribute("collapsed");
@@ -1577,24 +1620,173 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const sw = Math.min(iw, ih * a), sh = sw / a;
       return { img: planarPicture, sx: (iw - sw) / 2, sy: (ih - sh) / 2, sw, sh };
     }
+    // ---- the two views: flat and 3D surface ----
+    // With both on they split the free space: side by side when it's wide, stacked when it's
+    // tall. The flat view's canvas covers just its part; the 3D view draws on the page-wide
+    // WebGL canvas, clipped to its part, with the camera centered there.
+    let viewFlat = true, view3D = true, planeBox = "";
+    function viewRegions() {
+      const r = safeRect(), w = r.right - r.left, h = r.bottom - r.top;
+      if (!(viewFlat && view3D)) return { flat: viewFlat ? r : null, surface: view3D ? r : null };
+      if (w >= h) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
+      const m = r.top + h / 2;
+      return { flat: { ...r, bottom: m }, surface: { ...r, top: m } };
+    }
+    function cameraRegion() { return isPlanar() && view3D ? viewRegions().surface : null; }
+    function placePlane(r) {
+      const key = [r.left, r.top, r.right, r.bottom].map(Math.round).join();
+      if (key === planeBox) return;
+      planeBox = key;
+      const dpr = Math.min(devicePixelRatio, 2), w = r.right - r.left, h = r.bottom - r.top;
+      Object.assign(plane.style, { left: r.left + "px", top: r.top + "px", width: w + "px", height: h + "px" });
+      plane.width = Math.max(1, Math.round(w * dpr)); plane.height = Math.max(1, Math.round(h * dpr));
+      planeView.origin = { x: r.left, y: r.top };
+    }
+    function applyViews() {
+      $("viewFlat").checked = viewFlat;
+      $("view3D").checked = view3D;
+      if (isPlanar()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
+      planeBox = "";
+      placeCamera();
+    }
+    // one view always stays on: unchecking the last one puts it back
+    $("viewFlat").onchange = () => { viewFlat = $("viewFlat").checked || !view3D; applyViews(); };
+    $("view3D").onchange = () => { view3D = $("view3D").checked || !viewFlat; applyViews(); };
+
+    // ---- the 3D surface ----
+    // The grid, drawn edge to edge into a hidden canvas (PlanarView.drawBare), wraps around the
+    // surface (surfaces.mjs) as a texture: slides, flips, labels and pictures come along. Both
+    // sides show it, so on the one-sided surfaces a flipped cell is seen from the other side.
+    const surfaceGroup = new THREE.Group();
+    surfaceGroup.visible = false;
+    root.add(surfaceGroup);
+    const texCanvas = document.createElement("canvas"), texView = new PlanarView(texCanvas);
+    let surfaceTexture = null, surfaceMesh = null, texKey = "";
+    const surfaceMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
+    function buildSurface() {
+      if (surfaceMesh) { surfaceGroup.remove(surfaceMesh); surfaceMesh.geometry.dispose(); }
+      const nu = Math.min(400, Math.max(120, P.W * 16)), nv = Math.min(400, Math.max(120, P.H * 16));
+      const pos = new Float32Array((nu + 1) * (nv + 1) * 3), uv = new Float32Array((nu + 1) * (nv + 1) * 2), idx = [];
+      for (let j = 0; j <= nv; j++)
+        for (let i = 0; i <= nu; i++) {
+          const k = j * (nu + 1) + i, s = i / nu, t = j / nv;
+          pos.set(surfacePoint(P.topology, s, t), k * 3);
+          uv.set([s, 1 - t], k * 2); // the canvas's top row (t = 0) is the texture's top
+          if (i < nu && j < nv) idx.push(k, k + nu + 1, k + 1, k + 1, k + nu + 1, k + nu + 2);
+        }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      // the texture: square cells, as fine as a 2048 px texture allows
+      const C = Math.max(8, Math.floor(Math.min(160, 2048 / Math.max(P.W, P.H))));
+      texCanvas.width = P.W * C; texCanvas.height = P.H * C;
+      if (surfaceTexture) surfaceTexture.dispose(); // (a new size needs a new texture)
+      surfaceTexture = new THREE.CanvasTexture(texCanvas);
+      surfaceTexture.colorSpace = THREE.SRGBColorSpace;
+      surfaceTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      surfaceMat.map = surfaceTexture;
+      surfaceMat.needsUpdate = true;
+      texKey = "";
+      surfaceMesh = new THREE.Mesh(geo, surfaceMat);
+      surfaceGroup.add(surfaceMesh);
+    }
+    // a starting view per surface that shows its shape
+    function surfaceView() {
+      // (the bottle turned like a glass one on a shelf, neck looping over to its left side; the
+      // cross-cap tipped to show its crease)
+      const tilt = { torus: [0.55, 0], klein: [0.15, 0.5], rp2: [1.05, 0.55] }[P.topology];
+      return new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
+    }
+    function renderSurface(region, slide, look) {
+      const key = state.join(",") + "|" + (slide ? `${slide.axis},${slide.layer},${slide.p.toFixed(3)}` : "") + "|"
+        + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join();
+      if (key !== texKey) { texKey = key; texView.drawBare(P, state, slide, look); surfaceTexture.needsUpdate = true; }
+      placeCamera();
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, W, H);
+      renderer.clear();
+      renderer.setScissorTest(true);
+      renderer.setScissor(region.left, H - region.bottom, region.right - region.left, region.bottom - region.top);
+      renderer.render(scene, camera);
+      renderer.setScissorTest(false);
+    }
+    // the grid cell under a point of the 3D view, and where in it: { s, t, cell } (flat
+    // coordinates in [0, 1]), or null
+    function surfaceHit(x, y) {
+      if (!surfaceMesh || !view3D) return null;
+      root.updateMatrixWorld(true);
+      ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, camera);
+      const h = raycaster.intersectObject(surfaceMesh, false)[0];
+      if (!h || !h.uv) return null;
+      const s = h.uv.x, t = 1 - h.uv.y;
+      return { s, t, cell: { x: Math.min(P.W - 1, Math.floor(s * P.W)), y: Math.min(P.H - 1, Math.floor(t * P.H)) } };
+    }
+    // screen position (CSS px) of the surface at flat coordinates (s, t)
+    function surfaceToScreen(s, t) {
+      const v = new THREE.Vector3(...surfacePoint(P.topology, s, t));
+      surfaceMesh.localToWorld(v).project(camera);
+      return [((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H];
+    }
+    // Which line a drag on the surface slides: the row or column whose direction on screen, at
+    // the pressed spot, best matches the drag. T: one cell's step along it, in screen px.
+    function surfaceSlide(d, dx, dy) {
+      const e = 0.004, s0 = Math.min(1 - e, Math.max(e, d.s)), t0 = Math.min(1 - e, Math.max(e, d.t));
+      const step = (a, b, n) => [(b[0] - a[0]) / (2 * e * n), (b[1] - a[1]) / (2 * e * n)];
+      const tx = step(surfaceToScreen(s0 - e, t0), surfaceToScreen(s0 + e, t0), P.W);
+      const ty = step(surfaceToScreen(s0, t0 - e), surfaceToScreen(s0, t0 + e), P.H);
+      const fit = (T) => Math.abs(dx * T[0] + dy * T[1]) / (Math.hypot(T[0], T[1]) || 1e-9);
+      const axis = fit(tx) >= fit(ty) ? 0 : 1;
+      return { axis, layer: axis === 0 ? d.cell.y : d.cell.x, T: axis === 0 ? tx : ty };
+    }
+    // A click (no drag) near one of a cell's edges slides it one cell toward that edge: near
+    // the right edge slides its row right, near the top edge its column up. The middle does nothing.
+    const EDGE = 0.28; // how near, as a fraction of the cell
+    function edgeClick(d) {
+      const fx = d.s * P.W - d.cell.x, fy = d.t * P.H - d.cell.y;
+      const [dist, axis, q] = [[fx, 0, -1], [1 - fx, 0, 1], [fy, 1, -1], [1 - fy, 1, 1]].sort((a, b) => a[0] - b[0])[0];
+      if (dist <= EDGE) slideLine({ axis, layer: axis === 0 ? d.cell.y : d.cell.x, q });
+    }
+    // a slide made at once (an arrow, an edge click): one move, animated
+    function slideLine(move) {
+      flush();
+      record([move]);
+      play(move);
+      renderTape();
+      renderAlgorithms();
+    }
+    function releaseSlide() {
+      const q = Math.round(anim.theta), move = { axis: anim.axis, layer: anim.layer, q };
+      Object.assign(anim, { live: false, move, from: anim.theta, to: q, t: 0, dur: 90 + 140 * Math.min(1, Math.abs(q - anim.theta)) });
+      if (q) record([move]);
+      renderTape();
+      renderAlgorithms();
+    }
+
+    const refView = new PlanarView($("refPlane"));
     function drawPlanar() {
-      planeView.layout(P, safeRect());
+      const reg = viewRegions();
+      plane.hidden = !reg.flat;
+      canvas.hidden = !reg.surface;
       const slide = anim ? { axis: anim.axis, layer: anim.layer, p: anim.theta } : null;
-      planeView.draw(state, slide, { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: showAxes, hover: hoverArrow },
-                     $("reference").getBoundingClientRect());
+      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: showAxes, hover: hoverArrow };
+      if (reg.flat) {
+        placePlane(reg.flat);
+        planeView.layout(P, reg.flat);
+        planeView.draw(state, slide, look);
+      }
+      if (reg.surface && surfaceMesh) renderSurface(reg.surface, slide, look);
+      // the corner card: the solved grid
+      const card = $("refPlane"), dpr = Math.min(devicePixelRatio, 2);
+      if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
+      refView.drawSolvedCard(P, look);
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isPlanar() || pdrag) return;
       const a = showAxes ? planeView.arrowAt(e.clientX, e.clientY) : null;
-      if (a) {
-        flush();
-        const move = { axis: a.axis, layer: a.layer, q: a.q };
-        record([move]);
-        play(move);
-        renderTape();
-        renderAlgorithms();
-        return;
-      }
+      if (a) { slideLine({ axis: a.axis, layer: a.layer, q: a.q }); return; }
       const cell = planeView.cellAt(e.clientX, e.clientY);
       if (!cell) return;
       try { plane.setPointerCapture(e.pointerId); } catch {}
@@ -1620,13 +1812,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     });
     function endPlanarDrag(e) {
       if (!pdrag || e.pointerId !== pdrag.id) return;
-      if (anim && anim.live) {
-        const q = Math.round(anim.theta), move = { axis: anim.axis, layer: anim.layer, q };
-        Object.assign(anim, { live: false, move, from: anim.theta, to: q, t: 0, dur: 90 + 140 * Math.min(1, Math.abs(q - anim.theta)) });
-        if (q) record([move]);
-        renderTape();
-        renderAlgorithms();
-      }
+      if (anim && anim.live) releaseSlide();
       pdrag = null;
       plane.style.cursor = "";
     }
@@ -1762,7 +1948,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return {
           id: isCustom() ? "custom" : MENU[presetIdx].id, title: $("name").textContent, size,
           ...(isPlanar()
-            ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture }
+            ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
+                views: { flat: viewFlat, surface: view3D } }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
@@ -1775,8 +1962,17 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       },
       // ---- screen positions, for the pointer-input tests ----
       // planar: every arrow button ({ axis, layer, q, x, y }) and a grid cell's middle, in CSS px
-      arrows() { planeView.layout(P, safeRect()); return planeView.arrows().map(({ axis, layer, q, x, y }) => ({ axis, layer, q, x, y })); },
-      cellCenter(x, y) { planeView.layout(P, safeRect()); return planeView.cellCenter(x, y); },
+      arrows() { planeView.layout(P, viewRegions().flat); return planeView.arrows().map(({ axis, layer, q, x, y }) => ({ axis, layer, q, x, y })); },
+      cellCenter(x, y) { planeView.layout(P, viewRegions().flat); return planeView.cellCenter(x, y); },
+      // where grid cell (x, y) shows on the 3D surface, at fraction (fx, fy) across it, in CSS
+      // px; null when that spot is hidden (facing away, or behind another part of the surface)
+      surfacePoint(x, y, fx = 0.5, fy = 0.5) {
+        placeCamera();
+        root.updateMatrixWorld(true);
+        camera.updateMatrixWorld();
+        const s = (x + fx) / P.W, t = (y + fy) / P.H, [px, py] = surfaceToScreen(s, t), hit = surfaceHit(px, py);
+        return hit && hit.cell.x === x && hit.cell.y === y && Math.abs(hit.s - s) < 0.02 && Math.abs(hit.t - t) < 0.02 ? { x: px, y: py } : null;
+      },
       // (poses and camera are normally brought up to date by the next frame; a hidden or
       // headless page may not have drawn one since the last change)
       sync() { updatePieces(); root.updateMatrixWorld(true); camera.updateMatrixWorld(); },
@@ -1807,6 +2003,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return out;
       },
       view() { return root.quaternion.toArray(); },
+      // turn the view to Euler angles (radians, XYZ): for trying out starting views
+      setView(x, y, z) { root.quaternion.setFromEuler(new THREE.Euler(x, y, z)); },
     };
 
     if (document.documentElement.clientWidth < 700) $("panel").setAttribute("collapsed", "");

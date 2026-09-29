@@ -20,6 +20,7 @@ export class PlanarView {
     this.ctx = canvas.getContext("2d");
     this.P = null;
     this.cell = 40; this.ox = 0; this.oy = 0; // layout, in CSS px: cell size and the grid's top-left
+    this.origin = { x: 0, y: 0 }; // where the canvas's top-left is on the page (it may cover part of it)
   }
 
   // fit the grid, its wrapped copies and arrows inside `safe` ({ left, top, right, bottom })
@@ -65,11 +66,11 @@ export class PlanarView {
   // ---- drawing ----
   // state: the planar state. slide: the line moving right now, { axis, layer, p } with p its
   // offset in cells, or null. look: { labels, picture, arrows, hover (an arrow) }.
-  draw(state, slide, look, reference) {
-    const { ctx, canvas, P } = this;
+  draw(state, slide, look) {
+    const { ctx, canvas, P } = this, o = this.origin;
     const dpr = canvas.width / canvas.clientWidth || 1;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    ctx.setTransform(dpr, 0, 0, dpr, -o.x * dpr, -o.y * dpr); // page coordinates, like the layout
+    ctx.clearRect(o.x, o.y, canvas.clientWidth, canvas.clientHeight);
     const slots = this.slots(state, slide);
     const c = this.cell;
     // the body behind the stickers
@@ -96,7 +97,32 @@ export class PlanarView {
     }
     this.drawCoordinates();
     if (look.arrows) this.drawArrows(look.hover);
-    if (reference) this.drawReference(reference, look);
+  }
+
+  // Just the cells, edge to edge, filling the canvas: the picture wrapped around the 3D
+  // surface. The canvas should be W×H cells of square pixels.
+  drawBare(P, state, slide, look) {
+    const { ctx, canvas } = this;
+    this.P = P;
+    this.cell = canvas.width / P.W; this.ox = 0; this.oy = 0;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#0a0b0e";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const slots = this.slots(state, slide), c = this.cell;
+    for (let i = 0; i < P.n; i++) {
+      const at = { x: i % P.W, y: Math.floor(i / P.W) };
+      this.drawSlot(slots[i], at.x * c, at.y * c, c, 0, look, at);
+    }
+  }
+
+  // the solved grid, filling this (small) canvas: the corner card
+  drawSolvedCard(P, look) {
+    const { ctx, canvas } = this;
+    this.P = P;
+    const dpr = canvas.width / canvas.clientWidth || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    this.drawReference({ left: 0, top: 0, width: canvas.clientWidth, height: canvas.clientHeight }, look);
   }
 
   // what each grid cell shows: [{ v (piece*4 + orientation), dx, dy }], offsets in cells
