@@ -3,9 +3,9 @@
 // the edges the flat grid glues together land on the same place:
 //   torus         f(0, t) = f(1, t),  f(s, 0) = f(s, 1)
 //   Klein bottle  f(0, t) = f(1, t),  f(s, 1) = f(1 − s, 0)
-//   cross-cap     f(1, t) = f(0, 1 − t),  f(s, 1) = f(1 − s, 0)   (the projective plane)
+//   Boy's surface f(1, t) = f(0, 1 − t),  f(s, 1) = f(1 − s, 0)   (the projective plane)
 // The Klein bottle and projective plane can't sit in 3D without passing through themselves,
-// so these shapes do (the bottle's neck, the cross-cap's crease). Every shape is centered and
+// so these shapes do (the bottle's neck, Boy's surface's curve of self-crossing). Every shape is centered and
 // scaled to fit a unit sphere, like the 3D puzzles.
 
 const TAU = Math.PI * 2;
@@ -72,19 +72,32 @@ function klein(s, t) {
   return [x + R_NECK * nx * Math.cos(v), y + R_NECK * ny * Math.cos(v), R_NECK * Math.sin(v)];
 }
 
-// The cross-cap. The flat grid's projective-plane gluing is the square's boundary with
-// opposite points identified. Stretch the square onto a disk (keeping opposite points
-// opposite), lift the disk onto a hemisphere, and apply (x, y, z) → (yz, 2xy, x² − y²), which
-// sends opposite points of the sphere to the same place, so the rim folds onto itself as the
-// gluing says. It pinches to a point in two places.
-function crossCap(s, t) {
+// Boy's surface, Bryant and Kusner's, as Hermann Karcher writes it: invert, in the unit
+// sphere, the minimal surface
+//   M(z) = Re( a(z) V(z) ) + (0, 0, 1/2),   a(z) = 1 / (z³ − z⁻³ + √5),
+//   V(z) = ( i(z² − z⁻²),  z² + z⁻²,  (2i/3)(z³ + z⁻³) ),
+// Boy(z) = M(z) / |M(z)|². (Multiplied through by z³, so z = 0 is fine: a z^k = z^(k+3) / d,
+// d = z⁶ + √5 z³ − 1.) The flat grid's projective-plane gluing is the square's boundary with
+// opposite points identified: stretch the square onto the unit disk (keeping opposite points
+// opposite) and take the point as z. The formula sends opposite points of the rim, z and −z,
+// to the same place, so the rim closes up as the gluing says. It passes through itself along
+// curves, smoothly (no pinch points), in three lobes around a triple point.
+const cmul = (a, b) => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]];
+const cdiv = (a, b) => { const d = b[0] * b[0] + b[1] * b[1]; return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d]; };
+function boy(s, t) {
   const X = 2 * s - 1, Y = 2 * t - 1;
-  const x = X * Math.sqrt(Math.max(0, 1 - (Y * Y) / 2)), y = Y * Math.sqrt(Math.max(0, 1 - (X * X) / 2));
-  const h = 1 - x * x - y * y, z = h > 1e-12 ? Math.sqrt(h) : 0; // (on the rim: exactly 0)
-  return [y * z, 2 * x * y, x * x - y * y];
+  const z = [X * Math.sqrt(Math.max(0, 1 - (Y * Y) / 2)), Y * Math.sqrt(Math.max(0, 1 - (X * X) / 2))];
+  const z2 = cmul(z, z), z3 = cmul(z2, z), z5 = cmul(z3, z2), z6 = cmul(z3, z3);
+  const d = [z6[0] + Math.sqrt(5) * z3[0] - 1, z6[1] + Math.sqrt(5) * z3[1]];
+  const a1 = cdiv([z5[0] - z[0], z5[1] - z[1]], d); // a (z² − z⁻²), times i below
+  const a2 = cdiv([z5[0] + z[0], z5[1] + z[1]], d); // a (z² + z⁻²)
+  const a3 = cdiv([z6[0] + 1, z6[1]], d); // a (z³ + z⁻³), times 2i/3 below
+  const M = [-a1[1], a2[0], (-2 / 3) * a3[1] + 0.5]; // Re(i w) = −Im w
+  const m2 = M[0] * M[0] + M[1] * M[1] + M[2] * M[2];
+  return [M[0] / m2, M[1] / m2, M[2] / m2];
 }
 
-const SHAPES = { torus, klein, rp2: crossCap };
+const SHAPES = { torus, klein, rp2: boy };
 
 // center and scale each shape into the unit sphere, from a sample of its points
 const FIT = {};
@@ -106,8 +119,8 @@ for (const [name, f] of Object.entries(SHAPES)) {
 }
 
 // Which way the grid runs on each shape: reversing s keeps every gluing (both edges it
-// joins swap together) but turns the texture over. Chosen so the torus and most of the
-// bottle's outside read the right way round; the one-sided shapes can't read right everywhere.
+// joins swap together) but turns the texture over. Chosen so the torus and most of the other
+// two's outsides read the right way round; the one-sided shapes can't read right everywhere.
 const FLIP_S = { torus: true, klein: true, rp2: false };
 // Reversing t keeps the gluings too. Reversing both s and t turns the texture a half turn
 // (upright instead of upside down, still not mirrored): the bottle's rows run up its wall.

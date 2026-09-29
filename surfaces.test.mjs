@@ -22,7 +22,7 @@ test("Klein bottle: left meets right straight; top meets bottom mirrored", () =>
   }
 });
 
-test("cross-cap: both pairs of edges meet mirrored (opposite boundary points)", () => {
+test("Boy's surface: both pairs of edges meet mirrored (opposite boundary points)", () => {
   for (const u of samples) {
     same(surfacePoint("rp2", 1, u), surfacePoint("rp2", 0, 1 - u), `s edge at t=${u}`);
     same(surfacePoint("rp2", u, 1), surfacePoint("rp2", 1 - u, 0), `t edge at s=${u}`);
@@ -45,7 +45,7 @@ test("no jumps: walking any surface in small steps moves a small distance (piece
       for (let j = 0; j < N; j++) {
         const a = surfacePoint(topology, s, j / N), b = surfacePoint(topology, s, (j + 1) / N);
         const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-        // (0.12: the cross-cap is steep, not broken, where it meets its rim)
+        // (0.12: steep, not broken, near the projective plane's rim)
         assert.ok(d < 0.12, `${topology} jumps ${d.toFixed(3)} at s=${s}, t=${(j / N).toFixed(3)}`);
       }
     }

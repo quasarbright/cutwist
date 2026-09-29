@@ -121,7 +121,8 @@ test("the mouse wheel zooms without turning anything", async ({ page }) => {
 
 // ---- planar puzzles: arrows and drags on the 2D canvas ----
 const onPlane = (page, pts) => page.evaluate((pts) => pts.filter((p) => document.elementFromPoint(p.x, p.y)?.id === "plane"), pts);
-const loadGrid = (page, params) => page.evaluate((params) => window.cutwist.load("planar", { params }), params);
+const loadGrid = (page, { topology = "torus", ...params } = {}) =>
+  page.evaluate(({ id, params }) => window.cutwist.load(id, { params }), { id: `sliding-${topology}`, params });
 async function slideState(page, axis, layer, q) {
   return page.evaluate(({ axis, layer, q }) => {
     const c = window.cutwist;

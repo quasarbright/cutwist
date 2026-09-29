@@ -1706,9 +1706,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     // a starting view per surface that shows its shape
     function surfaceView() {
-      // (the bottle turned like a glass one on a shelf, neck looping over to its left side; the
-      // cross-cap tipped to show its crease)
-      const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [1.05, 0.55] }[P.topology];
+      // (the bottle turned like a glass one on a shelf, neck looping over to its left side;
+      // Boy's surface seen straight down its axis of threefold symmetry: the dome over the
+      // triple point, with the three lobes curling around it)
+      const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[P.topology];
       return new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
     }
     function renderSurface(region, slide, look) {
@@ -2003,7 +2004,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         root.updateMatrixWorld(true);
         camera.updateMatrixWorld();
         const s = (x + fx) / P.W, t = (y + fy) / P.H, [px, py] = surfaceToScreen(s, t), hit = surfaceHit(px, py);
-        return hit && hit.cell.x === x && hit.cell.y === y && Math.abs(hit.s - s) < 0.02 && Math.abs(hit.t - t) < 0.02 ? { x: px, y: py } : null;
+        // (the same cell, within 15% of a cell of the spot: the mesh's flat triangles stray a
+        // little from the exact surface where it's steep)
+        const near = hit && Math.abs(hit.s - s) < 0.15 / P.W && Math.abs(hit.t - t) < 0.15 / P.H;
+        return near && hit.cell.x === x && hit.cell.y === y ? { x: px, y: py } : null;
       },
       // (poses and camera are normally brought up to date by the next frame; a hidden or
       // headless page may not have drawn one since the last change)

@@ -21,19 +21,14 @@ export const TOPOLOGIES = {
   rp2: { name: "projective plane", x: true, y: true },
 };
 
-export const PLANAR_PRESETS = [
-  {
-    id: "planar", name: "Sliding Grid", rule: "planar", size: 2, fixed: true, noCustom: true,
-    width: 5, height: 5, topology: "torus",
-    params: [
-      { key: "topology", label: "surface", options: Object.entries(TOPOLOGIES).map(([k, t]) => [k, t.name]),
-        title: "which edges are glued to which: torus (both straight), Klein bottle (top and bottom mirrored), projective plane (both mirrored)" },
-      { key: "width", label: "width", min: 1 },
-      { key: "height", label: "height", min: 1 },
-    ],
-    title: (n, s) => `${s.width}×${s.height} ${TOPOLOGIES[s.topology].name}`,
-  },
-];
+// One puzzle per surface, each with its own width and height.
+const GRID_NAMES = { torus: "Sliding Torus", klein: "Sliding Klein Bottle", rp2: "Sliding Projective Plane" };
+export const PLANAR_PRESETS = Object.keys(TOPOLOGIES).map((topology) => ({
+  id: `sliding-${topology}`, name: GRID_NAMES[topology], rule: "planar", size: 2, fixed: true, noCustom: true,
+  width: 5, height: 5, topology,
+  params: [{ key: "width", label: "width", min: 1 }, { key: "height", label: "height", min: 1 }],
+  title: (n, s) => `${s.width}×${s.height} ${TOPOLOGIES[s.topology].name}`,
+}));
 
 export function buildPlanar(spec) {
   const W = spec.width, H = spec.height, T = TOPOLOGIES[spec.topology];
