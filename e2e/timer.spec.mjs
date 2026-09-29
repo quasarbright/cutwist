@@ -4,8 +4,12 @@ import { test, expect } from "@playwright/test";
 import { open, info, turn, finish } from "./helpers.mjs";
 
 test.beforeEach(async ({ page }) => {
-  await page.clock.install();
+  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
   await open(page);
+  // Stop the clock: installed, it still runs in real time, and a slow machine would slip extra
+  // seconds between steps. Paused, time moves only when a test says (after the page is up:
+  // opening it waits on animation frames, which a paused clock holds back).
+  await page.clock.pauseAt(new Date("2026-01-01T00:00:10Z"));
 });
 
 // scramble with known moves, so the test can solve it
@@ -84,5 +88,6 @@ test("the display shows minutes past 60 s", async ({ page }) => {
   await scramble(page);
   await turn(page, [0, 0, 1]);
   await page.clock.fastForward(62345);
+  await page.clock.runFor(20); // one frame: the display redraws on animation frames, which the paused clock holds back
   await expect(page.locator("#timer")).toHaveText(/^1:02\.3\d$/);
 });

@@ -21,20 +21,21 @@ function torus(s, t) {
 // open into the bulb's upper right. Two pieces, u in [0, 1) along the tube, v around it:
 //   the neck (t < 1/2): a tube of circles square to its spine (a smooth curve in the x-y
 //   plane), even thickness, widening where it opens into the bulb;
-//   the bulb (t ≥ 1/2): horizontal circles on one upright axis. The outer wall swells out,
+//   the bulb (t ≥ 1/2): horizontal circles on one upright axis, the neck's mouth right above
+//   it, so the body is round from the floor up into the neck. The outer wall swells out,
 //   curves under at the floor, and turns back up as the inner tube (like a bottle's punt),
 //   which becomes the neck.
 // Where they meet at the floor (t = 1 back to t = 0) it's the same circle with v glued to
 // π − v, a reflection; taking v = 2πs − π/2 makes that the flat grid's s → 1 − s.
 const NECK = [ // the neck's spine: points and tangents (Hermite), from the floor to the bulb's top
   [[0, -1.6], [0, 2.2]],
-  [[-2.3, 0.7], [-0.9, 3.0]],
-  [[-2.2, 3.7], [1.2, 2.6]],
-  [[0, 5.1], [2.6, 0]],
-  [[1.8, 4.3], [0.3, -2.0]],
-  [[1.3, 2.4], [0, -2.0]],
+  [[-2.0, 0.4], [-1.3, 2.6]],
+  [[-3.2, 3.4], [-0.2, 3.0]],
+  [[-1.5, 6.0], [3.0, 0.6]], // a wide, round arc over the top
+  [[0.35, 4.8], [0.5, -2.4]],
+  [[0, 2.4], [0, -2.4]], // straight above the bulb's axis: the body is round all the way up
 ];
-const R_NECK = 0.72, R_MOUTH = 1.0, R_BULB = 2.6, R_FLOOR = 1.25, Y_FLOOR = -3.2, Y_TOP = 2.4;
+const R_NECK = 0.72, R_MOUTH = 1.0, R_BULB = 2.85, R_FLOOR = 1.25, Y_FLOOR = -3.2, Y_TOP = 2.4;
 const smooth = (a) => (a <= 0 ? 0 : a >= 1 ? 1 : a * a * (3 - 2 * a));
 function neckSpine(w) { // w in [0, 1]: position and unit tangent
   const n = NECK.length - 1, k = Math.min(n - 1, Math.floor(w * n)), f = w * n - k;
@@ -56,11 +57,16 @@ function klein(s, t) {
   const w = (t - 0.5) / 0.5;
   let x, y, r;
   if (w < 0.5) { // the outer wall, from the neck's mouth down to the floor
-    const a = w / 0.5;
-    y = Y_TOP + (Y_FLOOR - Y_TOP) * (1 - Math.cos(Math.PI * a)) / 2;
-    x = NECK.at(-1)[0][0] * (1 - smooth(a / 0.75)); // drifting onto the bulb's axis
-    // tapering up into the neck, fullest a little below the middle
-    r = R_MOUTH * (1 - a) + R_FLOOR * a + (R_BULB - (R_MOUTH + R_FLOOR) / 2) * Math.sin(Math.PI * a ** 1.4) ** 0.9;
+    // It carries on down from the neck without a pause (moving down from the start, radius and
+    // position changing gently at first), so the two pieces meet smoothly; it slows to level
+    // at the floor, where it turns under.
+    const a = w / 0.5, c = 0.6; // c: how fast it heads down at the mouth (a cubic, level at the floor)
+    y = Y_TOP + (Y_FLOOR - Y_TOP) * (c * a + (3 - 2 * c) * a * a + (c - 2) * a ** 3);
+    x = 0; // on the bulb's axis, from the neck's mouth to the floor
+    // tapering up into the neck; fullest a little past halfway down, then in to the floor
+    const FULL = 0.55;
+    r = a < FULL ? R_MOUTH + (R_BULB - R_MOUTH) * smooth(a / FULL)
+      : R_BULB + (R_FLOOR - R_BULB) * (1 - Math.cos(((a - FULL) / (1 - FULL)) * Math.PI / 2));
   } else { // the inner tube, from the floor up to where the neck begins
     const b = (w - 0.5) / 0.5;
     y = Y_FLOOR + (NECK[0][0][1] - Y_FLOOR) * (1 - Math.cos((Math.PI * b) / 2));
