@@ -1663,6 +1663,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     const texCanvas = document.createElement("canvas"), texView = new PlanarView(texCanvas);
     let surfaceTexture = null, surfaceMesh = null, texKey = "";
     const surfaceMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
+    // the solved grid, for the corner card: its own texture, redrawn only when the look changes
+    const solvedCanvas = document.createElement("canvas"), solvedView = new PlanarView(solvedCanvas);
+    let solvedTexture = null, solvedKey = "";
+    const solvedMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
     function buildSurface() {
       if (surfaceMesh) { surfaceGroup.remove(surfaceMesh); surfaceMesh.geometry.dispose(); }
       const nu = Math.min(400, Math.max(120, P.W * 16)), nv = Math.min(400, Math.max(120, P.H * 16));
@@ -1679,16 +1683,24 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       geo.setIndex(idx);
       geo.computeVertexNormals();
-      // the texture: square cells, as fine as a 2048 px texture allows
-      const C = Math.max(8, Math.floor(Math.min(160, 2048 / Math.max(P.W, P.H))));
+      // the texture: square cells, up to 384 px each (the bottle's bulb stretches one cell a
+      // long way), in a texture of at most 3072 px or the GPU's limit
+      const maxTex = Math.min(3072, renderer.capabilities.maxTextureSize);
+      const C = Math.max(8, Math.floor(Math.min(384, maxTex / Math.max(P.W, P.H))));
       texCanvas.width = P.W * C; texCanvas.height = P.H * C;
-      if (surfaceTexture) surfaceTexture.dispose(); // (a new size needs a new texture)
-      surfaceTexture = new THREE.CanvasTexture(texCanvas);
-      surfaceTexture.colorSpace = THREE.SRGBColorSpace;
-      surfaceTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      surfaceMat.map = surfaceTexture;
-      surfaceMat.needsUpdate = true;
-      texKey = "";
+      solvedCanvas.width = texCanvas.width; solvedCanvas.height = texCanvas.height;
+      const texture = (c) => {
+        const t = new THREE.CanvasTexture(c);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        return t;
+      };
+      if (surfaceTexture) { surfaceTexture.dispose(); solvedTexture.dispose(); } // (a new size needs new textures)
+      surfaceTexture = texture(texCanvas);
+      solvedTexture = texture(solvedCanvas);
+      surfaceMat.map = surfaceTexture; surfaceMat.needsUpdate = true;
+      solvedMat.map = solvedTexture; solvedMat.needsUpdate = true;
+      texKey = ""; solvedKey = "";
       surfaceMesh = new THREE.Mesh(geo, surfaceMat);
       surfaceGroup.add(surfaceMesh);
     }
@@ -1711,6 +1723,22 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderer.setScissor(region.left, H - region.bottom, region.right - region.left, region.bottom - region.top);
       renderer.render(scene, camera);
       renderer.setScissorTest(false);
+      renderSolvedSurface(look);
+    }
+    // The corner card, with the 3D view on: the solved surface, turned the same way as the
+    // main view, drawn into the card's square with the card's camera (like the 3D puzzles').
+    function renderSolvedSurface(look) {
+      const key = [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join();
+      if (key !== solvedKey) { solvedKey = key; solvedView.drawBare(P, solvedPlanarState(P), null, look); solvedTexture.needsUpdate = true; }
+      const box = $("reference").getBoundingClientRect(), pad = 6, size = box.width - 2 * pad;
+      surfaceMesh.material = solvedMat;
+      renderer.setScissorTest(true);
+      renderer.setViewport(box.left + pad, H - box.bottom + pad, size, size);
+      renderer.setScissor(box.left + pad, H - box.bottom + pad, size, size);
+      renderer.render(scene, refCamera);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, W, H);
+      surfaceMesh.material = surfaceMat;
     }
     // the grid cell under a point of the 3D view, and where in it: { s, t, cell } (flat
     // coordinates in [0, 1]), or null
@@ -1777,11 +1805,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         planeView.layout(P, reg.flat);
         planeView.draw(state, slide, look);
       }
-      if (reg.surface && surfaceMesh) renderSurface(reg.surface, slide, look);
-      // the corner card: the solved grid
-      const card = $("refPlane"), dpr = Math.min(devicePixelRatio, 2);
-      if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
-      refView.drawSolvedCard(P, look);
+      if (reg.surface && surfaceMesh) renderSurface(reg.surface, slide, look); // (the card too: the solved surface)
+      // the corner card without the 3D view: the flat solved grid
+      const card = $("refPlane");
+      card.hidden = !!reg.surface;
+      if (!reg.surface) {
+        const dpr = Math.min(devicePixelRatio, 2);
+        if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
+        refView.drawSolvedCard(P, look);
+      }
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isPlanar() || pdrag) return;

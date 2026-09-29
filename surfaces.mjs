@@ -44,13 +44,13 @@ const PROFILE = [
 ];
 // The neck's spine, (x, y) points with tangents, from the top of the upper joint to the base joint.
 const NECK = [
-  [[0, 3.6], [0, 1.6]],
-  [[-0.7, 5.6], [-1.6, 1.3]],
-  [[-2.6, 6.3], [-1.8, -0.3]], // a wide arc over the top
-  [[-4.3, 4.3], [-0.2, -2.4]],
-  [[-3.7, 0.9], [0.9, -2.3]], // down outside, heading in
-  [[-1.5, -0.2], [1.8, -0.9]], // through the wall
-  [[0, -1.2], [0, -1.4]], // straight down into the base joint
+  [[0, 3.6], [0, 2.6]],
+  [[-0.7, 6.5], [-1.7, 2.4]],
+  [[-3.1, 7.9], [-2.9, 0]], // a high, wide arc over the top
+  [[-5.5, 5.7], [-0.3, -3.1]],
+  [[-5.0, 2.0], [1.1, -3.2]], // down outside, heading in
+  [[-2.6, -0.3], [2.4, -1.3]], // through the wall
+  [[0, -1.2], [0, -1.7]], // straight down into the base joint
 ];
 function hermite(pts, w) { // a point and unit tangent along Hermite segments, w in [0, 1]
   const n = pts.length - 1, k = Math.min(n - 1, Math.floor(w * n)), f = w * n - k;

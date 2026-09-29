@@ -131,20 +131,25 @@ test("labels: a letter for the column, a number for the row, like chess", async 
   assert.equal(colLabel(702), "AAA");
 });
 
-test("cell colors: hue by row, lightness by column, and the darkest column still tells its rows apart", async () => {
-  const { cellColor } = await import("./planar-view.mjs");
+test("cell colors: puzzle colors up to 12 rows, vivid hues past; darker across; the darkest column still tells rows apart", async () => {
+  const { cellColor, PUZZLE_COLORS } = await import("./planar-view.mjs");
   const { colorDistance } = await import("./puzzle.mjs");
-  // column A is the hue at full strength: some channel is maxed and another is zero
-  for (const y of [0, 1, 2, 3, 4]) {
-    const c = cellColor(0, y, 5, 5), ch = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  // up to 12 rows: column A is the puzzle color itself (a Rubik's cube's six first)
+  for (let y = 0; y < 6; y++) assert.equal(cellColor(0, y, 5, 6), PUZZLE_COLORS[y]);
+  assert.deepEqual(PUZZLE_COLORS.slice(0, 6), ["#f4f4ee", "#c8102e", "#0051ba", "#ffe600", "#009e60", "#ff6a13"]);
+  // past 12: column A is the hue at full strength (some channel maxed, another zero)
+  for (const y of [0, 5, 11]) {
+    const c = cellColor(0, y, 5, 16), ch = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
     assert.ok(Math.max(...ch) === 255 && Math.min(...ch) === 0, `${y}: ${c}`);
   }
-  assert.equal(cellColor(0, 0, 5, 5), "#ff0000"); // row 1 is red
-  // the last column is the same hue, darker, and still tells its rows apart
-  for (const H of [3, 5, 8, 10]) {
+  assert.equal(cellColor(0, 0, 5, 16), "#ff0000"); // row 1 is red
+  // the last column is each row's color, darker, and still tells the rows apart
+  // (visibly different starts around 0.02; 16 hues around the wheel are only 22.5° apart)
+  for (const [H, least] of [[3, 0.045], [5, 0.045], [8, 0.045], [12, 0.045], [16, 0.03]]) {
     const dark = Array.from({ length: H }, (_, y) => cellColor(5, y, 6, H));
     let min = Infinity;
     dark.forEach((a, i) => dark.forEach((b, j) => { if (i < j) min = Math.min(min, colorDistance(a, b)); }));
-    assert.ok(min > 0.045, `${H} rows: ${min}`); // visibly different starts around 0.02
+    assert.ok(min > least, `${H} rows: ${min}`);
   }
 });
+

@@ -174,3 +174,13 @@ test("every surface shows up in 3D, with cells in view", async ({ page }) => {
     expect(visible, topology).toBeGreaterThan(4);
   }
 });
+
+test("the corner card: the solved surface in 3D with the 3D view on, the flat grid with only the flat view", async ({ page }) => {
+  await load(page);
+  await expect(page.locator("#refPlane")).toBeHidden(); // 3D on: the card is drawn by the 3D view
+  await page.locator("#view3D").uncheck();
+  await expect(page.locator("#refPlane")).toBeVisible();
+  await page.locator("#view3D").check();
+  await page.locator("#viewFlat").uncheck();
+  await expect(page.locator("#refPlane")).toBeHidden();
+});

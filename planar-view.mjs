@@ -337,8 +337,14 @@ function vividColor(hueDeg) {
   vivid.set(key, best);
   return best;
 }
+// Up to 12 rows, the rows take twisty-puzzle colors instead: a Rubik's cube's six (ordered so
+// no neighbors, counting the wrap from the last row to the first, are a pair that's easy to
+// mix up, like red and orange), then six more from the megaminx family.
+export const PUZZLE_COLORS = ["#f4f4ee", "#c8102e", "#0051ba", "#ffe600", "#009e60", "#ff6a13",
+  "#7b3fb3", "#5ab4ff", "#ff7eb6", "#8ed142", "#007a89", "#d6c298"];
+const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
 export function cellColor(x, y, W, H) {
-  const base = vividColor((y * 360) / H + 29); // +29: row 1 starts at red
+  const base = H <= PUZZLE_COLORS.length ? rgbOf(PUZZLE_COLORS[y]) : vividColor((y * 360) / H + 29); // +29: row 1 starts at red
   const v = W > 1 ? 1 - ((1 - DARK) * x) / (W - 1) : 1;
   const hex = (c) => Math.round(c * v * 255).toString(16).padStart(2, "0");
   return `#${base.map(hex).join("")}`;
