@@ -1667,6 +1667,37 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     const texCanvas = document.createElement("canvas"), texView = new PlanarView(texCanvas);
     let surfaceTexture = null, surfaceMesh = null, texKey = "";
     const surfaceMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
+    // While a line slides, the texture stays as it was and the shader moves the line: a point
+    // on the moving line shows what was p cells behind it along the loop, found with the same
+    // seam rules as planar.mjs's wrap (mirrored coordinates are continuous: y → H − y). Redrawing
+    // and re-uploading the texture every frame instead took 8+ ms a frame here, and far more
+    // on some Windows GPUs.
+    const slideUniforms = {
+      uSlide: { value: 0 }, uAxis: { value: 0 }, uLines: { value: new THREE.Vector2() }, uP: { value: 0 },
+      uGrid: { value: new THREE.Vector2(1, 1) }, uSeams: { value: new THREE.Vector2() },
+    };
+    surfaceMat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, slideUniforms);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("void main() {", `uniform int uSlide, uAxis; uniform vec2 uLines, uGrid, uSeams; uniform float uP;
+        void main() {`)
+        .replace("#include <map_fragment>", `
+        #ifdef USE_MAP
+          vec2 uv = vMapUv, g = vec2(uv.x, 1.0 - uv.y) * uGrid, sgn = vec2(1.0); // grid coordinates, rows down
+          float line = floor(uAxis == 0 ? g.y : g.x);
+          if (uSlide == 1 && (line == uLines.x || line == uLines.y)) {
+            if (uAxis == 0) g.x -= uP; else g.y -= uP;
+            float kx = floor(g.x / uGrid.x); g.x -= kx * uGrid.x;
+            if (uSeams.x > 0.5 && mod(kx, 2.0) == 1.0) { g.y = uGrid.y - g.y; sgn.y = -sgn.y; }
+            float ky = floor(g.y / uGrid.y); g.y -= ky * uGrid.y;
+            if (uSeams.y > 0.5 && mod(ky, 2.0) == 1.0) { g.x = uGrid.x - g.x; sgn.x = -sgn.x; }
+            uv = vec2(g.x, uGrid.y - g.y) / uGrid;
+          }
+          // (gradients from the unmoved coordinates: the jump at the line's edge would pick a blurry mip)
+          vec4 sampledDiffuseColor = textureGrad(map, uv, dFdx(vMapUv) * sgn, dFdy(vMapUv) * sgn);
+          diffuseColor *= sampledDiffuseColor;
+        #endif`);
+    };
     // the solved grid, for the corner card: its own texture, redrawn only when the look changes
     const solvedCanvas = document.createElement("canvas"), solvedView = new PlanarView(solvedCanvas);
     let solvedTexture = null, solvedKey = "";
@@ -1718,10 +1749,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     function renderSurface(region, slide, look) {
       const hints = slide ? null : edgeHints; // (none while a line moves)
-      const key = state.join(",") + "|" + (slide ? `${slide.axis},${slide.layer},${slide.p.toFixed(3)}` : "") + "|"
-        + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
+      const key = state.join(",") + "|" + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
         + "|" + (hints ? `${hints.x},${hints.y},${hints.edge}` : "");
-      if (key !== texKey) { texKey = key; texView.drawBare(P, state, slide, { ...look, edgeHints: hints }); surfaceTexture.needsUpdate = true; }
+      if (key !== texKey) { texKey = key; texView.drawBare(P, state, null, { ...look, edgeHints: hints }); surfaceTexture.needsUpdate = true; }
+      // the moving line, and the one its loop continues in across a mirrored seam
+      const u = slideUniforms;
+      u.uSlide.value = slide && slide.p ? 1 : 0;
+      u.uGrid.value.set(P.W, P.H);
+      u.uSeams.value.set(P.T.x ? 1 : 0, P.T.y ? 1 : 0);
+      if (slide) {
+        const partner = slide.axis === 0 ? (P.T.x ? P.H - 1 - slide.layer : slide.layer) : (P.T.y ? P.W - 1 - slide.layer : slide.layer);
+        u.uAxis.value = slide.axis; u.uP.value = slide.p; u.uLines.value.set(slide.layer, partner);
+      }
       placeCamera();
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, W, H);
