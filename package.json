@@ -1,6 +1,7 @@
 {
   "name": "cutwist",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "test": "npm run test:unit && npm run test:e2e",
