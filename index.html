@@ -7,6 +7,16 @@
   <link rel="icon" type="image/png" href="favicon.png" />
   <link rel="apple-touch-icon" href="favicon.png" />
 
+  <!-- The import map has to come before any module script: Firefox ignores one that arrives
+       after a module has started loading, and then "three" doesn't resolve. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"
+    }
+  }
+  </script>
+
   <link rel="stylesheet" href="https://quasarbright.github.io/sketches/shared/cohesion.css" />
   <script type="module" src="https://quasarbright.github.io/sketches/shared/cohesion.js"></script>
 
@@ -15,14 +25,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Rubik:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"
-    }
-  }
-  </script>
 
   <style>
     :root {
