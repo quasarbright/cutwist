@@ -253,3 +253,16 @@ test("3D surface: dragging empty space turns the view without sliding anything",
   expect(await page.evaluate(() => window.cutwist.view())).not.toEqual(v0);
   expect((await info(page)).moves).toBe(0);
 });
+
+test("3D surface: hovering a cell shows its chevrons, lighting the one for the edge under the pointer", async ({ page }) => {
+  await loadGrid(page, { topology: "torus" });
+  const found = await visibleCell(page, [[0.5, 0.5], [0.9, 0.5]]);
+  expect(found, "a cell with its middle and right edge in view").toBeTruthy();
+  const [mid, right] = found.pts;
+  await page.mouse.move(mid.x, mid.y);
+  expect(await page.evaluate(() => window.cutwist.edgeHints())).toEqual({ x: found.x, y: found.y, edge: null });
+  await page.mouse.move(right.x, right.y);
+  expect(await page.evaluate(() => window.cutwist.edgeHints())).toEqual({ x: found.x, y: found.y, edge: "right" });
+  await page.mouse.move(5, 400); // off the surface
+  expect(await page.evaluate(() => window.cutwist.edgeHints())).toBeNull();
+});

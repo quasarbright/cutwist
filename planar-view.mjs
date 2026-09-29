@@ -113,6 +113,31 @@ export class PlanarView {
       const at = { x: i % P.W, y: Math.floor(i / P.W) };
       this.drawSlot(slots[i], at.x * c, at.y * c, c, 0, look, at);
     }
+    if (look.edgeHints) this.drawEdgeHints(look.edgeHints, c);
+  }
+
+  // The cell under the pointer on the 3D surface: a chevron at each edge, pointing out, the way
+  // a click near that edge slides it; the one whose zone the pointer is in lit up. Drawn on the
+  // grid, not the piece, so they point along the surface whatever way the piece is turned.
+  // hints: { x, y, edge: "left" | "right" | "top" | "bottom" | null }
+  drawEdgeHints({ x, y, edge }, c) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(x * c, y * c);
+    ctx.scale(c, c);
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const [name, dx, dy] of [["left", -1, 0], ["right", 1, 0], ["top", 0, -1], ["bottom", 0, 1]]) {
+      const on = name === edge, size = on ? 0.12 : 0.09;
+      const cx = 0.5 + 0.35 * dx, cy = 0.5 + 0.35 * dy, px = -dy, py = dx; // (px, py): across the chevron
+      ctx.beginPath();
+      ctx.moveTo(cx - size * dx + size * px, cy - size * dy + size * py);
+      ctx.lineTo(cx + size * 0.6 * dx, cy + size * 0.6 * dy);
+      ctx.lineTo(cx - size * dx - size * px, cy - size * dy - size * py);
+      ctx.globalAlpha = on ? 1 : 0.55;
+      ctx.lineWidth = on ? 0.085 : 0.07; ctx.strokeStyle = "#0a0b0e"; ctx.stroke(); // outline
+      ctx.lineWidth = on ? 0.045 : 0.035; ctx.strokeStyle = on ? "#f5c518" : "#fff"; ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // the solved grid, filling this (small) canvas: the corner card

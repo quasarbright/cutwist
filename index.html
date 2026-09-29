@@ -1237,6 +1237,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (puzzleGroup) puzzleGroup.visible = !isPlanar();
       surfaceGroup.visible = isPlanar();
       if (isPlanar()) {
+        edgeHints = null;
         buildSurface();
         if (resetView) root.quaternion.copy(surfaceView());
       }
@@ -1484,6 +1485,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (isPlanar()) {
         // the 3D surface: press a cell to slide its line (or click near an edge); anywhere else turns the view
         const hit = e.button === 0 && !e.shiftKey ? surfaceHit(e.clientX, e.clientY) : null;
+        edgeHints = null; // no chevrons while pressing, dragging or turning the view
         if (hit) { flush(); drag = { mode: "spress", x: e.clientX, y: e.clientY, ...hit }; }
         else drag = { mode: "orbit", x: e.clientX, y: e.clientY };
         return;
@@ -1509,7 +1511,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     canvas.addEventListener("pointermove", (e) => {
       if (!pointers.has(e.pointerId)) {
-        if (isPlanar()) { canvas.style.cursor = surfaceHit(e.clientX, e.clientY) ? "grab" : ""; return; }
+        if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
           const hit = pick(e.clientX, e.clientY);
@@ -1588,7 +1590,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     canvas.addEventListener("pointerup", endPointer);
     canvas.addEventListener("pointercancel", endPointer);
-    canvas.addEventListener("pointerleave", () => { if (hoverType !== null) setHover(null); setHoverSeg(null); });
+    canvas.addEventListener("pointerleave", () => { if (hoverType !== null) setHover(null); setHoverSeg(null); if (isPlanar()) hoverSurface(null); });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
@@ -1713,9 +1715,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       return new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
     }
     function renderSurface(region, slide, look) {
+      const hints = slide ? null : edgeHints; // (none while a line moves)
       const key = state.join(",") + "|" + (slide ? `${slide.axis},${slide.layer},${slide.p.toFixed(3)}` : "") + "|"
-        + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join();
-      if (key !== texKey) { texKey = key; texView.drawBare(P, state, slide, look); surfaceTexture.needsUpdate = true; }
+        + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
+        + "|" + (hints ? `${hints.x},${hints.y},${hints.edge}` : "");
+      if (key !== texKey) { texKey = key; texView.drawBare(P, state, slide, { ...look, edgeHints: hints }); surfaceTexture.needsUpdate = true; }
       placeCamera();
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, W, H);
@@ -1773,10 +1777,23 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // A click (no drag) near one of a cell's edges slides it one cell toward that edge: near
     // the right edge slides its row right, near the top edge its column up. The middle does nothing.
     const EDGE = 0.28; // how near, as a fraction of the cell
-    function edgeClick(d) {
+    // the edge zone a spot on a cell is in: { edge, axis, q } (the slide a click makes), or null
+    function edgeAt(d) {
       const fx = d.s * P.W - d.cell.x, fy = d.t * P.H - d.cell.y;
-      const [dist, axis, q] = [[fx, 0, -1], [1 - fx, 0, 1], [fy, 1, -1], [1 - fy, 1, 1]].sort((a, b) => a[0] - b[0])[0];
-      if (dist <= EDGE) slideLine({ axis, layer: axis === 0 ? d.cell.y : d.cell.x, q });
+      const [dist, edge, axis, q] = [[fx, "left", 0, -1], [1 - fx, "right", 0, 1], [fy, "top", 1, -1], [1 - fy, "bottom", 1, 1]]
+        .sort((a, b) => a[0] - b[0])[0];
+      return dist <= EDGE ? { edge, axis, q } : null;
+    }
+    function edgeClick(d) {
+      const e = edgeAt(d);
+      if (e) slideLine({ axis: e.axis, layer: e.axis === 0 ? d.cell.y : d.cell.x, q: e.q });
+    }
+    // the cell under the pointer on the 3D surface, for its chevrons (see PlanarView.drawEdgeHints)
+    let edgeHints = null;
+    function hoverSurface(x, y) {
+      const hit = x === null ? null : surfaceHit(x, y), e = hit && edgeAt(hit);
+      edgeHints = hit ? { x: hit.cell.x, y: hit.cell.y, edge: e ? e.edge : null } : null;
+      canvas.style.cursor = e ? "pointer" : hit ? "grab" : "";
     }
     // a slide made at once (an arrow, an edge click): one move, animated
     function slideLine(move) {
@@ -2039,6 +2056,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return out;
       },
       view() { return root.quaternion.toArray(); },
+      // the chevrons on the hovered 3D cell: { x, y, edge } or null
+      edgeHints() { return edgeHints; },
       // turn the view to Euler angles (radians, XYZ): for trying out starting views
       setView(x, y, z) { root.quaternion.setFromEuler(new THREE.Euler(x, y, z)); },
     };
