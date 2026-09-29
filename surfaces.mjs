@@ -16,64 +16,60 @@ function torus(s, t) {
   return [(R + r * Math.cos(a)) * Math.cos(b), r * Math.sin(a), (R + r * Math.cos(a)) * Math.sin(b)];
 }
 
-// A glass Klein bottle, like the blown ones: a round bulb whose neck leaves its floor, rises
-// inside it at a slant, passes out through the left wall, arcs over the top and comes down to
-// open into the bulb's upper right. Two pieces, u in [0, 1) along the tube, v around it:
-//   the neck (t < 1/2): a tube of circles square to its spine (a smooth curve in the x-y
-//   plane), even thickness, widening where it opens into the bulb;
-//   the bulb (t ≥ 1/2): horizontal circles on one upright axis, the neck's mouth right above
-//   it, so the body is round from the floor up into the neck. The outer wall swells out,
-//   curves under at the floor, and turns back up as the inner tube (like a bottle's punt),
-//   which becomes the neck.
-// Where they meet at the floor (t = 1 back to t = 0) it's the same circle with v glued to
-// π − v, a reflection; taking v = 2πs − π/2 makes that the flat grid's s → 1 − s.
-const NECK = [ // the neck's spine: points and tangents (Hermite), from the floor to the bulb's top
-  [[0, -1.6], [0, 2.2]],
-  [[-2.0, 0.4], [-1.3, 2.6]],
-  [[-3.2, 3.4], [-0.2, 3.0]],
-  [[-1.5, 6.0], [3.0, 0.6]], // a wide, round arc over the top
-  [[0.35, 4.8], [0.5, -2.4]],
-  [[0, 2.4], [0, -2.4]], // straight above the bulb's axis: the body is round all the way up
+// A glass Klein bottle, like the blown ones, in two pieces (t < 1/2, then t ≥ 1/2), v around:
+//   the pottery (t < 1/2): one profile curve spun about the upright axis, so it's round like a
+//   thrown pot. From the base joint (a short upright tube, neck-wide, on the axis inside the
+//   bulb) down the punt, around the floor, up the bulb's outer wall, in through the shoulder,
+//   and up the upper joint (another upright neck-wide tube, on top);
+//   the neck (t ≥ 1/2): a bendy tube, even thickness, circles square to its spine (a curve in
+//   the x-y plane). It leaves the upper joint straight up, arcs over, comes down outside,
+//   passes in through the bulb's wall, and turns to come straight down into the base joint.
+// The neck meets both joints head on, upright and at their width, so the joins are smooth.
+// Coming down into the base joint, the neck's circle runs the other way round from the
+// pottery's there (its frame turned over going around the arc): the same circle, with v glued
+// to π − v, a reflection. Taking v = 2πs − π/2 makes that the flat grid's s → 1 − s.
+const R_NECK = 0.72;
+// The profile, (radius, height) points with tangents (Hermite), from the base joint to the top.
+const PROFILE = [
+  [[R_NECK, -1.2], [0, -1.2]], // base joint: upright, heading down into the punt
+  [[R_NECK, -2.0], [0.15, -1.0]],
+  [[1.25, -3.05], [1.0, -0.6]], // the punt flaring into the floor
+  [[2.05, -3.35], [1.2, 0]], // the floor's lowest ring
+  [[2.95, -2.55], [0.5, 1.4]],
+  [[3.15, -1.1], [0, 1.6]], // widest
+  [[2.45, 0.7], [-0.95, 1.6]], // the shoulder
+  [[1.2, 2.05], [-0.8, 1.2]],
+  [[R_NECK, 3.0], [0, 1.0]], // upper joint: upright, neck-wide
+  [[R_NECK, 3.6], [0, 0.6]],
 ];
-const R_NECK = 0.72, R_MOUTH = 1.0, R_BULB = 2.85, R_FLOOR = 1.25, Y_FLOOR = -3.2, Y_TOP = 2.4;
-const smooth = (a) => (a <= 0 ? 0 : a >= 1 ? 1 : a * a * (3 - 2 * a));
-function neckSpine(w) { // w in [0, 1]: position and unit tangent
-  const n = NECK.length - 1, k = Math.min(n - 1, Math.floor(w * n)), f = w * n - k;
-  const [p0, m0] = NECK[k], [p1, m1] = NECK[k + 1];
-  const h00 = 2 * f ** 3 - 3 * f ** 2 + 1, h10 = f ** 3 - 2 * f ** 2 + f, h01 = -2 * f ** 3 + 3 * f ** 2, h11 = f ** 3 - f ** 2;
-  const d00 = 6 * f ** 2 - 6 * f, d10 = 3 * f ** 2 - 4 * f + 1, d01 = -6 * f ** 2 + 6 * f, d11 = 3 * f ** 2 - 2 * f;
-  const p = [0, 1].map((i) => h00 * p0[i] + h10 * m0[i] + h01 * p1[i] + h11 * m1[i]);
-  const d = [0, 1].map((i) => d00 * p0[i] + d10 * m0[i] + d01 * p1[i] + d11 * m1[i]), l = Math.hypot(d[0], d[1]);
-  return [p, [d[0] / l, d[1] / l]];
+// The neck's spine, (x, y) points with tangents, from the top of the upper joint to the base joint.
+const NECK = [
+  [[0, 3.6], [0, 1.6]],
+  [[-0.7, 5.6], [-1.6, 1.3]],
+  [[-2.6, 6.3], [-1.8, -0.3]], // a wide arc over the top
+  [[-4.3, 4.3], [-0.2, -2.4]],
+  [[-3.7, 0.9], [0.9, -2.3]], // down outside, heading in
+  [[-1.5, -0.2], [1.8, -0.9]], // through the wall
+  [[0, -1.2], [0, -1.4]], // straight down into the base joint
+];
+function hermite(pts, w) { // a point and unit tangent along Hermite segments, w in [0, 1]
+  const n = pts.length - 1, k = Math.min(n - 1, Math.floor(w * n)), f = w * n - k;
+  const [p0, m0] = pts[k], [p1, m1] = pts[k + 1];
+  const h = [2 * f ** 3 - 3 * f ** 2 + 1, f ** 3 - 2 * f ** 2 + f, -2 * f ** 3 + 3 * f ** 2, f ** 3 - f ** 2];
+  const d = [6 * f ** 2 - 6 * f, 3 * f ** 2 - 4 * f + 1, -6 * f ** 2 + 6 * f, 3 * f ** 2 - 2 * f];
+  const p = [0, 1].map((i) => h[0] * p0[i] + h[1] * m0[i] + h[2] * p1[i] + h[3] * m1[i]);
+  const dp = [0, 1].map((i) => d[0] * p0[i] + d[1] * m0[i] + d[2] * p1[i] + d[3] * m1[i]), l = Math.hypot(dp[0], dp[1]);
+  return [p, [dp[0] / l, dp[1] / l]];
 }
 function klein(s, t) {
   const v = TAU * s - Math.PI / 2;
   if (t < 0.5) {
-    const w = t / 0.5, [[x, y], [tx, ty]] = neckSpine(w);
-    const r = R_NECK + (R_MOUTH - R_NECK) * smooth((w - 0.75) / 0.25);
-    const nx = ty, ny = -tx; // the spine's normal in its plane: +x at the floor, −x coming into the top
-    return [x + r * nx * Math.cos(v), y + r * ny * Math.cos(v), r * Math.sin(v)];
+    const [[rho, y]] = hermite(PROFILE, t / 0.5);
+    return [rho * Math.cos(v), y, rho * Math.sin(v)];
   }
-  const w = (t - 0.5) / 0.5;
-  let x, y, r;
-  if (w < 0.5) { // the outer wall, from the neck's mouth down to the floor
-    // It carries on down from the neck without a pause (moving down from the start, radius and
-    // position changing gently at first), so the two pieces meet smoothly; it slows to level
-    // at the floor, where it turns under.
-    const a = w / 0.5, c = 0.6; // c: how fast it heads down at the mouth (a cubic, level at the floor)
-    y = Y_TOP + (Y_FLOOR - Y_TOP) * (c * a + (3 - 2 * c) * a * a + (c - 2) * a ** 3);
-    x = 0; // on the bulb's axis, from the neck's mouth to the floor
-    // tapering up into the neck; fullest a little past halfway down, then in to the floor
-    const FULL = 0.55;
-    r = a < FULL ? R_MOUTH + (R_BULB - R_MOUTH) * smooth(a / FULL)
-      : R_BULB + (R_FLOOR - R_BULB) * (1 - Math.cos(((a - FULL) / (1 - FULL)) * Math.PI / 2));
-  } else { // the inner tube, from the floor up to where the neck begins
-    const b = (w - 0.5) / 0.5;
-    y = Y_FLOOR + (NECK[0][0][1] - Y_FLOOR) * (1 - Math.cos((Math.PI * b) / 2));
-    x = 0;
-    r = R_FLOOR + (R_NECK - R_FLOOR) * smooth(b / 0.6);
-  }
-  return [x - r * Math.cos(v), y, r * Math.sin(v)];
+  const [[x, y], [tx, ty]] = hermite(NECK, (t - 0.5) / 0.5);
+  const nx = ty, ny = -tx; // the spine's normal in its plane: +x leaving the top, −x coming into the base
+  return [x + R_NECK * nx * Math.cos(v), y + R_NECK * ny * Math.cos(v), R_NECK * Math.sin(v)];
 }
 
 // The cross-cap. The flat grid's projective-plane gluing is the square's boundary with
@@ -112,10 +108,13 @@ for (const [name, f] of Object.entries(SHAPES)) {
 // Which way the grid runs on each shape: reversing s keeps every gluing (both edges it
 // joins swap together) but turns the texture over. Chosen so the torus and most of the
 // bottle's outside read the right way round; the one-sided shapes can't read right everywhere.
-const FLIP_S = { torus: true, klein: false, rp2: false };
+const FLIP_S = { torus: true, klein: true, rp2: false };
+// Reversing t keeps the gluings too. Reversing both s and t turns the texture a half turn
+// (upright instead of upside down, still not mirrored): the bottle's rows run up its wall.
+const FLIP_T = { torus: false, klein: true, rp2: false };
 
 // the point of `topology`'s surface at flat coordinates (s, t)
 export function surfacePoint(topology, s, t) {
-  const p = SHAPES[topology](FLIP_S[topology] ? 1 - s : s, t), { c, r } = FIT[topology];
+  const p = SHAPES[topology](FLIP_S[topology] ? 1 - s : s, FLIP_T[topology] ? 1 - t : t), { c, r } = FIT[topology];
   return [(p[0] - c[0]) / r, (p[1] - c[1]) / r, (p[2] - c[2]) / r];
 }

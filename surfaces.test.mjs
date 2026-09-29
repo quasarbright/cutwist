@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { surfacePoint } from "./surfaces.mjs";
 
-const same = (a, b, msg) => assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-9, `${msg}: ${a} vs ${b}`);
+const same = (a, b, msg) => assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-7, `${msg}: ${a} vs ${b}`);
 const samples = Array.from({ length: 21 }, (_, i) => i / 20);
 
 test("torus: left meets right, top meets bottom", () => {
@@ -35,4 +35,22 @@ test("every surface fits the unit sphere, and fills it", () => {
     for (const s of samples) for (const t of samples) r = Math.max(r, Math.hypot(...surfacePoint(topology, s, t)));
     assert.ok(r <= 1 + 1e-9 && r > 0.9, `${topology}: ${r}`);
   }
+});
+
+test("no jumps: walking any surface in small steps moves a small distance (pieces meet)", () => {
+  const N = 400;
+  for (const topology of ["torus", "klein", "rp2"])
+    for (let i = 0; i <= 8; i++) {
+      const s = i / 8;
+      for (let j = 0; j < N; j++) {
+        const a = surfacePoint(topology, s, j / N), b = surfacePoint(topology, s, (j + 1) / N);
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        // (0.12: the cross-cap is steep, not broken, where it meets its rim)
+        assert.ok(d < 0.12, `${topology} jumps ${d.toFixed(3)} at s=${s}, t=${(j / N).toFixed(3)}`);
+      }
+    }
+});
+
+test("Klein bottle: the round body and the neck meet exactly at the upper joint", () => {
+  for (const s of samples) same(surfacePoint("klein", s, 0.5 - 1e-9), surfacePoint("klein", s, 0.5 + 1e-9), `s=${s}`);
 });

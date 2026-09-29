@@ -1696,7 +1696,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function surfaceView() {
       // (the bottle turned like a glass one on a shelf, neck looping over to its left side; the
       // cross-cap tipped to show its crease)
-      const tilt = { torus: [0.55, 0], klein: [0.15, 0.5], rp2: [1.05, 0.55] }[P.topology];
+      const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [1.05, 0.55] }[P.topology];
       return new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
     }
     function renderSurface(region, slide, look) {
