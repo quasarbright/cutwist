@@ -412,7 +412,7 @@ test("megaminx uses the standard color scheme", () => {
   const P = preset("megaminx", 3);
   const name = { "#f4f4ee": "white", "#5c6068": "gray", "#0051ba": "blue", "#5ab4ff": "light blue",
     "#c8102e": "red", "#ff6a13": "orange", "#009e60": "green", "#8ed142": "light green",
-    "#7b3fb3": "purple", "#ff7eb6": "pink", "#ffe600": "yellow", "#e9dcbf": "beige" };
+    "#7b3fb3": "purple", "#ff7eb6": "pink", "#ffe600": "yellow", "#d6c298": "beige" };
   const opp = { white: "gray", blue: "light blue", red: "orange", green: "light green", purple: "pink", yellow: "beige" };
   const color = (i) => name[P.colors[i]];
   for (let i = 0; i < 12; i++) {
@@ -437,7 +437,7 @@ test("icosahedron uses the cubing.js / FTO Discord scheme", () => {
   const P = preset("golden-icosahedron");
   assert.equal(new Set(P.colors).size, 20);
   const col = { R: "#f4f400", C: "#d41f69", F: "#008800", E: "#5c5c5c", L: "#8800dd", U: "#ffffff", A: "#007a89",
-    G: "#ff0000", I: "#7d3b11", S: "#b9a1ff", H: "#3399ff", J: "#5ec4b6", B: "#44ee00", K: "#e8d0a0", D: "#aaaaaa",
+    G: "#ff0000", I: "#7d3b11", S: "#b9a1ff", H: "#3399ff", J: "#5ec4b6", B: "#44ee00", K: "#d8b87c", D: "#aaaaaa",
     M: "#ff66cc", O: "#292929", P: "#ff8000", N: "#980000", Q: "#0000ff" };
   const at = (name) => P.normals[P.colors.indexOf(col[name])];
   // cubing.js's net: each face's neighbors, clockwise seen from outside
@@ -465,9 +465,11 @@ test("octahedron opposite faces pair like a cube's", () => {
   }
 });
 
-test("textures only past 12 faces, and faces sharing one have clearly different colors", () => {
-  assert.equal(preset("megaminx").textures, null);
-  assert.equal(preset("cube").textures, null);
+test("textures on by default past 12 faces, and faces sharing one have clearly different colors", () => {
+  assert.equal(preset("megaminx").texturesByDefault, false);
+  assert.equal(preset("icosahedron").texturesByDefault, true);
+  // up to 7 faces, every face gets its own texture
+  assert.equal(new Set(preset("cube").textures).size, 6);
   for (const id of ["icosahedron", "rhombic-triaconta", "soccer"]) {
     const P = preset(id);
     assert.equal(P.textures.length, P.colors.length);
@@ -525,12 +527,21 @@ test("prisms: every kind and side count scrambles cleanly", () => {
 test("deep cuts: dino, helicopter, megaminx crystal, chopasaurus", () => {
   const kinds = (P) => { const k = {}; for (const p of P.pieces) if (p.stickers.length) k[p.stickers.length] = (k[p.stickers.length] || 0) + 1; return k; };
   assert.deepEqual(kinds(preset("dino")), { 2: 12 });
+  // dino sizes: evenly spaced from the neighbors' plane (1/3 of the way to the corner) outward
+  const dino3 = preset("dino", 3);
+  assert.deepEqual(dino3.axes[0].offsets.map((o) => +(o / Math.sqrt(3)).toFixed(6)), [-2 / 3, -1 / 3, 1 / 3, 2 / 3].map((x) => +x.toFixed(6)));
+  assert.deepEqual(kinds(dino3), { 2: 36 });
   assert.deepEqual(kinds(preset("helicopter")), { 1: 24, 3: 8 });
   assert.ok(preset("helicopter").axes.every((a) => a.order === 2));
   assert.deepEqual(kinds(preset("megaminx-crystal")), { 2: 30, 3: 20 });
   assert.deepEqual(kinds(preset("chopasaurus")), { 2: 30, 3: 20, 12: 1 }); // the face centers never move: one core
   assert.deepEqual(kinds(preset("icosahedron-crystal")), { 1: 60, 2: 90, 5: 12 });
   assert.deepEqual(kinds(preset("pyraminx-crystal")), { 1: 4, 2: 6, 3: 4 });
+  // corner-turning octahedron: cuts at 1/3 and 2/3 of each corner's height, 9 triangles a face
+  const octa = preset("octa-corner");
+  assert.deepEqual(kinds(octa), { 2: 12, 4: 12 });
+  assert.ok(octa.axes.every((a) => a.order === 4 && a.layers === 5));
+  assert.deepEqual(octa.axes[0].offsets.map((o) => +(o / Math.sqrt(3)).toFixed(6)), [-2 / 3, -1 / 3, 1 / 3, 2 / 3].map((x) => +x.toFixed(6)));
   // skewb sizes: N even layers per corner, so every face is a grid of squares
   assert.deepEqual(kinds(preset("skewb", 2)), { 1: 6, 3: 8 });
   assert.deepEqual(kinds(preset("skewb", 3)), { 1: 30, 2: 12, 3: 8 }); // master: 6 centers + 24 petals, 12 edges, 8 corners

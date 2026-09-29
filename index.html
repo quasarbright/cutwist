@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cutwist</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="apple-touch-icon" href="favicon.png" />
 
   <link rel="stylesheet" href="https://quasarbright.github.io/sketches/shared/cohesion.css" />
   <script type="module" src="https://quasarbright.github.io/sketches/shared/cohesion.js"></script>
@@ -40,6 +42,9 @@
     }
 
     html, body { height: 100%; overflow: hidden; background: var(--bg); }
+    /* no double-tap zoom anywhere (tapping undo twice quickly zoomed in on phones); pinch
+       zoom still works. Buttons get it too in case an ancestor rule changes. */
+    html, body, button, input, select { touch-action: manipulation; }
     #c { position: fixed; top: 0; left: 0; z-index: 1; display: block; touch-action: none; }
 
     .tw-title {
@@ -69,6 +74,21 @@
 
     .tw-customize { width: 100%; padding: 6px 10px; font-size: .85rem; }
     .tw-customize[hidden] { display: none; }
+
+    /* ---- algorithms: record turns, play them back forward or inverted ---- */
+    .tw-algorithms { display: flex; flex-direction: column; gap: 6px; }
+    .tw-algorithms .control-head { display: flex; align-items: center; justify-content: space-between; }
+    .tw-rec { padding: 3px 9px; font-size: .78rem; }
+    .tw-rec .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e5484d; margin-right: 6px; vertical-align: 1px; }
+    .tw-rec.is-recording { color: #ffb4b0; border-color: #e5484d; }
+    .tw-rec.is-recording .dot { animation: tw-blink 1s steps(2, start) infinite; }
+    @keyframes tw-blink { to { visibility: hidden; } }
+    .tw-mlist { display: flex; flex-direction: column; gap: 3px; }
+    .tw-mlist:empty::before { content: "none yet: record some turns"; color: var(--faint); font-size: .75rem; }
+    .tw-mrow { display: flex; align-items: center; gap: 4px; }
+    .tw-mname { width: 1.6em; font-family: var(--font-mono); font-size: .85rem; color: var(--text); }
+    .tw-mlen { flex: 1; font-family: var(--font-mono); font-size: .72rem; color: var(--muted); white-space: nowrap; }
+    .tw-mrow .btn { padding: 2px 8px; font-size: .78rem; font-family: var(--font-mono); }
 
     /* ---- puzzle builder ---- */
     .tw-builder { display: flex; flex-direction: column; gap: 16px; }
@@ -182,6 +202,20 @@
     .tw-tape.is-solved { border-color: var(--accent); }
     .tw-status { color: var(--muted); white-space: nowrap; }
     .tw-tape.is-solved .tw-status { color: var(--accent); }
+    /* solve timer: shown after a scramble, left of the status */
+    .tw-clock { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; padding-right: 8px; border-right: 1px solid var(--border); }
+    .tw-clock[hidden] { display: none; }
+    .tw-timer { color: var(--text); font-variant-numeric: tabular-nums; }
+    .tw-clock.is-paused .tw-timer { color: var(--muted); }
+    .tw-clock.is-done .tw-timer { color: var(--accent); }
+    .tw-pause {
+      width: 20px; height: 20px; padding: 0; display: grid; place-items: center;
+      border: 1px solid var(--border); border-radius: 5px; background: var(--panel-2);
+      color: var(--text); font-size: .6rem; line-height: 1; cursor: pointer;
+    }
+    .tw-pause:hover { border-color: var(--muted); }
+    .tw-pause[hidden] { display: none; }
+    .tw-clock.is-paused .tw-pause { color: var(--accent); border-color: var(--accent); }
 
     /* ---- solved reference (drawn by the canvas above it; this is the card behind) ---- */
     .tw-reference {
@@ -229,6 +263,15 @@
     </div>
     <button class="btn tw-customize" id="customize" title="open this puzzle in the editor, with its cuts and blacked-out pieces filled in, to change it">customize</button>
 
+    <!-- algorithms: turns recorded while "record" is on, played back as one undo step -->
+    <div class="control tw-algorithms">
+      <div class="control-head">
+        <span class="name" title="record a sequence of turns, then play it back forward or inverted (for commutators). Cleared when you switch puzzles">algorithms</span>
+        <button class="btn tw-rec" id="mRecord" title="start recording turns into a new algorithm" aria-pressed="false"><span class="dot"></span><span id="mRecordLabel">record</span></button>
+      </div>
+      <div class="tw-mlist" id="mList"></div>
+    </div>
+
     <!-- puzzle builder: shown for "Custom…" -->
     <div class="tw-builder" id="builder" hidden>
       <section>
@@ -274,13 +317,14 @@
   </control-panel>
 
   <div class="tw-tape" id="tape">
-    <span class="tw-status" id="status"></span>
+    <span class="tw-clock" id="clock" hidden><button class="tw-pause" id="pause" hidden></button><span class="tw-timer" id="timer" title="solve time: starts on your first turn after a scramble and stops when it's solved">0.00</span></span><span class="tw-status" id="status"></span>
   </div>
 
   <div class="control-bar">
     <button class="btn" id="undo" title="undo the last turn (⌘Z)">↶</button>
     <button class="btn" id="redo" title="redo a turn you undid (⇧⌘Z)">↷</button>
     <button class="btn is-active" id="axes" title="show the turn axes: click a segment to turn that layer clockwise, right-click for counterclockwise" aria-pressed="true">axes</button>
+    <button class="btn is-active" id="textures" title="patterns on the stickers, to tell similar colors apart (on by default past 12 faces)" aria-pressed="true">textures</button>
     <button class="btn" id="scramble" title="mix the puzzle up with random turns">scramble</button>
     <button class="btn" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
     <about-modal label="about">
@@ -298,6 +342,7 @@
       PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, toCustom, CUT_RANGE, TRIM_RANGE,
       piecesInLayer, layerOf, closestOrientation, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
+    import { History, SolveTimer, formatTime } from "./session.mjs";
 
     const $ = (id) => document.getElementById(id);
     const TAU = Math.PI * 2;
@@ -334,21 +379,26 @@
     // is a window onto it: turning and orbiting move the stickers, never the pattern.
     const TEXTURE_PX = 8;
     const texturePeriod = { value: TEXTURE_PX * renderer.getPixelRatio() };
+    // the textures button: each puzzle's default (on past 12 faces) until it's clicked;
+    // switching puzzles goes back to the default
+    let showTextures = true, textureChoice = null;
+    const texturesOn = { value: 1 };
     function addTextures(mat) {
       mat.onBeforeCompile = (sh) => {
         sh.uniforms.uPeriod = texturePeriod;
+        sh.uniforms.uTextures = texturesOn;
         sh.vertexShader = sh.vertexShader
           .replace("#include <common>", "#include <common>\nattribute float tex;\nvarying float vTex;")
           .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTex = tex;");
         sh.fragmentShader = sh.fragmentShader
           .replace("#include <common>", `#include <common>
-uniform float uPeriod;
+uniform float uPeriod, uTextures;
 varying float vTex;
 float cover(float d, float hw, float w) { return 1.0 - smoothstep(hw - 0.5 * w, hw + 0.5 * w, d); }
 float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5), hw, w); }`)
           .replace("#include <color_fragment>", `#include <color_fragment>
 {
-  int t = int(vTex + 0.5);
+  int t = uTextures > 0.5 ? int(vTex + 0.5) : 0;
   vec2 p = gl_FragCoord.xy / uPeriod;
   float w = 1.0 / uPeriod, a = 0.0;
   if (t == 1) a = line(p.y, 0.16, w);
@@ -451,7 +501,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           const before = sp.length;
           fan(vs, sp, sn, s.normal);
           color.set(P.colors[s.color]);
-          const kind = P.textures ? P.textures[s.color] : 0;
+          const kind = P.textures ? P.textures[s.color] : 0; // (an older cached engine has none for small puzzles)
           for (let t = before; t < sp.length; t += 3) {
             sc.push(color.r, color.g, color.b);
             sx.push(kind);
@@ -546,9 +596,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const q = mod((end > 0) === clockwise ? -1 : 1, n);
       flush();
       const move = { axis, layer, q };
-      record(move);
+      record([move]);
       play(move);
       renderTape();
+      renderAlgorithms();
     }
 
     // ---------- drawing the current state ----------
@@ -594,19 +645,53 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       while (anim && !anim.live) finishAnim();
     }
     function play(move) { queue.push({ move }); startNext(); }
+    // several turns in a row; dur: ms per turn (default: the usual, quicker when queued)
+    function playAll(moves, dur) { for (const move of moves) queue.push(dur ? { move, dur } : { move }); startNext(); }
+
+    // ---------- solve timer ----------
+    // SolveTimer (session.mjs) keeps the time; this draws it and its pause/play button.
+    const timer = new SolveTimer();
+    function renderTimer() {
+      const st = timer.state;
+      $("clock").hidden = st === "hidden";
+      if (st === "hidden") return;
+      $("timer").textContent = formatTime(timer.ms);
+      $("clock").classList.toggle("is-done", st === "done");
+      $("clock").classList.toggle("is-paused", st === "paused");
+      const btn = $("pause");
+      btn.hidden = st !== "running" && st !== "paused";
+      btn.textContent = st === "paused" ? "▶" : "❚❚";
+      btn.title = st === "paused" ? "resume the timer (your next turn resumes it too)" : "pause the timer (your next turn resumes it)";
+      btn.setAttribute("aria-label", st === "paused" ? "resume timer" : "pause timer");
+    }
+    $("pause").onclick = () => { if (timer.state === "paused") timer.resume(); else timer.pause(); renderTimer(); };
 
     // ---------- history ----------
-    let history = [], cursor = 0, scrambled = false;
-    function record(move) { history.length = cursor; history.push(move); cursor++; }
-    function undo() { if (!cursor) return; cursor--; play(inverseMove(P, history[cursor])); renderTape(); }
-    function redo() { if (cursor >= history.length) return; play(history[cursor]); cursor++; renderTape(); }
+    // History (session.mjs) holds the undo steps and the algorithms; this plays the moves it
+    // hands back. Any turn, undo or redo also starts (or resumes) the timer.
+    const history = new History((m) => inverseMove(P, m));
+    let scrambled = false;
+    function record(moves) { timer.turn(); history.record(moves); renderTimer(); }
+    function undo() {
+      const moves = history.undo();
+      if (!moves) return;
+      timer.turn(); renderTimer();
+      playAll(moves); renderTape(); renderAlgorithms();
+    }
+    function redo() {
+      const moves = history.redo();
+      if (!moves) return;
+      timer.turn(); renderTimer();
+      playAll(moves); renderTape(); renderAlgorithms();
+    }
 
     function renderTape() {
       const idle = !anim && !queue.length;
       updateReferenceTarget();
-      const solved = idle && (scrambled || cursor > 0) && isSolved(P, state);
+      const solved = idle && (scrambled || history.cursor > 0) && isSolved(P, state);
+      if (solved && timer.state === "running") { timer.solved(); renderTimer(); }
       $("tape").classList.toggle("is-solved", solved);
-      const n = cursor === 1 ? "1 move" : `${cursor} moves`;
+      const done = history.movesDone, n = done === 1 ? "1 move" : `${done} moves`;
       $("status").textContent = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
@@ -1049,7 +1134,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
       state = solvedState(P);
-      anim = null; queue = []; history = []; cursor = 0; scrambled = false; scrambledState = null;
+      anim = null; queue = []; scrambled = false; scrambledState = null;
+      history.reset(); renderAlgorithms(); // algorithms belong to this puzzle
+      timer.clear(); renderTimer();
       buildMeshes();
       if (resetView) root.quaternion.copy(startView());
       refG = 0;
@@ -1060,6 +1147,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("sizeControl").hidden = !!spec.fixed;
       $("builder").hidden = !isCustom();
       $("customize").hidden = isCustom() || !!spec.noCustom;
+      renderTexturesButton();
       if (!isCustom()) setPainting(false);
       if (isCustom()) showStats();
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
@@ -1092,6 +1180,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const v = $("preset").value;
       presetIdx = v === "custom" ? v : +v;
       paramVals = {};
+      textureChoice = null;
       size = currentSpec().size;
       renderParams();
       if (isCustom()) { renderBuilder(); computeSnaps(); }
@@ -1134,17 +1223,74 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("axes").classList.toggle("is-active", showAxes);
       $("axes").setAttribute("aria-pressed", String(showAxes));
     };
-    $("scramble").onclick = () => {
+    // ---------- algorithms ----------
+    // Recorded and kept by History (session.mjs). Playback turns the same layers of the puzzle,
+    // however it's held, quickly, as one undo step.
+    const count = (n) => (n === 1 ? "1 move" : `${n} moves`);
+    function renderAlgorithms() {
+      const rec = $("mRecord"), on = history.isRecording;
+      rec.classList.toggle("is-recording", on);
+      rec.setAttribute("aria-pressed", String(on));
+      $("mRecordLabel").textContent = on ? `stop · ${count(history.recorded.length)}` : "record";
+      rec.title = on ? "stop recording and save these turns as an algorithm" : "start recording turns into a new algorithm";
+      const list = $("mList");
+      list.replaceChildren();
+      for (const alg of history.algorithms) {
+        const row = document.createElement("div");
+        row.className = "tw-mrow";
+        row.dataset.name = alg.name;
+        row.innerHTML = `<span class="tw-mname"></span><span class="tw-mlen"></span>
+          <button class="btn" data-act="play" title="play it">▶</button><button class="btn" data-act="reverse" title="play it in reverse: the inverse, undoing it">◀</button><button class="btn" data-act="delete" title="delete this algorithm">✕</button>`;
+        row.querySelector(".tw-mname").textContent = alg.name;
+        row.querySelector(".tw-mlen").textContent = count(alg.moves.length);
+        const [fwd, back, del] = row.querySelectorAll("button");
+        fwd.onclick = () => playAlgorithm(alg.name, false);
+        back.onclick = () => playAlgorithm(alg.name, true);
+        del.onclick = () => { history.deleteAlgorithm(alg.name); renderAlgorithms(); };
+        list.append(row);
+      }
+    }
+    function playAlgorithm(name, reverse) {
+      if (anim && anim.live) return;
+      flush();
+      timer.turn();
+      const moves = history.playAlgorithm(name, reverse);
+      if (!moves) return;
+      renderTimer();
+      playAll(moves, Math.min(160, Math.max(45, 2400 / moves.length)));
+      renderTape();
+      renderAlgorithms();
+    }
+    $("mRecord").onclick = () => {
+      if (history.isRecording) history.stopRecording();
+      else history.startRecording();
+      renderAlgorithms();
+    };
+
+    function renderTexturesButton() {
+      showTextures = textureChoice ?? !!P.texturesByDefault;
+      texturesOn.value = showTextures ? 1 : 0;
+      $("textures").classList.toggle("is-active", showTextures);
+      $("textures").setAttribute("aria-pressed", String(showTextures));
+    }
+    $("textures").onclick = () => {
+      textureChoice = !showTextures;
+      renderTexturesButton();
+    };
+    // moves: a given scramble (the tests use this); by default a random one
+    function scramble(moves = scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0))) {
       flush(); if (anim) anim = null;
-      history = []; cursor = 0; scrambled = true;
-      const moves = scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0));
+      history.clear(); scrambled = true;
       scrambledState = state.slice();
       for (const m of moves) applyMove(P, scrambledState, m);
       const dur = Math.min(110, Math.max(35, 3500 / Math.max(1, moves.length)));
       for (const move of moves) queue.push({ move, dur });
       startNext();
+      timer.arm(); renderTimer();
       renderTape();
-    };
+      return moves;
+    }
+    $("scramble").onclick = () => scramble();
     // Reset goes back one level: after turning a scrambled puzzle, back to the scramble;
     // from the scramble itself (or mid-scramble, or unscrambled), back to solved.
     let scrambledState = null;
@@ -1152,9 +1298,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const scrambling = scrambled && !history.length && (anim || queue.length);
       const turned = scrambled && !scrambling && scrambledState && state.some((g, i) => g !== scrambledState[i]);
       anim = null; queue = [];
-      history = []; cursor = 0;
-      if (turned) state = scrambledState.slice();
-      else { state = solvedState(P); scrambled = false; scrambledState = null; }
+      history.clear();
+      if (turned) { state = scrambledState.slice(); timer.arm(); } // back to the scramble: time it again
+      else { state = solvedState(P); scrambled = false; scrambledState = null; timer.clear(); }
+      renderTimer();
       renderTape();
     };
     addEventListener("keydown", (e) => {
@@ -1295,9 +1442,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const move = { axis: drag.axis, layer: drag.layer, q: mod(qs, ax.order) };
       Object.assign(anim, { live: false, move, from: anim.theta, to: qs * step, t: 0,
                             dur: 90 + 160 * Math.min(1, Math.abs(qs * step - anim.theta) / step) });
-      if (move.q) record(move);
+      if (move.q) record([move]);
       drag = null;
       renderTape();
+      renderAlgorithms();
     }
 
     function endPointer(e) {
@@ -1320,6 +1468,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // ---------- loop ----------
     let lastT = performance.now();
     function frame(now) {
+      if (timer.state === "running") $("timer").textContent = formatTime(timer.ms);
       const dt = Math.min(50, now - lastT);
       lastT = now;
       if (anim && !anim.live) {
@@ -1372,6 +1521,84 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       updatePieces();
       root.updateMatrixWorld(true);
     }
+
+    // ---------- test hook ----------
+    // For the browser tests (e2e/) and poking at things from the console: drive the page
+    // without pointer input. A turn here goes through the same path as a turn by hand.
+    window.cutwist = {
+      // pick a puzzle by preset id, like the menu, then optionally its size and a family's
+      // own numbers (params: { sides: 5 }, { a: 2, b: 3, c: 4 })
+      load(id, { size: n, params } = {}) {
+        const i = PRESETS.findIndex((p) => p.id === id);
+        if (i < 0) throw new Error(`no preset ${id}`);
+        $("preset").value = i;
+        $("preset").onchange();
+        if (params) { Object.assign(paramVals, params); renderParams(); load(); }
+        if (n !== undefined) setSize(n, 1);
+        return this.info();
+      },
+      turn(axis, layer, q = 1) {
+        flush();
+        const move = { axis, layer, q: mod(q, P.axes[axis].order) };
+        record([move]);
+        play(move);
+        renderTape();
+        renderAlgorithms();
+      },
+      // skip to the end of every queued animation
+      finish() { flush(); },
+      // scramble (with the given moves, or random ones); returns the moves
+      scramble(moves) { return scramble(moves); },
+      // the moves that undo `moves`
+      invert(moves) { return history.inverseOf(moves); },
+      shareLink() { return shareLink(); },
+      get state() { return Array.from(state); },
+      info() {
+        return {
+          id: isCustom() ? "custom" : PRESETS[presetIdx].id, title: $("name").textContent, size,
+          pieces: P.pieces.length, faces: P.colors.length,
+          axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })),
+          solved: isSolved(P, state), scrambled, idle: !anim && !queue.length,
+          moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
+          status: $("status").textContent,
+          timer: { state: timer.state, ms: timer.ms, text: $("clock").hidden ? null : $("timer").textContent },
+          recording: history.isRecording, recorded: history.recorded.length,
+          algorithms: history.algorithms.map((a) => ({ name: a.name, moves: a.moves.length })),
+          textures: showTextures,
+        };
+      },
+      // ---- screen positions, for the pointer-input tests ----
+      // (poses and camera are normally brought up to date by the next frame; a hidden or
+      // headless page may not have drawn one since the last change)
+      sync() { updatePieces(); root.updateMatrixWorld(true); camera.updateMatrixWorld(); },
+      // every axis stub segment's middle, in CSS pixels
+      segments() {
+        this.sync();
+        return segMeshes.map((m) => {
+          const v = m.getWorldPosition(new THREE.Vector3()).project(camera);
+          return { ...m.userData, x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H };
+        });
+      },
+      // the middle of every sticker facing the camera whose middle is on its own piece (not
+      // hidden behind another), in CSS pixels
+      stickers() {
+        this.sync();
+        const out = [], toCam = new THREE.Vector3();
+        P.pieces.forEach((piece, i) => {
+          const M = P.group.mats[state[i]];
+          for (const st of piece.stickers) {
+            const c = applyMat(M, scale(st.verts.reduce(add, [0, 0, 0]), 1 / st.verts.length));
+            const n = new THREE.Vector3(...applyMat(M, st.normal)).applyQuaternion(root.quaternion);
+            const w = new THREE.Vector3(...c); puzzleGroup.localToWorld(w);
+            if (n.dot(toCam.copy(camera.position).sub(w).normalize()) < 0.3) continue;
+            const [x, y] = toScreen(c), hit = pick(x, y);
+            if (hit && hit.object.userData.piece === i) out.push({ piece: i, color: st.color, x, y });
+          }
+        });
+        return out;
+      },
+      view() { return root.quaternion.toArray(); },
+    };
 
     if (document.documentElement.clientWidth < 700) $("panel").setAttribute("collapsed", "");
     resize();

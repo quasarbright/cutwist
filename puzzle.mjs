@@ -81,7 +81,7 @@ function megaminxColors(raw) {
   const ang = (i) => Math.atan2(dot(ns[i], v), dot(ns[i], u));
   ring.sort((a, b) => ang(b) - ang(a)); // decreasing angle about w = clockwise from outside
   const pairs = [["#f4f4ee", "#5c6068"], ["#0051ba", "#5ab4ff"], ["#c8102e", "#ff6a13"],
-                 ["#009e60", "#8ed142"], ["#7b3fb3", "#ff7eb6"], ["#ffe600", "#e9dcbf"]];
+                 ["#009e60", "#8ed142"], ["#7b3fb3", "#ff7eb6"], ["#ffe600", "#d6c298"]];
   const out = new Array(12);
   const opposite = (i) => ns.findIndex((n) => close(n, scale(ns[i], -1)));
   [0, ...ring].forEach((f, k) => { out[f] = pairs[k][0]; out[opposite(f)] = pairs[k][1]; });
@@ -101,7 +101,7 @@ const ICOSA_NET = [
 const ICOSA_COLORS = {
   R: "#f4f400", C: "#d41f69", F: "#008800", E: "#5c5c5c", L: "#8800dd", // yellow, cerise, dark green, dark gray, purple
   U: "#ffffff", A: "#007a89", G: "#ff0000", I: "#7d3b11", S: "#b9a1ff", // white, teal, red, brown, lavender
-  H: "#3399ff", J: "#5ec4b6", B: "#44ee00", K: "#e8d0a0", D: "#aaaaaa", // aqua, sea green, green, cream, light gray
+  H: "#3399ff", J: "#5ec4b6", B: "#44ee00", K: "#d8b87c", D: "#aaaaaa", // aqua, sea green, green, cream, light gray
   M: "#ff66cc", O: "#292929", P: "#ff8000", N: "#980000", Q: "#0000ff", // pink, charcoal, orange, burgundy, bold blue
 };
 function icosahedronColors(raw) {
@@ -138,9 +138,9 @@ function pairedColors(raw, pairs) {
 const RHOMBIC_DODECA = cyclic(signs([1, 1, 0])); // cube edge directions
 const RHOMBIC_TRIACONTA = [...cyclic(signs([1, 0, 0])), ...cyclic(signs([1, PHI, 1 / PHI]))]; // icosahedron edge directions
 const PAIRS_6 = [["#f4f4ee", "#5c6068"], ["#0051ba", "#5ab4ff"], ["#c8102e", "#ff6a13"],
-                 ["#009e60", "#8ed142"], ["#7b3fb3", "#ff7eb6"], ["#ffe600", "#e9dcbf"]];
+                 ["#009e60", "#8ed142"], ["#7b3fb3", "#ff7eb6"], ["#ffe600", "#d6c298"]];
 const PAIRS_15 = [
-  ["#ffffff", "#aaaaaa"], ["#f4f400", "#e8d0a0"], ["#ff0000", "#980000"], ["#ff8000", "#7d3b11"],
+  ["#ffffff", "#aaaaaa"], ["#f4f400", "#d8b87c"], ["#ff0000", "#980000"], ["#ff8000", "#7d3b11"],
   ["#44ee00", "#008800"], ["#0000ff", "#3399ff"], ["#8800dd", "#b9a1ff"], ["#ff66cc", "#d41f69"],
   ["#007a89", "#5ec4b6"], ["#5c5c5c", "#292929"], ["#1e3a5f", "#8fc7ff"], ["#6b7a1f", "#c9c27a"],
   ["#d4a017", "#ffc49b"], ["#3f2a8c", "#8c8cff"], ["#1f8f5f", "#9ff0c8"],
@@ -341,7 +341,7 @@ export const PRESETS = [
   // (see cutDepths).
   { id: "skewb", name: "Skewb", solid: "cube", on: "vertex", rule: "skewb", size: 2, names: { 2: "Skewb", 3: "Master Skewb", 4: "Professor Skewb" } },
   // Deep corner cuts, through the corners next to each one: only edge pieces show.
-  { id: "dino", name: "Dino Cube", solid: "cube", on: "vertex", rule: "neighbor-corners", size: 2, fixed: true, names: { 2: "Dino Cube" } },
+  { id: "dino", name: "Dino Cube", solid: "cube", on: "vertex", rule: "neighbor-corners", size: 2, names: { 2: "Dino Cube" } },
   // Edge turning, cuts through the centers of the two faces at each edge. The real puzzle
   // also turns by odd angles that jumble it; here only half turns (the cube's symmetry).
   { id: "helicopter", name: "Helicopter Cube", solid: "cube", on: "edge", rule: "depths", depths: [Math.SQRT1_2], size: 2, fixed: true, names: { 2: "Helicopter Cube" } },
@@ -364,6 +364,9 @@ export const PRESETS = [
   { id: "pyraminx-crystal", name: "Pyraminx Crystal", solid: "tetrahedron", on: "face", rule: "depths", depths: [1 / 9], size: 2, fixed: true },
   { id: "ftt", name: "Face-Turning Tetrahedron", solid: "tetrahedron", on: "face", rule: "steps", size: 3, names: { 3: "Face-Turning Tetrahedron" } },
   { id: "octahedron", name: "Octahedron", solid: "octahedron", on: "face", rule: "layers", size: 3, names: { 2: "Skewb Diamond", 3: "Face-Turning Octahedron" } },
+  // Corner turning like a pyraminx: cuts at k/N of the way from each corner down to the
+  // center (the plane through its neighboring corners), so every face is a grid of N² triangles.
+  { id: "octa-corner", name: "Corner-Turning Octahedron", solid: "octahedron", on: "vertex", rule: "grid", size: 3 },
   { id: "octa-shallow", name: "Shallow Octahedron", solid: "octahedron", on: "face", rule: "steps", size: 3, center: 1.5 },
   { id: "megaminx", name: "Megaminx", solid: "dodecahedron", on: "face", rule: "minx", size: 3, names: MINX_NAMES },
   // Megaminx Crystal: megaminx-style face turning cut all the way to the neighbors' centers.
@@ -456,10 +459,12 @@ function cutDepths(spec, solid, normals, n, N) {
     const w = 2 / (N - 1);
     for (let j = 0; j < N - 1; j++) out.push((w * (j - (N - 2) / 2)) / Math.sqrt(3));
   } else if (spec.rule === "neighbor-corners") {
-    // one cut per corner, through the corners next to it (dino cube, chopasaurus)
+    // N − 1 cuts per corner, evenly spaced from the plane through the corners next to it (the
+    // dino cube's and chopasaurus's one cut) out toward the corner: size 3 on a cube is 1/3
+    // and 2/3 of the way from the center to the corner.
     const ds = solid.polys.flatMap((p) => p.verts.map((v) => dot(n, v)));
-    const hi = Math.max(...ds);
-    if (N > 1) out.push(Math.max(...ds.filter((d) => d < hi - 1e-6)));
+    const hi = Math.max(...ds), ring = Math.max(...ds.filter((d) => d < hi - 1e-6));
+    for (let j = 0; j < N - 1; j++) out.push(ring + ((hi - ring) * j) / (N - 1));
   } else if (spec.rule === "neighbor-centers") {
     // one cut per face, through the centers of the faces next to it
     if (N > 1) out.push(minxCenterDepth(normals, n));
@@ -740,7 +745,7 @@ export function buildPuzzle(spec, size = spec.size) {
     }
   }
 
-  return { spec, size, normals, colors, textures: faceTextures(colors), solid, R, axes: turning, pieces, group, types, cuts };
+  return { spec, size, normals, colors, textures: faceTextures(colors), texturesByDefault: colors.length >= TEXTURE_MIN_FACES, solid, R, axes: turning, pieces, group, types, cuts };
 }
 
 // A piece's type: the set of pieces the solid's rotations carry it onto (all the corners,
@@ -836,7 +841,8 @@ export function toCustom(P) {
 
 // ---------- textures ----------
 // Past 12 faces there are more colors than can all look clearly different, so every face
-// also gets a texture, drawn as ink over its color (see the sticker shader in index.html).
+// also gets a texture by default, drawn as ink over its color (see the sticker shader in
+// index.html). Smaller puzzles get them too, off by default (the textures button).
 // The texture is fixed to the screen, not the sticker ("unmoving plaid"): stickers are
 // windows onto it, so a turned piece's pattern never looks turned.
 export const TEXTURES = ["plain", "stripes", "grid", "dots", "checker", "wavy", "honeycomb"];
@@ -859,12 +865,12 @@ function oklab(css) {
 }
 export const colorDistance = (a, b) => len(sub(oklab(a), oklab(b)));
 
-// A texture index per face, or null for 12 faces or fewer. Faces sharing a texture should
-// have colors far apart, so the closest pairs of colors get told apart by texture. Greedy:
-// take faces in order of how close their nearest look-alike is, and give each the texture
-// whose faces so far are farthest from it in color (ties to the least used texture).
+// A texture index per face. Faces sharing a texture should
+// have colors far apart, so the closest pairs of colors get told apart by texture. Greedy
+// first: take faces in order of how close their nearest look-alike is, and give each the
+// texture whose faces so far are farthest from it in color (ties to the least used texture).
+// Then swaps, to push the closest same-texture pair apart.
 export function faceTextures(colors) {
-  if (colors.length < TEXTURE_MIN_FACES) return null;
   const n = colors.length, T = TEXTURES.length;
   const d = colors.map((a) => colors.map((b) => colorDistance(a, b)));
   const nearest = (i) => Math.min(...d[i].filter((_, j) => j !== i));
@@ -879,6 +885,29 @@ export function faceTextures(colors) {
     }
     out[i] = best;
     members[best].push(i);
+  }
+  // Then swap: take the closest pair sharing a texture and trade one of them with another
+  // face, as long as that pushes the closest same-texture pair farther apart.
+  const worst = () => {
+    let w = Infinity, pair = null;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (out[i] === out[j] && d[i][j] < w) { w = d[i][j]; pair = [i, j]; }
+    return [w, pair];
+  };
+  for (let round = 0; round < 4 * n; round++) {
+    const [w, pair] = worst();
+    if (!pair) break;
+    let bestGain = w, swap = null;
+    for (const a of pair)
+      for (let b = 0; b < n; b++) {
+        if (out[b] === out[a]) continue;
+        [out[a], out[b]] = [out[b], out[a]];
+        const [w2] = worst();
+        [out[a], out[b]] = [out[b], out[a]];
+        if (w2 > bestGain + 1e-9) { bestGain = w2; swap = [a, b]; }
+      }
+    if (!swap) break;
+    const [a, b] = swap;
+    [out[a], out[b]] = [out[b], out[a]];
   }
   return out;
 }
