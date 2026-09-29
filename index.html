@@ -45,7 +45,8 @@
     /* no double-tap zoom anywhere (tapping undo twice quickly zoomed in on phones); pinch
        zoom still works. Buttons get it too in case an ancestor rule changes. */
     html, body, button, input, select { touch-action: manipulation; }
-    #c { position: fixed; top: 0; left: 0; z-index: 1; display: block; touch-action: none; }
+    #c, #plane { position: fixed; top: 0; left: 0; z-index: 1; display: block; touch-action: none; }
+    #c[hidden], #plane[hidden] { display: none; }
 
     .tw-title {
       position: fixed; top: 18px; left: 22px; z-index: 3; pointer-events: none;
@@ -74,6 +75,25 @@
 
     .tw-customize { width: 100%; padding: 6px 10px; font-size: .85rem; }
     .tw-customize[hidden] { display: none; }
+    /* a family's own numbers and choices: spaced like the panel's other controls (they sit
+       inside this wrapper, out of reach of the panel's own spacing) */
+    #paramControls { display: flex; flex-direction: column; gap: 16px; }
+    #paramControls:empty { display: none; }
+    /* planar look: a two-way fill choice, then checkboxes */
+    .tw-look { gap: 8px; }
+    .tw-seg.tw-fill { grid-template-columns: 1fr 1fr; } /* (beats the editor's 3-column .tw-seg, defined later) */
+    .tw-fill button { font: inherit; cursor: pointer; }
+    .tw-fill button[aria-checked="true"] { color: var(--text); background: var(--border); }
+    .tw-fill button:focus-visible, .tw-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .tw-link {
+      align-self: flex-start; margin-top: -4px; padding: 0; border: 0; background: none; cursor: pointer;
+      color: var(--muted); font: inherit; font-size: .76rem; text-decoration: underline; text-underline-offset: 2px;
+    }
+    .tw-link:hover { color: var(--text); }
+    .tw-link[hidden], label.check[hidden] { display: none; }
+    .tw-look label.check { font-size: .86rem; }
+    .tw-look label.check.tw-sub { padding-left: 24px; margin-top: -4px; }
+    .tw-look label.check:has(input:disabled) { opacity: .45; cursor: default; }
 
     /* ---- algorithms: record turns, play them back forward or inverted ---- */
     .tw-algorithms { display: flex; flex-direction: column; gap: 6px; }
@@ -238,6 +258,7 @@
 </head>
 <body>
   <canvas id="c"></canvas>
+  <canvas id="plane" hidden></canvas>
   <div class="tw-reference" id="reference" title="the solved puzzle, turned to match your view"><span>SOLVED</span></div>
 
   <div class="tw-title">
@@ -262,6 +283,22 @@
       </div>
     </div>
     <button class="btn tw-customize" id="customize" title="open this puzzle in the editor, with its cuts and blacked-out pieces filled in, to change it">customize</button>
+
+    <!-- planar puzzles: how the cells look. What fills a cell is a choice of two (a segmented
+         bar, like the editor's); everything else is on/off (checkboxes), with an option that
+         depends on another indented under it and grayed out when it doesn't apply. -->
+    <div class="control tw-look" id="planarControls" hidden>
+      <div class="control-head"><span class="name" title="how the cells are marked">look</span></div>
+      <div class="tw-seg tw-fill" role="radiogroup" aria-label="fill cells with">
+        <button role="radio" id="fillColors" aria-checked="true" title="each row a hue, light to dark across the columns">colors</button>
+        <button role="radio" id="fillPicture" aria-checked="false" title="cut a picture of yours across the grid (kept until you reload)">picture</button>
+      </div>
+      <button class="tw-link" id="pictureChange" hidden>choose another picture…</button>
+      <input type="file" id="pictureFile" accept="image/*" hidden />
+      <label class="check" title="each cell's home, like a chess square: column letter, row number. A part is underlined when the cell is in that column or row"><input type="checkbox" id="labels" checked /> labels</label>
+      <label class="check tw-sub" id="reflectRow" title="flipped cells show their label mirrored; off: always upright (a flipped cell still has black text, and its corner notch shows the flip)"><input type="checkbox" id="reflectLabels" checked /> labels get reflected</label>
+      <label class="check" id="texturesRow" title="a pattern per column on top of the colors"><input type="checkbox" id="planarTextures" /> textures</label>
+    </div>
 
     <!-- algorithms: turns recorded while "record" is on, played back as one undo step -->
     <div class="control tw-algorithms">
@@ -343,6 +380,10 @@
       piecesInLayer, layerOf, closestOrientation, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
+    import {
+      PLANAR_PRESETS, buildPlanar, solvedPlanarState, isPlanarSolved, applyPlanarMove, inversePlanarMove, planarScrambleMoves,
+    } from "./planar.mjs";
+    import { PlanarView } from "./planar-view.mjs";
 
     const $ = (id) => document.getElementById(id);
     const TAU = Math.PI * 2;
@@ -425,6 +466,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       W = document.documentElement.clientWidth;
       H = document.documentElement.clientHeight;
       renderer.setSize(W, H);
+      if (typeof sizePlane === "function") sizePlane();
       texturePeriod.value = TEXTURE_PX * renderer.getPixelRatio();
       camera.aspect = W / H;
       placeCamera();
@@ -616,6 +658,17 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
     }
 
+    // ---------- the two kinds of puzzle ----------
+    // A 3D puzzle (puzzle.mjs) or a planar one (planar.mjs, P.kind "planar"). Both keep their
+    // state in an Int32Array and take moves { axis, layer, q }, so everything above the model
+    // (history, algorithms, timer, scramble, reset) is shared; these pick the model's rules.
+    const isPlanar = () => !!P && P.kind === "planar";
+    const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : applyMove(P, s, m));
+    const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : inverseMove(P, m));
+    const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isSolved(P, s));
+    const freshState = () => (isPlanar() ? solvedPlanarState(P) : solvedState(P));
+    const randomScramble = () => (isPlanar() ? planarScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
+
     // ---------- turning: animation queue ----------
     // anim is the layer currently turning: { axis, pieces, theta, ... }. A queued turn
     // animates theta from `from` to `to`, then commits `move` to the state.
@@ -625,6 +678,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     function startNext() {
       if (anim || !queue.length) return;
+      if (isPlanar()) {
+        // a slide: theta is the line's offset in cells, from 0 to q
+        const e = queue.shift(), q = e.move.q, fast = queue.length > 1 ? 0.45 : 1;
+        anim = { axis: e.move.axis, layer: e.move.layer, move: e.move, theta: 0, from: 0, to: q, t: 0,
+                 dur: e.dur ?? Math.min(420, 110 + 55 * Math.abs(q)) * fast };
+        return;
+      }
       const e = queue.shift(), ax = P.axes[e.move.axis];
       const qs = signedQ(e.move.q, ax.order);
       const fast = queue.length > 1 ? 0.45 : 1;
@@ -635,7 +695,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       };
     }
     function finishAnim() {
-      if (anim.move && anim.move.q) applyMove(P, state, anim.move);
+      if (anim.move && anim.move.q) applyAny(state, anim.move);
       anim = null;
       startNext();
       renderTape();
@@ -669,7 +729,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // ---------- history ----------
     // History (session.mjs) holds the undo steps and the algorithms; this plays the moves it
     // hands back. Any turn, undo or redo also starts (or resumes) the timer.
-    const history = new History((m) => inverseMove(P, m));
+    const history = new History(inverseAny);
     let scrambled = false;
     function record(moves) { timer.turn(); history.record(moves); renderTimer(); }
     function undo() {
@@ -688,15 +748,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function renderTape() {
       const idle = !anim && !queue.length;
       updateReferenceTarget();
-      const solved = idle && (scrambled || history.cursor > 0) && isSolved(P, state);
+      const solved = idle && (scrambled || history.cursor > 0) && solvedAny(state);
       if (solved && timer.state === "running") { timer.solved(); renderTimer(); }
       $("tape").classList.toggle("is-solved", solved);
       const done = history.movesDone, n = done === 1 ? "1 move" : `${done} moves`;
       $("status").textContent = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
-        : scrambled ? "scrambled · drag a sticker to turn"
-        : "drag a sticker to turn · drag outside to rotate";
+        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : "scrambled · drag a sticker to turn")
+        : isPlanar() ? "drag a row or column to slide it" : "drag a sticker to turn · drag outside to rotate";
     }
 
     // Look at the corner where face 0 meets its two nearest neighbors, with the first
@@ -1091,11 +1151,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 
-    let presetIdx = 0, size = PRESETS[0].size;
+    // the menu: the 3D presets, then the planar ones
+    const MENU = [...PRESETS, ...PLANAR_PRESETS];
+    let presetIdx = 0, size = MENU[0].size;
     // a family's own numbers (a cuboid's lengths, a prism's sides), over the preset's defaults
     let paramVals = {};
     const isCustom = () => presetIdx === "custom";
-    const currentSpec = () => (isCustom() ? custom : { ...PRESETS[presetIdx], ...paramVals });
+    const currentSpec = () => (isCustom() ? custom : { ...MENU[presetIdx], ...paramVals });
 
     // One −/+ row per number the family has, built like the size control.
     function renderParams() {
@@ -1104,6 +1166,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       for (const q of (!isCustom() && spec.params) || []) {
         const row = document.createElement("div");
         row.className = "control";
+        if (q.options) { // a choice: a dropdown
+          row.innerHTML = `<div class="control-head"><span class="name"></span></div><select class="tw-select"></select>`;
+          row.querySelector(".name").textContent = q.label;
+          if (q.title) row.querySelector(".name").title = q.title;
+          const sel = row.querySelector("select");
+          sel.setAttribute("aria-label", q.label);
+          for (const [value, text] of q.options) sel.append(new Option(text, value));
+          sel.value = spec[q.key];
+          sel.onchange = () => { paramVals[q.key] = sel.value; load(); renderParams(); };
+          host.append(row);
+          continue;
+        }
         row.innerHTML = `<div class="control-head"><span class="name"></span></div>
           <div class="tw-size"><button class="btn">−</button><input type="number" step="1" inputmode="numeric" /><button class="btn">+</button></div>`;
         row.querySelector(".name").textContent = q.label;
@@ -1129,33 +1203,41 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // resetView: point the camera at the new solid's corner (on switching puzzles, not sizes)
     function load(resetView = true) {
       const spec = currentSpec();
-      const next = buildPuzzle(spec, size);
+      const next = spec.rule === "planar" ? buildPlanar(spec) : buildPuzzle(spec, size);
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
-      state = solvedState(P);
+      state = freshState();
       anim = null; queue = []; scrambled = false; scrambledState = null;
       history.reset(); renderAlgorithms(); // algorithms belong to this puzzle
       timer.clear(); renderTimer();
-      buildMeshes();
-      if (resetView) root.quaternion.copy(startView());
-      refG = 0;
-      updateReferenceTarget(true);
+      // a planar puzzle draws on its own 2D canvas; the 3D scene waits, hidden
+      $("c").hidden = isPlanar();
+      $("plane").hidden = !isPlanar();
+      $("planarControls").hidden = !isPlanar();
+      $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
+      $("textures").hidden = isPlanar(); // planar cells always carry their column's texture
+      if (!isPlanar()) {
+        buildMeshes();
+        if (resetView) root.quaternion.copy(startView());
+        refG = 0;
+        updateReferenceTarget(true);
+      }
       $("name").textContent = puzzleTitle(spec, size);
       $("size").value = size;
       $("sizeDown").disabled = size <= 0;
       $("sizeControl").hidden = !!spec.fixed;
       $("builder").hidden = !isCustom();
       $("customize").hidden = isCustom() || !!spec.noCustom;
-      renderTexturesButton();
+      if (!isPlanar()) renderTexturesButton();
       if (!isCustom()) setPainting(false);
       if (isCustom()) showStats();
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
-      if (hoverType !== null) setHover(hoverType); // meshes were rebuilt
+      if (hoverType !== null && !isPlanar()) setHover(hoverType); // meshes were rebuilt
       renderTape();
     }
 
-    PRESETS.forEach((p, i) => $("preset").append(new Option(p.name, i)));
+    MENU.forEach((p, i) => $("preset").append(new Option(p.name, i)));
     $("preset").append(new Option("Custom…", "custom"));
     $("builder").style.setProperty("--center", pctIn(CUT_RANGE, 0) + "%");
     $("bUndo").onclick = undoEdit;
@@ -1278,11 +1360,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderTexturesButton();
     };
     // moves: a given scramble (the tests use this); by default a random one
-    function scramble(moves = scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0))) {
+    function scramble(moves = randomScramble()) {
       flush(); if (anim) anim = null;
       history.clear(); scrambled = true;
       scrambledState = state.slice();
-      for (const m of moves) applyMove(P, scrambledState, m);
+      for (const m of moves) applyAny(scrambledState, m);
       const dur = Math.min(110, Math.max(35, 3500 / Math.max(1, moves.length)));
       for (const move of moves) queue.push({ move, dur });
       startNext();
@@ -1300,7 +1382,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       anim = null; queue = [];
       history.clear();
       if (turned) { state = scrambledState.slice(); timer.arm(); } // back to the scramble: time it again
-      else { state = solvedState(P); scrambled = false; scrambledState = null; timer.clear(); }
+      else { state = freshState(); scrambled = false; scrambledState = null; timer.clear(); }
       renderTimer();
       renderTape();
     };
@@ -1465,6 +1547,126 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       placeCamera();
     }, { passive: false });
 
+    // ---------- planar puzzles: drawing and input ----------
+    // PlanarView (planar-view.mjs) lays the grid out inside the space the page's controls leave
+    // free and draws it. Drag a cell along its row or column to slide that line; it follows
+    // the pointer, wrapping across the glued edges, and snaps to whole cells on release (one
+    // move). The arrows at each line's ends slide it one cell; the axes button hides them.
+    const plane = $("plane"), planeView = new PlanarView(plane);
+    // look: planarPicture stays loaded after switching back to colors, so picture needs no re-upload
+    let showLabels = true, reflectLabels = true, planarTextures = false, planarPicture = null, usePicture = false, hoverArrow = null, pdrag = null;
+    function sizePlane() {
+      const dpr = Math.min(devicePixelRatio, 2);
+      plane.width = Math.round(W * dpr); plane.height = Math.round(H * dpr);
+      plane.style.width = W + "px"; plane.style.height = H + "px";
+    }
+    // the part of the screen no control covers
+    function safeRect() {
+      const pad = 16, r = (sel) => document.querySelector(sel).getBoundingClientRect();
+      const panel = $("panel").getBoundingClientRect(), open = !$("panel").hasAttribute("collapsed");
+      let top = r(".tw-title").bottom + pad, right = W - pad;
+      if (open && panel.width) right = Math.min(right, panel.left - pad);
+      else top = Math.max(top, panel.bottom + pad);
+      const bottom = Math.min(r("#tape").top, r(".control-bar").top, r("#reference").top) - pad;
+      return { left: pad, top, right, bottom };
+    }
+    // the picture cropped to the grid's shape
+    function pictureLook() {
+      if (!planarPicture || !usePicture) return null;
+      const iw = planarPicture.naturalWidth, ih = planarPicture.naturalHeight, a = P.W / P.H;
+      const sw = Math.min(iw, ih * a), sh = sw / a;
+      return { img: planarPicture, sx: (iw - sw) / 2, sy: (ih - sh) / 2, sw, sh };
+    }
+    function drawPlanar() {
+      planeView.layout(P, safeRect());
+      const slide = anim ? { axis: anim.axis, layer: anim.layer, p: anim.theta } : null;
+      planeView.draw(state, slide, { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: showAxes, hover: hoverArrow },
+                     $("reference").getBoundingClientRect());
+    }
+    plane.addEventListener("pointerdown", (e) => {
+      if (!isPlanar() || pdrag) return;
+      const a = showAxes ? planeView.arrowAt(e.clientX, e.clientY) : null;
+      if (a) {
+        flush();
+        const move = { axis: a.axis, layer: a.layer, q: a.q };
+        record([move]);
+        play(move);
+        renderTape();
+        renderAlgorithms();
+        return;
+      }
+      const cell = planeView.cellAt(e.clientX, e.clientY);
+      if (!cell) return;
+      try { plane.setPointerCapture(e.pointerId); } catch {}
+      pdrag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, cell, axis: null };
+    });
+    plane.addEventListener("pointermove", (e) => {
+      if (!isPlanar()) return;
+      if (!pdrag) {
+        hoverArrow = showAxes ? planeView.arrowAt(e.clientX, e.clientY) : null;
+        plane.style.cursor = hoverArrow ? "pointer" : planeView.cellAt(e.clientX, e.clientY) ? "grab" : "";
+        return;
+      }
+      if (e.pointerId !== pdrag.id) return;
+      const dx = e.clientX - pdrag.x0, dy = e.clientY - pdrag.y0;
+      if (pdrag.axis === null) {
+        if (Math.hypot(dx, dy) < 6) return; // a tap, so far
+        flush();
+        pdrag.axis = Math.abs(dx) >= Math.abs(dy) ? 0 : 1;
+        anim = { live: true, axis: pdrag.axis, layer: pdrag.axis === 0 ? pdrag.cell.y : pdrag.cell.x, move: null, theta: 0 };
+        plane.style.cursor = "grabbing";
+      }
+      if (anim && anim.live) anim.theta = (pdrag.axis === 0 ? dx : dy) / planeView.cell;
+    });
+    function endPlanarDrag(e) {
+      if (!pdrag || e.pointerId !== pdrag.id) return;
+      if (anim && anim.live) {
+        const q = Math.round(anim.theta), move = { axis: anim.axis, layer: anim.layer, q };
+        Object.assign(anim, { live: false, move, from: anim.theta, to: q, t: 0, dur: 90 + 140 * Math.min(1, Math.abs(q - anim.theta)) });
+        if (q) record([move]);
+        renderTape();
+        renderAlgorithms();
+      }
+      pdrag = null;
+      plane.style.cursor = "";
+    }
+    plane.addEventListener("pointerup", endPlanarDrag);
+    plane.addEventListener("pointercancel", endPlanarDrag);
+    plane.addEventListener("pointerleave", () => { hoverArrow = null; });
+    plane.addEventListener("contextmenu", (e) => e.preventDefault());
+    // the look controls: which fill is on, and which checkboxes apply right now
+    function renderLook() {
+      $("fillColors").setAttribute("aria-checked", String(!usePicture));
+      $("fillPicture").setAttribute("aria-checked", String(usePicture));
+      $("pictureChange").hidden = !usePicture;
+      $("labels").checked = showLabels;
+      $("reflectLabels").checked = reflectLabels;
+      $("reflectLabels").disabled = !showLabels;
+      $("planarTextures").checked = planarTextures;
+      $("planarTextures").disabled = usePicture; // textures only go on the colors
+    }
+    $("fillColors").onclick = () => { usePicture = false; renderLook(); };
+    $("fillPicture").onclick = () => {
+      if (planarPicture) { usePicture = true; renderLook(); }
+      else $("pictureFile").click(); // the first time: pick one
+    };
+    $("pictureChange").onclick = () => $("pictureFile").click();
+    $("pictureFile").onchange = async () => {
+      const file = $("pictureFile").files[0];
+      $("pictureFile").value = "";
+      if (!file) return;
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      try { await img.decode(); } catch { return; } // not an image
+      planarPicture = img; // kept until the page reloads
+      usePicture = true;
+      renderLook();
+    };
+    $("labels").onchange = () => { showLabels = $("labels").checked; renderLook(); };
+    $("reflectLabels").onchange = () => { reflectLabels = $("reflectLabels").checked; };
+    $("planarTextures").onchange = () => { planarTextures = $("planarTextures").checked; };
+    renderLook();
+
     // ---------- loop ----------
     let lastT = performance.now();
     function frame(now) {
@@ -1477,6 +1679,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         anim.theta = anim.from + (anim.to - anim.from) * ease(u);
         if (u >= 1) finishAnim();
       }
+      if (isPlanar()) { drawPlanar(); requestAnimationFrame(frame); return; }
       updatePieces();
       renderer.setViewport(0, 0, W, H);
       renderer.setScissorTest(false);
@@ -1494,6 +1697,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let refG = 0;
     const refQ = new THREE.Quaternion(), refTarget = new THREE.Quaternion(), refM = new THREE.Matrix4();
     function updateReferenceTarget(snap = false) {
+      if (isPlanar()) return; // the planar view draws its own solved grid
       refG = closestOrientation(P, state, refG);
       const m = P.group.mats[refG];
       refM.set(m[0], m[1], m[2], 0, m[3], m[4], m[5], 0, m[6], m[7], m[8], 0, 0, 0, 0, 1);
@@ -1529,7 +1733,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // pick a puzzle by preset id, like the menu, then optionally its size and a family's
       // own numbers (params: { sides: 5 }, { a: 2, b: 3, c: 4 })
       load(id, { size: n, params } = {}) {
-        const i = PRESETS.findIndex((p) => p.id === id);
+        const i = MENU.findIndex((p) => p.id === id);
         if (i < 0) throw new Error(`no preset ${id}`);
         $("preset").value = i;
         $("preset").onchange();
@@ -1539,7 +1743,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       },
       turn(axis, layer, q = 1) {
         flush();
-        const move = { axis, layer, q: mod(q, P.axes[axis].order) };
+        // (a planar slide keeps its sign and size: q cells right/down, or left/up if negative)
+        const move = { axis, layer, q: isPlanar() ? q : mod(q, P.axes[axis].order) };
         record([move]);
         play(move);
         renderTape();
@@ -1555,10 +1760,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       get state() { return Array.from(state); },
       info() {
         return {
-          id: isCustom() ? "custom" : PRESETS[presetIdx].id, title: $("name").textContent, size,
-          pieces: P.pieces.length, faces: P.colors.length,
-          axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })),
-          solved: isSolved(P, state), scrambled, idle: !anim && !queue.length,
+          id: isCustom() ? "custom" : MENU[presetIdx].id, title: $("name").textContent, size,
+          ...(isPlanar()
+            ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture }
+            : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
+          solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
           status: $("status").textContent,
           timer: { state: timer.state, ms: timer.ms, text: $("clock").hidden ? null : $("timer").textContent },
@@ -1568,6 +1774,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         };
       },
       // ---- screen positions, for the pointer-input tests ----
+      // planar: every arrow button ({ axis, layer, q, x, y }) and a grid cell's middle, in CSS px
+      arrows() { planeView.layout(P, safeRect()); return planeView.arrows().map(({ axis, layer, q, x, y }) => ({ axis, layer, q, x, y })); },
+      cellCenter(x, y) { planeView.layout(P, safeRect()); return planeView.cellCenter(x, y); },
       // (poses and camera are normally brought up to date by the next frame; a hidden or
       // headless page may not have drawn one since the last change)
       sync() { updatePieces(); root.updateMatrixWorld(true); camera.updateMatrixWorld(); },

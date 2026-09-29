@@ -848,8 +848,11 @@ export function toCustom(P) {
 export const TEXTURES = ["plain", "stripes", "grid", "dots", "checker", "wavy", "honeycomb"];
 export const TEXTURE_MIN_FACES = 13;
 
-// "#rrggbb" or "hsl(h, s%, l%)" to OKLab, where distance tracks how different colors look
+// "#rrggbb", "hsl(h, s%, l%)" or "oklch(l c h)" to OKLab, where distance tracks how
+// different colors look
 function oklab(css) {
+  const lch = /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(css);
+  if (lch) { const [l, c, h] = [+lch[1], +lch[2], (+lch[3] * Math.PI) / 180]; return [l, c * Math.cos(h), c * Math.sin(h)]; }
   let rgb;
   const hsl = /hsl\(\s*([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%/.exec(css);
   if (hsl) {

@@ -118,3 +118,63 @@ test("the mouse wheel zooms without turning anything", async ({ page }) => {
   await page.mouse.wheel(0, -800);
   expect((await info(page)).moves).toBe(0);
 });
+
+// ---- planar puzzles: arrows and drags on the 2D canvas ----
+const onPlane = (page, pts) => page.evaluate((pts) => pts.filter((p) => document.elementFromPoint(p.x, p.y)?.id === "plane"), pts);
+const loadGrid = (page, params) => page.evaluate((params) => window.cutwist.load("planar", { params }), params);
+async function slideState(page, axis, layer, q) {
+  return page.evaluate(({ axis, layer, q }) => {
+    const c = window.cutwist;
+    document.getElementById("reset").click();
+    c.turn(axis, layer, q); c.finish();
+    return c.state;
+  }, { axis, layer, q });
+}
+
+test("planar: clicking a row's right arrow slides it one cell right", async ({ page }) => {
+  await loadGrid(page, { topology: "torus" });
+  const arrows = await onPlane(page, await page.evaluate(() => window.cutwist.arrows()));
+  const right = arrows.find((a) => a.axis === 0 && a.layer === 1 && a.q === 1);
+  expect(right, "row 1's right arrow in view").toBeTruthy();
+  await page.mouse.click(right.x, right.y);
+  await finish(page);
+  expect((await info(page)).moves).toBe(1);
+  const clicked = await state(page);
+  expect(clicked).toEqual(await slideState(page, 0, 1, 1));
+});
+
+test("planar: dragging a cell two cells down slides its column by two, in one move", async ({ page }) => {
+  await loadGrid(page, { topology: "klein" });
+  const a = await page.evaluate(() => window.cutwist.cellCenter(1, 1));
+  const b = await page.evaluate(() => window.cutwist.cellCenter(1, 3));
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x + 4, b.y + 6, { steps: 12 });
+  await page.mouse.up();
+  await finish(page);
+  expect((await info(page)).moves).toBe(1);
+  const dragged = await state(page);
+  expect(dragged).toEqual(await slideState(page, 1, 1, 2));
+});
+
+test("planar: a short drag snaps back without a move", async ({ page }) => {
+  await loadGrid(page, { topology: "torus" });
+  const a = await page.evaluate(() => window.cutwist.cellCenter(2, 2));
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(a.x + 15, a.y, { steps: 4 });
+  await page.mouse.up();
+  await finish(page);
+  const s = await info(page);
+  expect(s.moves).toBe(0);
+  expect(s.solved).toBe(true);
+});
+
+test("planar: with the axes button off, the arrows are gone", async ({ page }) => {
+  await loadGrid(page, { topology: "torus" });
+  const [arrow] = await onPlane(page, await page.evaluate(() => window.cutwist.arrows()));
+  await page.click("#axes");
+  await page.mouse.click(arrow.x, arrow.y);
+  await finish(page);
+  expect((await info(page)).moves).toBe(0);
+});
