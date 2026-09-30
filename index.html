@@ -473,7 +473,7 @@
         puzzle, it finds all of these rotations and numbers them, with 0 meaning "not rotated".
         To find them, it tries every way of sending one face and a neighboring face onto another
         such pair, and keeps the rotations that carry every face onto a face. Here are all 24
-        for a cube, with their numbers.</p>
+        for a cube, with their numbers, grouped by which face ends up on top.</p>
       <canvas class="cw-viz" data-viz="orient"></canvas>
       <p class="cw-viz-caption" data-caption="orient">&nbsp;</p>
       <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
@@ -2504,30 +2504,48 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
 
     const VIZ = {
-      // All of the uncut cube's 24 rotations, each turning from rotation 0 into place and
-      // labeled with its number in the engine's list
+      // All of the uncut cube's 24 rotations, still, each labeled with its number in the
+      // engine's list: a column for each face that can be on top (the engine's face table says
+      // which face a rotation sends up), and in it the four ways to turn the cube with that face up
       orient(v) {
-        const P = vizPuzzle("cube", 1), sc = vizOrthoScene(8.3);
-        const cubes = P.group.mats.map((M, g) => {
-          const o = pieceObject(P.pieces[0], P.colors, null, 0.028 * P.R, 0.004 * P.R);
-          sc.root.add(o);
-          return { o, g, q: vizQuat(M), pos: [-7 + (g % 8) * 2, 2.85 - Math.floor(g / 8) * 2.85, 0] };
-        });
-        const HOLD0 = 1, MOVE = 1.2, HOLD = 2.8, BACK = 0.8, ROUND = HOLD0 + MOVE + HOLD + BACK + 0.4;
-        const I = new THREE.Quaternion();
-        return (t) => {
-          const u = t % ROUND;
-          const f = u < HOLD0 ? 0 : u < HOLD0 + MOVE ? vizEase((u - HOLD0) / MOVE) : u < HOLD0 + MOVE + HOLD ? 1 : 1 - vizEase((u - HOLD0 - MOVE - HOLD) / BACK);
-          for (const c of cubes) vizPlaceQ(c.o, I.clone().slerp(c.q, f), c.pos, 0.95 / P.R);
-          vizDraw(v, sc);
+        const P = vizPuzzle("cube", 1), sc = vizOrthoScene(6);
+        const UP = P.normals.findIndex((n) => n[1] > 0.99);
+        const faces = [2, 3, 4, 5, 0, 1]; // white, yellow, green, blue, red, orange
+        const names = { 0: "red", 1: "orange", 2: "white", 3: "yellow", 4: "green", 5: "blue" };
+        const halfH = (6 * VIZ_H) / VIZ_W, headH = 0.6, rowH = (2 * halfH - headH) / 4;
+        const cells = faces.flatMap((f, col) => P.group.facePerm.map((fp, g) => g).filter((g) => P.group.facePerm[g][f] === UP)
+          .map((g, row) => {
+            const o = pieceObject(P.pieces[0], P.colors, null, 0.028 * P.R, 0.004 * P.R);
+            sc.root.add(o);
+            const pos = [-5 + col * 2 - 0.3, halfH - headH - rowH * (row + 0.5), 0];
+            vizPlaceQ(o, vizQuat(P.group.mats[g]), pos, 0.62 / P.R);
+            return { g, pos };
+          }));
+        let drawn = null; // (still: drawn once per canvas, and again once the web fonts are in)
+        document.fonts?.ready.then(() => { drawn = null; });
+        return () => {
+          if (drawn === v.cv) return;
+          drawn = v.cv;
           const { ctx } = v, C = vizColors();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, v.cv.width, v.cv.height);
+          vizDraw(v, sc);
           ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
-          for (const c of cubes) {
-            const [x, y] = vizProject(sc, [c.pos[0], c.pos[1] - 1.2, 0]);
-            const moving = f > 0 && f < 1 && c.g !== 0;
-            vizTag(ctx, x, y, moving ? `0→${c.g}` : String(f >= 0.5 ? c.g : 0), c.g !== 0 && f > 0, C);
+          // column headers: the face on top
+          ctx.font = '11px "JetBrains Mono", ui-monospace, monospace'; ctx.textBaseline = "middle";
+          faces.forEach((f, col) => {
+            const [x, y] = vizProject(sc, [-5 + col * 2, halfH - headH / 2, 0]);
+            const w = ctx.measureText(names[f]).width;
+            ctx.fillStyle = P.colors[f];
+            ctx.fillRect(x - (w + 14) / 2, y - 4, 8, 8);
+            ctx.fillStyle = C.muted; ctx.textAlign = "left";
+            ctx.fillText(names[f], x - (w + 14) / 2 + 12, y + 0.5);
+          });
+          for (const c of cells) {
+            const [x, y] = vizProject(sc, [c.pos[0] + 0.95, c.pos[1], 0]);
+            vizTag(ctx, x, y, String(c.g), false, C);
           }
-          v.caption(f === 0 ? "every cube starts at rotation 0" : "all 24 of the cube's rotations, each labeled with its number");
+          v.caption("all 24 of the cube's rotations, by which face ends up on top");
         };
       },
 
@@ -2939,7 +2957,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         for (const { v, frame } of vizzes) {
           const r = v.cv.getBoundingClientRect();
           if (r.bottom < 0 || r.top > innerHeight) continue; // (off screen in the modal's scroll)
-          if (v.cv.dataset.viz !== "drift" && v.cv.dataset.viz !== "table") { v.ctx.setTransform(1, 0, 0, 1, 0, 0); v.ctx.clearRect(0, 0, v.cv.width, v.cv.height); }
+          // (drift, table and orient clear their own canvases)
+          if (!["drift", "table", "orient"].includes(v.cv.dataset.viz)) { v.ctx.setTransform(1, 0, 0, 1, 0, 0); v.ctx.clearRect(0, 0, v.cv.width, v.cv.height); }
           frame(t);
         }
       };
