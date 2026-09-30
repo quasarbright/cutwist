@@ -53,6 +53,8 @@
 
     /* about-modal diagrams */
     .cw-viz { display: block; width: 100%; max-width: 440px; margin: 14px auto 4px; }
+    .cohesion-about ol { padding-left: 1.3em; }
+    .cohesion-about li { margin: .35em 0; }
     .cw-viz-caption { font-size: .8rem; color: var(--muted); text-align: center; margin-top: 2px; min-height: 1.3em; }
 
     /* shown instead of the puzzle when the browser can't start WebGL */
@@ -407,7 +409,7 @@
       <h2 class="title">Cutwist</h2>
       <p class="intro">A twisty puzzle is a solid cut by flat planes. Every 3D puzzle here is made by
         one routine that splits a shape with a plane, and every puzzle's state is a list of whole
-        numbers, which is what keeps it exact however long you turn it.</p>
+        numbers.</p>
 
       <div class="section-label">carving the solid</div>
       <p>Each flat face of a solid lies on a plane, and the solid is everything on the inner side of
@@ -444,44 +446,53 @@
         megaminx).</p>
       <p>Every cut is made in all the directions of its kind at once, like every face or every
         corner. So the pattern of cuts has the same symmetry as the solid, and each of those
-        rotations carries it onto itself too.</p>
+        rotations carries the cuts onto themselves too.</p>
       <canvas class="cw-viz" data-viz="turn"></canvas>
       <p class="cw-viz-caption" data-caption="turn">&nbsp;</p>
 
-      <div class="section-label">why not just rotate the pieces?</div>
-      <p>The obvious way to store a puzzle is its geometry: every corner of every piece as an x, y
-        and z, and a turn rotates the corners of each piece in the layer. The trouble is that a
-        computer can't do those rotations exactly. A quarter turn uses cos 90°, which is 0, and
-        in floating point comes out as 6.1×10<sup>−17</sup>. Turn the point (1, 0, 0) by a
-        quarter turn four times and it comes back as (1, −2.4×10<sup>−16</sup>, 0).</p>
-      <p>That's far too small to see, and it grows slowly. The chart below turns a megaminx at
-        random with exactly that method and measures how far the corners have wandered from where
-        they should be. The problem is the questions a puzzle has to answer with a yes or no: is
-        this piece back where it started, which side of this cut is it on, is the puzzle solved.
-        With numbers that keep wandering, each of those needs a tolerance, a guess at how much
-        error has built up so far, and the error grows the longer you play.</p>
-      <canvas class="cw-viz" data-viz="drift"></canvas>
-      <p class="cw-viz-caption" data-caption="drift">&nbsp;</p>
-
-      <div class="section-label">never moving the pieces</div>
-      <p>So Cutwist never moves the pieces. Each piece keeps its home geometry, and the state only
-        records which rotation has been applied to it. There are few choices: a cube lands back
-        in its own outline in 24 ways (any of 6 faces on top, turned any of 4 ways), and a
-        dodecahedron in 60. The engine finds them once, when it builds a puzzle, by trying every
-        way of sending one face and a neighbor onto another face and neighbor, and keeping the
-        rotations that carry every face onto a face. It numbers them, with 0 for no rotation.</p>
-      <p>Doing one of these rotations and then another always gives a third one on the list, so
-        the engine also builds a table: rotation g followed by rotation r is rotation
-        mul[r][g]. The puzzle's whole state is one of these numbers per piece, and a turn looks
-        up a new number for each piece in the layer. Here's a 2×2×2, mixed up a little, whose 8
-        pieces each hold one of its 24 rotations.</p>
+      <div class="section-label">how a turn is stored</div>
+      <p>A cube can be picked up and set back down in its own outline in 24 ways: any of its 6
+        faces on top, turned any of 4 ways. A dodecahedron can in 60. When the engine builds a
+        puzzle, it finds all of these rotations and numbers them, with 0 meaning "not rotated".
+        To find them, it tries every way of sending one face and a neighboring face onto another
+        such pair, and keeps the rotations that carry every face onto a face.</p>
+      <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
+        them. So the engine doesn't store where the pieces are. It keeps each piece's home shape,
+        from the solved puzzle, and stores one number per piece: which of the rotations that
+        piece has gone through. The whole puzzle is a list of numbers, starting as all zeros. A
+        turn works like this:</p>
+      <ol>
+        <li><b>Find the pieces in the layer.</b> For each piece, rotate the center of its home
+          shape by the piece's current rotation, and see which side of the cut it lands on.</li>
+        <li><b>Look up each new number.</b> The turn is itself one of the rotations, say number
+          r. Doing rotation g and then rotation r always gives another rotation on the list, so
+          the engine builds a table of all these combinations up front. A piece in the layer
+          holding number g now holds whatever the table says for "g, then r".</li>
+        <li><b>Draw.</b> Each piece's home shape is rotated by its current number's rotation and
+          drawn.</li>
+      </ol>
+      <p>Pieces outside the layer keep their numbers. Undoing a turn is the same lookup with the
+        opposite rotation. Here's a 2×2×2, mixed up a little, whose 8 pieces each hold one of its
+        24 rotations.</p>
       <canvas class="cw-viz" data-viz="table"></canvas>
       <p class="cw-viz-caption" data-caption="table">&nbsp;</p>
-      <p>Whole numbers don't drift. After a million turns every entry is still exactly one of the
-        rotations, so undo, reversed algorithms and "is it solved?" all have exact answers. To
-        draw a piece, or to see which layer it's in, the engine rotates its home geometry by its
-        current rotation. That's one rotation from the original numbers every time, so the
-        rounding error is always that of a single multiply and never adds up.</p>
+
+      <div class="section-label">why not move the pieces themselves?</div>
+      <p>The obvious way to build this is to store every corner of every piece as an x, y and z,
+        and have a turn rotate those corners. That would have worked. A computer can't rotate
+        exactly, though: a quarter turn uses cos 90°, which is 0 but comes out as
+        6.1×10<sup>−17</sup>, so four quarter turns bring (1, 0, 0) back as
+        (1, −2.4×10<sup>−16</sup>, 0). Every turn adds a little more error. The chart turns a
+        megaminx at random both ways and measures how far the moved corners have drifted from the
+        exact positions.</p>
+      <canvas class="cw-viz" data-viz="drift"></canvas>
+      <p class="cw-viz-caption" data-caption="drift">&nbsp;</p>
+      <p>That never becomes visible. The difference shows up in the yes/no questions. With
+        drifting corners, "which side of this cut is the piece on?" and "is the puzzle solved?"
+        have to compare numbers that are almost equal, so each needs a tolerance. With the list
+        of whole numbers, they have exact answers. "Solved" becomes a second table lookup: for
+        each sticker, which face its piece's rotation points it at, then checking that every face
+        shows one color. Two puzzle states can be compared number by number.</p>
 
       <div class="section-label">the sliding puzzles</div>
       <p>The torus, Klein bottle and projective plane use the same idea in 2D. The state is one
@@ -2526,7 +2537,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             const now = on ? P.group.mul[r][before[i]] : state[i];
             ctx.fillText(on && f < 1 ? `${before[i]}→${now}` : String(now), x + bw / 2, y + 28);
           }
-          v.caption(`this turn is rotation ${r}: each lit piece's g becomes mul[${r}][g]`);
+          v.caption(`this turn is rotation ${r}: each lit piece's number g becomes the table's "g, then ${r}"`);
         };
       },
     };
