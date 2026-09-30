@@ -458,12 +458,21 @@
         faces on top, turned any of 4 ways. A dodecahedron can in 60. When the engine builds a
         puzzle, it finds all of these rotations and numbers them, with 0 meaning "not rotated".
         To find them, it tries every way of sending one face and a neighboring face onto another
-        such pair, and keeps the rotations that carry every face onto a face.</p>
+        such pair, and keeps the rotations that carry every face onto a face. Here are 8 of a
+        cube's 24, with their numbers.</p>
+      <canvas class="cw-viz" data-viz="orient"></canvas>
+      <p class="cw-viz-caption" data-caption="orient">&nbsp;</p>
       <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
         them. So the engine doesn't store where the pieces are. It keeps each piece's home shape,
         from the solved puzzle, and stores one number per piece: which of the rotations that
-        piece has gone through. The whole puzzle is a list of numbers, starting as all zeros. A
-        turn works like this:</p>
+        piece has gone through. The whole puzzle is a list of numbers, starting as all zeros.</p>
+      <p>Here's one turn of a solved 2×2×2, with one piece lit, next to an uncut cube. The turn
+        is a quarter turn, which is one of the rotations on the list. It turns the lit piece
+        exactly the way it turns the whole uncut cube, so the piece's number becomes that
+        rotation's number. The gray label marks where the piece started.</p>
+      <canvas class="cw-viz" data-viz="onepiece"></canvas>
+      <p class="cw-viz-caption" data-caption="onepiece">&nbsp;</p>
+      <p>A turn works like this:</p>
       <ol>
         <li><b>Find the pieces in the layer.</b> For each piece, rotate the center of its home
           shape by the piece's current rotation, and see which side of the cut it lands on.</li>
@@ -2321,7 +2330,116 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       };
     }
 
+    // Shared by the numbering diagrams: an orthographic camera (grids of objects line up), a
+    // fixed view that shows three faces, and the boxed number labels the 2×2×2 diagram uses.
+    function vizOrthoScene(halfW) {
+      const sc = vizScene(), halfH = (halfW * VIZ_H) / VIZ_W;
+      sc.cam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 100);
+      sc.cam.position.set(0, 0, 10);
+      return sc;
+    }
+    const VIZ_VIEW = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.5, -0.65, 0));
+    const vizQuat = (M) => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().set(M[0], M[1], M[2], 0, M[3], M[4], M[5], 0, M[6], M[7], M[8], 0, 0, 0, 0, 1));
+    // obj at `pos`, seen through the fixed view, rotated by quaternion q, scaled by s
+    function vizPlaceQ(obj, q, pos, s) {
+      obj.matrix.compose(new THREE.Vector3(...pos), VIZ_VIEW.clone().multiply(q), new THREE.Vector3(s, s, s));
+      obj.matrixWorldNeedsUpdate = true;
+    }
+    function vizColors() {
+      const css = getComputedStyle(document.body), get = (k, d) => css.getPropertyValue(k).trim() || d;
+      return { accent: get("--accent", "#f5c518"), muted: get("--muted", "#8e909b"), border: get("--border", "#2e3240"), text: get("--text", "#ecebe6") };
+    }
+    // screen position (CSS px in the diagram) of a world point
+    const vizProject = (sc, p) => { const s = new THREE.Vector3(...p).project(sc.cam); return [(s.x + 1) / 2 * VIZ_W, (1 - s.y) / 2 * VIZ_H]; };
+    // a piece's home: plain gray text on a dark backing, no border
+    function vizHomeTag(ctx, x, y, text, C) {
+      ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const w = ctx.measureText(text).width + 8;
+      ctx.fillStyle = "rgba(18, 19, 24, 0.85)";
+      ctx.beginPath(); ctx.roundRect(x - w / 2, y - 8, w, 16, 5); ctx.fill();
+      ctx.fillStyle = C.muted;
+      ctx.fillText(text, x, y + 0.5);
+    }
+    function vizTag(ctx, x, y, text, on, C) {
+      ctx.font = '600 12px "JetBrains Mono", ui-monospace, monospace';
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const w = ctx.measureText(text).width + 10;
+      ctx.fillStyle = "#121318"; ctx.strokeStyle = on ? C.accent : C.border; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(x - w / 2, y - 9, w, 18, 5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = on ? C.accent : C.text;
+      ctx.fillText(text, x, y + 0.5);
+    }
+
     const VIZ = {
+      // A few of the uncut cube's 24 rotations, each turning from rotation 0 into place and
+      // labeled with its number in the engine's list
+      orient(v) {
+        const P = vizPuzzle("cube", 1), sc = vizOrthoScene(4.6);
+        const picks = [0, 1, 4, 7, 10, 14, 18, 23];
+        const cubes = picks.map((g, k) => {
+          const o = pieceObject(P.pieces[0], P.colors, null, 0.028 * P.R, 0.004 * P.R);
+          sc.root.add(o);
+          return { o, g, q: vizQuat(P.group.mats[g]), pos: [-3.3 + (k % 4) * 2.2, k < 4 ? 1.05 : -1.2, 0] };
+        });
+        const HOLD0 = 1, MOVE = 1.2, HOLD = 2.8, BACK = 0.8, ROUND = HOLD0 + MOVE + HOLD + BACK + 0.4;
+        const I = new THREE.Quaternion();
+        return (t) => {
+          const u = t % ROUND;
+          const f = u < HOLD0 ? 0 : u < HOLD0 + MOVE ? vizEase((u - HOLD0) / MOVE) : u < HOLD0 + MOVE + HOLD ? 1 : 1 - vizEase((u - HOLD0 - MOVE - HOLD) / BACK);
+          for (const c of cubes) vizPlaceQ(c.o, I.clone().slerp(c.q, f), c.pos, 1.15 / P.R);
+          vizDraw(v, sc);
+          const { ctx } = v, C = vizColors();
+          ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+          for (const c of cubes) {
+            const [x, y] = vizProject(sc, [c.pos[0], c.pos[1] - 1.05, 0]);
+            const moving = f > 0 && f < 1 && c.g !== 0;
+            vizTag(ctx, x, y, moving ? `0→${c.g}` : String(f >= 0.5 ? c.g : 0), c.g !== 0 && f > 0, C);
+          }
+          v.caption(f === 0 ? "every cube starts at rotation 0" : `8 of the cube's 24 rotations, each labeled with its number`);
+        };
+      },
+
+      // One turn of a solved 2×2×2, one piece lit: the turn is rotation r, the same rotation
+      // that takes the uncut cube beside it from 0 to r, so the piece's number becomes r
+      onepiece(v) {
+        const P = vizPuzzle("cube", 2), U = vizPuzzle("cube", 1), sc = vizOrthoScene(2.75);
+        const objs = P.pieces.map((p) => { const o = pieceObject(p, P.colors, null, 0.028 * P.R * 1.5, 0.004 * P.R); sc.root.add(o); return o; });
+        const whole = pieceObject(U.pieces[0], U.colors, null, 0.028 * U.R, 0.004 * U.R);
+        sc.root.add(whole);
+        // the piece: the one nearest the viewer's top front right; the turn: its layer along
+        // the first axis, a quarter turn
+        const state = solvedState(P);
+        const i = P.pieces.reduce((b, p, k) => (p.centroid[0] + p.centroid[1] + p.centroid[2] > P.pieces[b].centroid.reduce((s, x) => s + x, 0) ? k : b), 0);
+        const axis = 0, ax = P.axes[axis], layer = layerOf(P, state, i, axis), q = 1, r = ax.rot[q];
+        const turning = new Set(piecesInLayer(P, state, axis, layer));
+        objs[i].children[0].material = bodyHiMat;
+        if (objs[i].children[1]) objs[i].children[1].material = stickerHiMat;
+        const L = [-1.35, 0, 0], Rp = [1.45, 0, 0], s = 0.95 / P.R;
+        const HOLD0 = 1.3, MOVE = 1.2, HOLD = 3, BACK = 0.8, ROUND = HOLD0 + MOVE + HOLD + BACK + 0.4;
+        const I = new THREE.Quaternion(), qr = vizQuat(P.group.mats[r]);
+        return (t) => {
+          const u = t % ROUND;
+          const f = u < HOLD0 ? 0 : u < HOLD0 + MOVE ? vizEase((u - HOLD0) / MOVE) : u < HOLD0 + MOVE + HOLD ? 1 : 1 - vizEase((u - HOLD0 - MOVE - HOLD) / BACK);
+          const qf = I.clone().slerp(qr, f);
+          objs.forEach((o, k) => vizPlaceQ(o, turning.has(k) ? qf : I, L, s));
+          vizPlaceQ(whole, qf, Rp, s);
+          vizDraw(v, sc);
+          const { ctx } = v, C = vizColors();
+          ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+          // world point of piece i's centroid (pushed out a little), turned by qf, seen through the view
+          const at = (c, quat, base, k) => new THREE.Vector3(...scale(c, s * k)).applyQuaternion(quat).applyQuaternion(VIZ_VIEW).add(new THREE.Vector3(...base)).toArray();
+          const home = vizProject(sc, at(P.pieces[i].centroid, I, L, 2.5));
+          vizHomeTag(ctx, home[0], home[1], `#${i}`, C);
+          const label = f > 0 && f < 1 ? `0→${r}` : String(f >= 0.5 ? r : 0);
+          const [px, py] = vizProject(sc, at(P.pieces[i].centroid, qf, L, 1.25));
+          vizTag(ctx, px, py, label, f > 0, C);
+          const [wx, wy] = vizProject(sc, [Rp[0], Rp[1] - 1.05, 0]);
+          vizTag(ctx, wx, wy, label, f > 0, C);
+          v.caption(f === 0 ? `solved: piece #${i} and the uncut cube are both at rotation 0` : `this turn is rotation ${r}: the lit piece ends up turned exactly like the uncut cube`);
+        };
+      },
+
       // A dodecahedron carved from a sphere (the picture: a polyhedron with a few hundred
       // faces, since the routine only cuts flat faces) ...
       "carve-sphere"(v) {
@@ -2583,13 +2701,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           }).sort((a, b) => a.depth - b.depth);
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
           // each piece's home, by its index: fixed to the cube, further out, never turning
-          ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
           for (const [i, piece] of P.pieces.entries()) {
             const p = new THREE.Vector3(...scale(piece.centroid, 2.05 / P.R)).applyMatrix4(sc.root.matrixWorld);
             const depth = p.z, s = p.project(sc.cam);
-            ctx.globalAlpha = depth > 0 ? 0.9 : 0.4;
-            ctx.fillStyle = muted;
-            ctx.fillText(`#${i}`, (s.x + 1) / 2 * VIZ_W, (1 - s.y) / 2 * VIZ_H);
+            ctx.globalAlpha = depth > 0 ? 1 : 0.45;
+            vizHomeTag(ctx, (s.x + 1) / 2 * VIZ_W, (1 - s.y) / 2 * VIZ_H, `#${i}`, { muted });
           }
           ctx.font = '600 12px "JetBrains Mono", ui-monospace, monospace';
           for (const tag of tags) {
