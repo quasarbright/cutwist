@@ -478,28 +478,29 @@
         vertical.</p>
       <canvas class="cw-viz" data-viz="orient"></canvas>
       <p class="cw-viz-caption" data-caption="orient">&nbsp;</p>
-      <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
-        them. So the engine doesn't store where the pieces are. It keeps each piece's home shape,
-        from the solved puzzle, and stores one number per piece: which of the rotations that
-        piece has gone through. The rotation is about the puzzle's center, so it moves the piece
-        as well as turning it: one number says both which spot the piece is in and which way it
-        faces. The whole puzzle is a list of numbers, starting as all zeros.</p>
-      <p>Here's a solved 2×2×2 with one piece lit, next to an uncut cube with the same corner
-        lit. Each of the three layers the piece is in takes a quarter turn each way, going back
-        to the start after each. Every turn
-        is one of the rotations on the list, and it turns the lit piece exactly the way it turns
-        the whole uncut cube, lit corner and all, so the piece's number becomes that rotation's
-        number.</p>
+      <p>The engine gives every piece one of these numbers. It keeps each piece's home shape,
+        from the solved puzzle, plus the number of the rotation that carries it from home to where
+        it is now. Each rotation spins the whole puzzle about its center, so a piece carried by
+        one ends up somewhere else as well as facing a new way: the one number says both which
+        spot the piece is in and which way it faces. A piece at 0 is in its home spot, facing its
+        home way. The whole puzzle is a list of these numbers, one per piece, starting as all
+        zeros.</p>
+      <p>Turns keep the pieces on the list, because every turn is itself one of the rotations.
+        Here's a solved 2×2×2 with one piece lit, next to an uncut cube with the same corner lit.
+        Each of the three layers the piece is in takes a quarter turn each way, going back to the
+        start after each. Each turn moves the lit piece exactly the way it moves the whole uncut
+        cube, lit corner and all, so the piece's number becomes that rotation's number.</p>
       <canvas class="cw-viz" data-viz="onepiece"></canvas>
       <p class="cw-viz-caption" data-caption="onepiece">&nbsp;</p>
       <p>A turn works like this:</p>
       <ol>
         <li><b>Find the pieces in the layer.</b> For each piece, rotate the center of its home
           shape by the piece's current rotation, and see which side of the cut it lands on.</li>
-        <li><b>Look up each new number.</b> The turn is itself one of the rotations, say number
-          r. Doing rotation g and then rotation r always gives another rotation on the list, so
-          the engine builds a table of all these combinations up front. A piece in the layer
-          holding number g now holds whatever the table says for "g, then r".</li>
+        <li><b>Look up each new number.</b> Call the turn's rotation r, and say a piece in the
+          layer currently holds number g. Doing rotation g and then rotation r always gives
+          another rotation on the list, so the engine builds a table of all these combinations up
+          front. The piece's new number is whatever the table says for "g, then r". (Starting
+          from solved, g is 0, and "0, then r" is just r, as in the diagram above.)</li>
         <li><b>Draw.</b> Each piece's home shape is rotated by its current number's rotation and
           drawn.</li>
       </ol>
