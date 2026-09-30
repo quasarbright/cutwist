@@ -2567,8 +2567,31 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           ctx.clearRect(0, 0, v.cv.width, v.cv.height);
           vizSpin(sc, t * 0.4, 0.55);
           vizDraw(v, sc);
-          // the state: one box per piece, the turning ones showing their lookup
           ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+          // each piece's number, floating just outside it and riding along with the turn;
+          // the far side fainter, drawn first so the near side covers it
+          const rot = rotMat(ax.dir, (f * q * TAU) / ax.order);
+          sc.root.updateMatrixWorld();
+          const tags = P.pieces.map((piece, i) => {
+            let M = P.group.mats[state[i]];
+            if (turning.has(i)) M = mulMat(rot, M);
+            const p = new THREE.Vector3(...scale(applyMat(M, piece.centroid), 1.5 / P.R)).applyMatrix4(sc.root.matrixWorld);
+            const depth = p.z, s = p.project(sc.cam);
+            const on = turning.has(i), now = on ? P.group.mul[r][before[i]] : state[i];
+            return { x: (s.x + 1) / 2 * VIZ_W, y: (1 - s.y) / 2 * VIZ_H, depth, on, text: on && f < 1 ? `${before[i]}→${now}` : String(now) };
+          }).sort((a, b) => a.depth - b.depth);
+          ctx.font = '600 12px "JetBrains Mono", ui-monospace, monospace';
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          for (const tag of tags) {
+            const w = ctx.measureText(tag.text).width + 10;
+            ctx.globalAlpha = tag.depth > 0 ? 1 : 0.45;
+            ctx.fillStyle = "#121318"; ctx.strokeStyle = tag.on ? accent : border; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(tag.x - w / 2, tag.y - 9, w, 18, 5); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = tag.on ? accent : text;
+            ctx.fillText(tag.text, tag.x, tag.y + 0.5);
+          }
+          ctx.globalAlpha = 1;
+          // the state: one box per piece, the turning ones showing their lookup
           const bw = 48, gap = 4, x0 = (VIZ_W - (8 * bw + 7 * gap)) / 2, y = VIZ_H + 8;
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
           for (let i = 0; i < 8; i++) {
