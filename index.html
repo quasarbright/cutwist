@@ -444,11 +444,13 @@
         rotation carries the whole solid onto itself: a quarter turn about a cube's face, a third
         of a turn about its corner (the skewb), a fifth of a turn about a dodecahedron's face (the
         megaminx).</p>
+      <canvas class="cw-viz" data-viz="turn"></canvas>
+      <p class="cw-viz-caption" data-caption="turn">&nbsp;</p>
       <p>Every cut is made in all the directions of its kind at once, like every face or every
         corner. So the pattern of cuts has the same symmetry as the solid, and each of those
         rotations carries the cuts onto themselves too.</p>
-      <canvas class="cw-viz" data-viz="turn"></canvas>
-      <p class="cw-viz-caption" data-caption="turn">&nbsp;</p>
+      <canvas class="cw-viz" data-viz="symcuts"></canvas>
+      <p class="cw-viz-caption" data-caption="symcuts">&nbsp;</p>
 
       <div class="section-label">how a turn is stored</div>
       <p>A cube can be picked up and set back down in its own outline in 24 ways: any of its 6
@@ -2385,6 +2387,44 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           for (const { o, centroid } of stageObjs[made].userData.parts) vizPlace(o, P.group.mats[0], scale(centroid, 0.6 * e));
           const title = puzzleTitle(P.spec, n);
           v.caption(cutT < 0 ? `${title}: the solid, uncut` : k < planes.length ? `${title}: cut ${k + 1} of ${planes.length}` : `${title}: ${planes.length} cuts, ${shown} pieces`);
+          vizSpin(sc, t, 0.5);
+          vizDraw(v, sc);
+        };
+      },
+
+      // A 7×7×7's cuts made a set at a time: each depth on all six faces at once (the
+      // real splitPiece; the same pieces as buildPuzzle's axis-by-axis order)
+      symcuts(v) {
+        const P = vizPuzzle("cube", 7), sc = vizScene(), group = new THREE.Group();
+        group.scale.setScalar(1 / P.R);
+        sc.root.add(group);
+        const margin = 0.028 * P.R * (3 / 7), lift = 0.004 * P.R;
+        // one set per distance from the center, outermost first: that depth along every axis, both ways
+        const depths = [...new Set(P.axes[0].offsets.map((o) => Math.abs(o).toFixed(9)))].map(Number).sort((a, b) => b - a);
+        const sets = depths.map((d) => P.axes.flatMap((ax) => [[ax.dir, d], [ax.dir, -d]]));
+        let pieces = [P.solid];
+        const stages = [pieces];
+        for (const set of sets) {
+          for (const [dir, off] of set) pieces = pieces.flatMap((p) => splitPiece(p, dir, off, -1).filter(Boolean));
+          stages.push(pieces);
+        }
+        const stageObjs = stages.map((ps) => {
+          const g = new THREE.Group();
+          for (const p of ps) { const o = pieceObject(p, P.colors, null, margin, lift); vizPlace(o, P.group.mats[0]); g.add(o); }
+          g.visible = false;
+          group.add(g);
+          return g;
+        });
+        // (smaller discs than elsewhere: six at once pile up; a cube's face reaches 0.58 R out)
+        const planes = sets[0].map(() => vizCutPlane(P.R * 0.9, group));
+        const STEP = 1.8, CUT = 0.5, HOLD = 2.5, ROUND = 1 + sets.length * STEP + HOLD;
+        return (t) => {
+          const u = t % ROUND, k = Math.floor((u - 1) / STEP), f = (u - 1) / STEP - k;
+          const made = u < 1 ? 0 : k >= sets.length ? sets.length : k + (f >= CUT ? 1 : 0);
+          stageObjs.forEach((g, i) => { g.visible = i === made; });
+          const inStep = u >= 1 && k < sets.length;
+          planes.forEach((show, i) => show(inStep ? sets[k][i][0] : [0, 0, 1], inStep ? sets[k][i][1] : 0, inStep ? Math.min(1, f / 0.25, (1 - f) / 0.3) : 0));
+          v.caption(u < 1 ? "a 7×7×7 cube, uncut" : inStep ? `cut set ${k + 1} of ${sets.length}: one depth, made on all six faces at once` : `${sets.length} sets, ${sets.length * 6} cuts`);
           vizSpin(sc, t, 0.5);
           vizDraw(v, sc);
         };
