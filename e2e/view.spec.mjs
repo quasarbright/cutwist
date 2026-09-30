@@ -42,3 +42,22 @@ test("buttons don't double-tap zoom on phones; the puzzle keeps all touches for 
   for (const sel of ["#undo", "#redo", "#scramble", "#pause", "#sizeUp", "#mRecord", "body"]) expect(await touch(sel), sel).toBe("manipulation");
   expect(await touch("#c")).toBe("none");
 });
+
+test("rear view: the button splits the view, goes in the URL, and is off while a flat grid shows", async ({ page }) => {
+  await expect(page.locator("#rear")).toHaveAttribute("aria-pressed", "false");
+  await page.click("#rear");
+  expect((await info(page)).rear).toBe(true);
+  await expect(page.locator("#rearSplit")).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("rear")).toBe("on");
+  // a planar puzzle with its flat grid on screen: no rear view
+  await page.evaluate(() => window.cutwist.load("sliding-klein"));
+  await expect(page.locator("#rear")).toBeDisabled();
+  expect((await info(page)).rear).toBe(false);
+  await expect(page.locator("#rearSplit")).toBeHidden();
+  // only the 3D surface: back on
+  await page.uncheck("#viewFlat");
+  await expect(page.locator("#rear")).toBeEnabled();
+  expect((await info(page)).rear).toBe(true);
+  await page.click("#rear");
+  expect((await info(page)).rear).toBe(false);
+});

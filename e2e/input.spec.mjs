@@ -266,3 +266,44 @@ test("3D surface: hovering a cell shows its chevrons, lighting the one for the e
   await page.mouse.move(5, 400); // off the surface
   expect(await page.evaluate(() => window.cutwist.edgeHints())).toBeNull();
 });
+
+// ---- rear view: the right half is the back, and input there goes through its camera ----
+const rearStickers = (page) => page.evaluate(() => window.cutwist.stickers("rear"));
+
+test("rear view: dragging a sticker in the back view turns its layer", async ({ page }) => {
+  await page.click("#rear");
+  const split = await page.locator("#rearSplit").boundingBox();
+  const all = (await rearStickers(page)).filter((s) => s.x > split.x + 10);
+  expect(all.length).toBeGreaterThan(5);
+  const v0 = await page.evaluate(() => window.cutwist.view());
+  const s0 = await state(page);
+  const st = all[Math.floor(all.length / 2)];
+  await page.mouse.move(st.x, st.y);
+  await page.mouse.down();
+  await page.mouse.move(st.x + 120, st.y + 10, { steps: 12 });
+  await page.mouse.up();
+  await finish(page);
+  expect((await info(page)).moves).toBe(1);
+  expect((await state(page))[st.piece], "the dragged piece moved").not.toBe(s0[st.piece]);
+  expect(await page.evaluate(() => window.cutwist.view()), "the view didn't turn").toEqual(v0);
+});
+
+test("rear view: dragging empty space in the back view turns the view the way the drag goes", async ({ page }) => {
+  await page.click("#rear");
+  const split = await page.locator("#rearSplit").boundingBox();
+  const before = await rearStickers(page);
+  // from empty space near the top of the back view, straight down
+  const x = split.x + 30, y = split.y + 10;
+  expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id, [x, y])).toBe("c");
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 60, { steps: 8 });
+  await page.mouse.up();
+  const after = await rearStickers(page);
+  // stickers seen from behind before and after moved down the screen, like the drag
+  const moved = before.map((a) => [a, after.find((b) => b.piece === a.piece && b.color === a.color)]).filter(([, b]) => b);
+  expect(moved.length).toBeGreaterThan(3);
+  const dy = moved.reduce((s, [a, b]) => s + (b.y - a.y), 0) / moved.length;
+  expect(dy).toBeGreaterThan(5);
+  expect((await info(page)).moves).toBe(0);
+});

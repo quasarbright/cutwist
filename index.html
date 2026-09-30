@@ -51,6 +51,18 @@
     #c[hidden], #plane[hidden], #refPlane[hidden] { display: none; }
     #refPlane { position: absolute; inset: 0; width: 100%; height: 100%; }
 
+    /* rear view: the line between the two views, named at its foot */
+    #rear { white-space: nowrap; }
+    #rear:disabled { opacity: .4; cursor: not-allowed; }
+    .tw-split { position: fixed; width: 1px; background: var(--border); z-index: 2; pointer-events: none; }
+    .tw-split[hidden] { display: none; }
+    .tw-split span {
+      position: absolute; bottom: 0; font-family: var(--font-mono); font-size: .75rem; color: var(--faint);
+      letter-spacing: .08em; text-transform: uppercase;
+    }
+    .tw-split span:first-child { right: 10px; }
+    .tw-split span:last-child { left: 10px; }
+
     /* about-modal diagrams */
     .cw-viz { display: block; width: 100%; max-width: 440px; margin: 14px auto 4px; }
     .cohesion-about ol { padding-left: 1.3em; }
@@ -283,6 +295,7 @@
 <body>
   <canvas id="c"></canvas>
   <canvas id="plane" hidden></canvas>
+  <div class="tw-split" id="rearSplit" hidden><span>front</span><span>back</span></div>
   <div class="tw-nogl" id="nogl" role="alert" hidden>
     <div>
       <h2>No 3D graphics</h2>
@@ -403,6 +416,7 @@
     <button class="btn" id="redo" title="redo a turn you undid (⇧⌘Z)">↷</button>
     <button class="btn is-active" id="axes" title="show the turn axes: click a segment to turn that layer clockwise, right-click for counterclockwise" aria-pressed="true">axes</button>
     <button class="btn is-active" id="textures" title="patterns on the stickers, to tell similar colors apart (on by default past 12 faces)" aria-pressed="true">textures</button>
+    <button class="btn" id="rear" title="show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same (only when the 3D view is the only one on screen)" aria-pressed="false">rear view</button>
     <button class="btn" id="scramble" title="mix the puzzle up with random turns">scramble</button>
     <button class="btn" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
     <about-modal label="about">
@@ -458,8 +472,8 @@
         faces on top, turned any of 4 ways. A dodecahedron can in 60. When the engine builds a
         puzzle, it finds all of these rotations and numbers them, with 0 meaning "not rotated".
         To find them, it tries every way of sending one face and a neighboring face onto another
-        such pair, and keeps the rotations that carry every face onto a face. Here are 8 of a
-        cube's 24, with their numbers.</p>
+        such pair, and keeps the rotations that carry every face onto a face. Here are all 24
+        for a cube, with their numbers.</p>
       <canvas class="cw-viz" data-viz="orient"></canvas>
       <p class="cw-viz-caption" data-caption="orient">&nbsp;</p>
       <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
@@ -549,13 +563,24 @@
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-    scene.add(new THREE.HemisphereLight(0xf2f4ff, 0x6a6660, 2.1));
+    const skyLight = new THREE.HemisphereLight(0xf2f4ff, 0x6a6660, 2.1);
+    scene.add(skyLight);
     const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
     keyLight.position.set(-2, 3, 4);
     scene.add(keyLight);
     const fillLight = new THREE.DirectionalLight(0xffffff, 0.8);
     fillLight.position.set(4, 0.5, 1.5);
     scene.add(fillLight);
+    // The rear view gets the lights reflected through the center (sky and ground swapped too).
+    // It shows the three faces opposite the front's three, and those point away from the
+    // front's lights: reflected, they're lit the way the front's are, so colors read the same.
+    const KEY_AT = keyLight.position.clone(), FILL_AT = fillLight.position.clone();
+    function lightFor(cam) {
+      const s = cam === rearCamera ? -1 : 1;
+      keyLight.position.copy(KEY_AT).multiplyScalar(s);
+      fillLight.position.copy(FILL_AT).multiplyScalar(s);
+      skyLight.position.set(0, s, 0);
+    }
 
     // root carries the view rotation; puzzleGroup scales the puzzle to unit radius
     const root = new THREE.Group();
@@ -623,8 +648,43 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       texturePeriod.value = TEXTURE_PX * renderer.getPixelRatio();
       camera.aspect = W / H;
       placeCamera();
+      if (P) renderRearButton(); // (the line between the views moves with the window)
+    }
+    // ---- rear view ----
+    // Side by side: the front on the left, and on the right the same puzzle seen from behind
+    // (a second camera, turned half way around the vertical axis). Only when nothing but 3D
+    // is on screen. Input in either half uses that half's camera.
+    let rearView = false;
+    const rearCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+    const rearAllowed = () => !(P && P.kind === "planar" && viewFlat);
+    const rearOn = () => rearView && rearAllowed();
+    // the 3D views on screen: { cam, region } each, regions in CSS px
+    function views() {
+      // (split, a 3D puzzle's views fit the space clear of the title, panel and bottom controls,
+      // like the planar views; alone it keeps the whole screen)
+      const r = P && P.kind === "planar" ? viewRegions().surface : rearOn() ? safeRect() : { left: 0, top: 0, right: W, bottom: H - 90 };
+      if (!r) return [];
+      if (!rearOn()) return [{ cam: camera, region: r }];
+      const m = (r.left + r.right) / 2;
+      return [{ cam: camera, region: { ...r, right: m } }, { cam: rearCamera, region: { ...r, left: m } }];
+    }
+    // the camera of the view a point is in
+    const camAt = (x) => { const vs = views(); return (vs.find((v) => x < v.region.right) || vs[vs.length - 1] || { cam: camera }).cam; };
+    // fit a unit sphere (plus margin) into one view's region, centered there
+    function fitView(cam, region, margin) {
+      const vHalf = (cam.fov * Math.PI) / 360, tv = Math.tan(vHalf);
+      const w = region.right - region.left, h = region.bottom - region.top;
+      const d = (margin / Math.sin(Math.atan(Math.min((tv * h) / H, (tv * w) / H)))) * zoom;
+      cam.aspect = W / H;
+      cam.position.set(0, 0, cam === rearCamera ? -d : d);
+      cam.lookAt(0, 0, 0);
+      cam.setViewOffset(W, H, W / 2 - (region.left + w / 2), H / 2 - (region.top + h / 2), W, H);
+      cam.updateProjectionMatrix();
+      cam.updateMatrixWorld();
     }
     function placeCamera() {
+      if (rearOn()) { for (const v of views()) fitView(v.cam, v.region, P.kind === "planar" ? 1.15 : 1.3); return; }
+      camera.quaternion.identity();
       const vHalf = (camera.fov * Math.PI) / 360;
       const region = typeof cameraRegion === "function" ? cameraRegion() : null;
       if (region) {
@@ -781,7 +841,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function pickSegment(x, y) {
       if (!showAxes || !segMeshes.length) return null;
       ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
-      raycaster.setFromCamera(ndc, camera);
+      raycaster.setFromCamera(ndc, inputCam);
       const seg = raycaster.intersectObjects(segMeshes, false)[0];
       if (!seg) return null;
       const body = raycaster.intersectObjects(bodyMeshes, false)[0];
@@ -1412,6 +1472,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (isCustom()) showStats();
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
       if (hoverType !== null && !isPlanar()) setHover(hoverType); // meshes were rebuilt
+      renderRearButton();
       renderTape();
       writeURL();
     }
@@ -1483,6 +1544,34 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("axes").setAttribute("aria-pressed", String(showAxes));
       writeURL();
     };
+    // rear view: on or off, and off (disabled) while a flat grid is on screen
+    function renderRearButton() {
+      const ok = rearAllowed();
+      $("rear").disabled = !ok;
+      $("rear").classList.toggle("is-active", rearOn());
+      $("rear").setAttribute("aria-pressed", String(rearOn()));
+      $("rear").title = ok ? "show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same"
+        : "rear view needs the 3D view to be the only one on screen (turn off the flat view)";
+      placeSplit();
+    }
+    // the line between the two views (and the regions under it follow the panel opening and
+    // closing, so this runs every frame; it only touches the page when something moved)
+    let splitKey = "";
+    function placeSplit() {
+      const split = $("rearSplit"), on = rearOn(), a = on ? views()[0].region : null;
+      const key = on ? [a.right, a.top, a.bottom].map(Math.round).join() : "";
+      if (key === splitKey) return;
+      splitKey = key;
+      split.hidden = !on;
+      if (on) Object.assign(split.style, { left: a.right + "px", top: a.top + "px", height: a.bottom - a.top + "px" });
+    }
+    $("rear").onclick = () => {
+      rearView = !rearView;
+      placeCamera();
+      renderRearButton();
+      writeURL();
+    };
+
     // ---------- algorithms ----------
     // Recorded and kept by History (session.mjs). Playback turns the same layers of the puzzle,
     // however it's held, quickly, as one undo step.
@@ -1578,22 +1667,28 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     const pointers = new Map();
     let drag = null;
 
+    // The camera pointer input goes through: the one for the view the pointer is over (see
+    // views), chosen when a press starts or the pointer hovers, and kept for a whole drag.
+    let inputCam = camera;
+    const aimAt = (x) => { inputCam = camAt(x); };
     function pick(x, y) {
       ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
-      raycaster.setFromCamera(ndc, camera);
+      raycaster.setFromCamera(ndc, inputCam);
       return raycaster.intersectObjects(bodyMeshes, false)[0] || null;
     }
     function toScreen(p) {
       const v = new THREE.Vector3(...p);
-      puzzleGroup.localToWorld(v).project(camera);
+      puzzleGroup.localToWorld(v).project(inputCam);
       return [((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H];
     }
     // Rotate the view about screen axes: horizontal drag spins about the screen's vertical,
     // vertical drag about its horizontal. Same response in every orientation, no poles.
+    // (The screen's axes are the input camera's: from behind, "right" is the other way.)
     function orbitBy(dx, dy) {
       const dist = Math.hypot(dx, dy);
       if (!dist) return;
-      const axis = new THREE.Vector3(dy / dist, dx / dist, 0);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(inputCam.quaternion), up = new THREE.Vector3(0, 1, 0).applyQuaternion(inputCam.quaternion);
+      const axis = right.multiplyScalar(dy / dist).add(up.multiplyScalar(dx / dist));
       root.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, (dist * 3.2) / Math.min(W, H)));
     }
 
@@ -1633,6 +1728,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return;
       }
       if (pointers.size > 2) return;
+      aimAt(e.clientX); // (this press, and the drag it starts, go through this view's camera)
       if (isPlanar()) {
         // the 3D surface: press a cell to slide its line (or click near an edge); anywhere else turns the view
         const hit = e.button === 0 && !e.shiftKey ? surfaceHit(e.clientX, e.clientY) : null;
@@ -1662,6 +1758,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     canvas.addEventListener("pointermove", (e) => {
       if (!pointers.has(e.pointerId)) {
+        if (!pointers.size) aimAt(e.clientX); // (hovering; never mid-drag)
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
@@ -1801,6 +1898,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (isPlanar()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
       planeBox = "";
       placeCamera();
+      renderRearButton();
       writeURL();
     }
     // one view always stays on: unchecking the last one puts it back
@@ -1916,8 +2014,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderer.setViewport(0, 0, W, H);
       renderer.clear();
       renderer.setScissorTest(true);
-      renderer.setScissor(region.left, H - region.bottom, region.right - region.left, region.bottom - region.top);
-      renderer.render(scene, camera);
+      for (const { cam, region: r } of views()) {
+        renderer.setScissor(r.left, H - r.bottom, r.right - r.left, r.bottom - r.top);
+        lightFor(cam);
+        renderer.render(scene, cam);
+      }
+      lightFor(camera);
       renderer.setScissorTest(false);
       renderSolvedSurface(look);
     }
@@ -1942,7 +2044,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (!surfaceMesh || !view3D) return null;
       root.updateMatrixWorld(true);
       ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
-      raycaster.setFromCamera(ndc, camera);
+      raycaster.setFromCamera(ndc, inputCam);
       const h = raycaster.intersectObject(surfaceMesh, false)[0];
       if (!h || !h.uv) return null;
       const s = h.uv.x, t = 1 - h.uv.y;
@@ -1951,7 +2053,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // screen position (CSS px) of the surface at flat coordinates (s, t)
     function surfaceToScreen(s, t) {
       const v = new THREE.Vector3(...surfacePoint(P.topology, s, t));
-      surfaceMesh.localToWorld(v).project(camera);
+      surfaceMesh.localToWorld(v).project(inputCam);
       return [((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H];
     }
     // Which line a drag on the surface slides: the row or column whose direction on screen, at
@@ -2015,6 +2117,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         planeView.draw(state, slide, look);
       }
       if (reg.surface && surfaceMesh) renderSurface(reg.surface, slide, look); // (the card too: the solved surface)
+      placeSplit();
       // the corner card without the 3D view: the flat solved grid
       const card = $("refPlane");
       card.hidden = !!reg.surface;
@@ -2110,7 +2213,20 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       updatePieces();
       renderer.setViewport(0, 0, W, H);
       renderer.setScissorTest(false);
-      renderer.render(scene, camera);
+      if (rearOn()) {
+        placeCamera(); // (the views' space changes when the panel opens or closes)
+        placeSplit();
+        // each view clipped to its half (full height, so axis stubs aren't cut off)
+        renderer.clear();
+        renderer.setScissorTest(true);
+        for (const { cam, region } of views()) {
+          renderer.setScissor(region.left, 0, region.right - region.left, H);
+          lightFor(cam);
+          renderer.render(scene, cam);
+        }
+        lightFor(camera);
+        renderer.setScissorTest(false);
+      } else renderer.render(scene, camera);
       renderReference();
       requestAnimationFrame(frame);
     }
@@ -2169,6 +2285,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         for (const p of spec.params || []) q.set(p.key, spec[p.key]);
       }
       if (!showAxes) q.set("axes", "off");
+      if (rearView) q.set("rear", "on");
       if (isPlanar()) {
         if (planarTextures) q.set("textures", "on");
         if (!viewFlat) q.set("flat", "off");
@@ -2201,6 +2318,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("preset").value = presetIdx;
       const off = (k) => q.get(k) === "off", on = (k) => q.get(k) === "on";
       showAxes = !off("axes");
+      rearView = on("rear");
       $("axes").classList.toggle("is-active", showAxes);
       $("axes").setAttribute("aria-pressed", String(showAxes));
       if (q.has("textures")) {
@@ -2372,31 +2490,30 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
 
     const VIZ = {
-      // A few of the uncut cube's 24 rotations, each turning from rotation 0 into place and
+      // All of the uncut cube's 24 rotations, each turning from rotation 0 into place and
       // labeled with its number in the engine's list
       orient(v) {
-        const P = vizPuzzle("cube", 1), sc = vizOrthoScene(4.6);
-        const picks = [0, 1, 4, 7, 10, 14, 18, 23];
-        const cubes = picks.map((g, k) => {
+        const P = vizPuzzle("cube", 1), sc = vizOrthoScene(8.3);
+        const cubes = P.group.mats.map((M, g) => {
           const o = pieceObject(P.pieces[0], P.colors, null, 0.028 * P.R, 0.004 * P.R);
           sc.root.add(o);
-          return { o, g, q: vizQuat(P.group.mats[g]), pos: [-3.3 + (k % 4) * 2.2, k < 4 ? 1.05 : -1.2, 0] };
+          return { o, g, q: vizQuat(M), pos: [-7 + (g % 8) * 2, 2.85 - Math.floor(g / 8) * 2.85, 0] };
         });
         const HOLD0 = 1, MOVE = 1.2, HOLD = 2.8, BACK = 0.8, ROUND = HOLD0 + MOVE + HOLD + BACK + 0.4;
         const I = new THREE.Quaternion();
         return (t) => {
           const u = t % ROUND;
           const f = u < HOLD0 ? 0 : u < HOLD0 + MOVE ? vizEase((u - HOLD0) / MOVE) : u < HOLD0 + MOVE + HOLD ? 1 : 1 - vizEase((u - HOLD0 - MOVE - HOLD) / BACK);
-          for (const c of cubes) vizPlaceQ(c.o, I.clone().slerp(c.q, f), c.pos, 1.15 / P.R);
+          for (const c of cubes) vizPlaceQ(c.o, I.clone().slerp(c.q, f), c.pos, 0.95 / P.R);
           vizDraw(v, sc);
           const { ctx } = v, C = vizColors();
           ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
           for (const c of cubes) {
-            const [x, y] = vizProject(sc, [c.pos[0], c.pos[1] - 1.05, 0]);
+            const [x, y] = vizProject(sc, [c.pos[0], c.pos[1] - 1.2, 0]);
             const moving = f > 0 && f < 1 && c.g !== 0;
             vizTag(ctx, x, y, moving ? `0→${c.g}` : String(f >= 0.5 ? c.g : 0), c.g !== 0 && f > 0, C);
           }
-          v.caption(f === 0 ? "every cube starts at rotation 0" : `8 of the cube's 24 rotations, each labeled with its number`);
+          v.caption(f === 0 ? "every cube starts at rotation 0" : "all 24 of the cube's rotations, each labeled with its number");
         };
       },
 
@@ -2776,6 +2893,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // For the browser tests (e2e/) and poking at things from the console: drive the page
     // without pointer input. A turn here goes through the same path as a turn by hand.
     window.cutwist = {
+      // what the main renderer holds on the GPU (for catching leaks)
+      gpu() { return { ...renderer.info.memory, programs: renderer.info.programs.length }; },
       // pick a puzzle by preset id, like the menu, then optionally its size and a family's
       // own numbers (params: { sides: 5 }, { a: 2, b: 3, c: 4 })
       load(id, { size: n, params } = {}) {
@@ -2806,7 +2925,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       get state() { return Array.from(state); },
       info() {
         return {
-          id: isCustom() ? "custom" : MENU[presetIdx].id, title: $("name").textContent, size,
+          id: isCustom() ? "custom" : MENU[presetIdx].id, title: $("name").textContent, size, rear: rearOn(),
           ...(isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D } }
@@ -2849,20 +2968,23 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       },
       // the middle of every sticker facing the camera whose middle is on its own piece (not
       // hidden behind another), in CSS pixels
-      stickers() {
+      // view: "front", or "rear" for the rear view's (with it on)
+      stickers(view = "front") {
         this.sync();
-        const out = [], toCam = new THREE.Vector3();
+        const out = [], toCam = new THREE.Vector3(), was = inputCam, cam = view === "rear" ? rearCamera : camera;
+        inputCam = cam;
         P.pieces.forEach((piece, i) => {
           const M = P.group.mats[state[i]];
           for (const st of piece.stickers) {
             const c = applyMat(M, scale(st.verts.reduce(add, [0, 0, 0]), 1 / st.verts.length));
             const n = new THREE.Vector3(...applyMat(M, st.normal)).applyQuaternion(root.quaternion);
             const w = new THREE.Vector3(...c); puzzleGroup.localToWorld(w);
-            if (n.dot(toCam.copy(camera.position).sub(w).normalize()) < 0.3) continue;
+            if (n.dot(toCam.copy(cam.position).sub(w).normalize()) < 0.3) continue;
             const [x, y] = toScreen(c), hit = pick(x, y);
             if (hit && hit.object.userData.piece === i) out.push({ piece: i, color: st.color, x, y });
           }
         });
+        inputCam = was;
         return out;
       },
       view() { return root.quaternion.toArray(); },
