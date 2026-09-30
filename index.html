@@ -411,17 +411,24 @@
 
       <div class="section-label">carving the solid</div>
       <p>Each flat face of a solid lies on a plane, and the solid is everything on the inner side of
-        all its face planes. So any of them can be made the same way: start with a box bigger than
-        the solid, and slice off whatever is outside each face's plane, one plane at a time.</p>
-      <p>Slicing a shape with no dents by a plane leaves two shapes with no dents, so the whole
-        program only needs one geometric routine: split a shape by a plane. Here it carves a
-        dodecahedron out of a box.</p>
-      <canvas class="cw-viz" data-viz="carve"></canvas>
-      <p class="cw-viz-caption" data-caption="carve">&nbsp;</p>
+        all its face planes. So any of them can be made the same way: start with a shape the solid
+        fits inside, like a sphere, and slice off whatever is outside each face's plane, one plane
+        at a time.</p>
+      <canvas class="cw-viz" data-viz="carve-sphere"></canvas>
+      <p class="cw-viz-caption" data-caption="carve-sphere">&nbsp;</p>
+      <p>A sphere is the natural picture, but the program can only slice shapes with flat faces,
+        so a sphere has to be faked with hundreds of small ones, and every slice has to clip all
+        of them. Any starting shape works as long as the solid fits inside it, so the code starts
+        from a box, which has six faces. (The real box is far bigger than the solid; it's drawn
+        smaller here so the slices show.)</p>
+      <canvas class="cw-viz" data-viz="carve-box"></canvas>
+      <p class="cw-viz-caption" data-caption="carve-box">&nbsp;</p>
+      <p>Slicing a shape with no dents by a plane leaves a shape with no dents, so the whole
+        program needs one geometric routine: split a shape by a plane.</p>
 
       <div class="section-label">cuts make pieces</div>
-      <p>The pieces come from the same routine. Take the finished solid and split it by every cut
-        plane: wherever a plane passes through a piece, that piece becomes two. The new faces a cut
+      <p>The pieces come from the same routine. Take the finished solid and split it by each cut
+        plane in turn: wherever a plane passes through a piece, that piece becomes two. The new faces a cut
         exposes are marked as plastic instead of sticker, so they're drawn black. A 3×3×3 cube is
         six cuts, two across each of its three directions. Choosing other directions (corners
         instead of faces, say) and other depths gives every other puzzle.</p>
@@ -2229,55 +2236,134 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       vizRenderer.render(sc.scene, sc.cam);
       v.ctx.drawImage(vizRenderer.domElement, 0, top * v.dpr, VIZ_W * v.dpr, VIZ_H * v.dpr);
     }
+    // A translucent cut plane, like the cuts diagram's: show(dir, offset, opacity) puts it on
+    // the plane dir·x = offset (in the puzzle's units, inside `group`).
+    function vizCutPlane(P, group) {
+      const accent = getComputedStyle(document.body).getPropertyValue("--accent").trim() || "#f5c518";
+      const mat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(P.R * 1.2, 72), mat), Z = new THREE.Vector3(0, 0, 1);
+      group.add(mesh);
+      return (dir, off, opacity) => {
+        mesh.visible = opacity > 0;
+        mat.opacity = 0.32 * opacity;
+        if (!mesh.visible) return;
+        mesh.quaternion.setFromUnitVectors(Z, new THREE.Vector3(...dir));
+        mesh.position.set(...scale(dir, off));
+      };
+    }
+    // the cut an outer layer turns along: the one between it and the rest
+    const vizLayerCut = (ax, layer) => ax.offsets[layer === 0 ? 0 : ax.offsets.length - 1];
+    // a random turn of an outer layer (a face, or the skewb's corner), one step either way
+    function vizOuterMove(P) {
+      const axis = Math.floor(Math.random() * P.axes.length), ax = P.axes[axis];
+      return { axis, layer: Math.random() < 0.5 ? 0 : ax.layers - 1, q: Math.random() < 0.5 ? 1 : ax.order - 1 };
+    }
     const vizSpin = (sc, t, tilt = 0.5) => sc.root.quaternion.setFromEuler(new THREE.Euler(tilt, 0.6 + t * 0.25, 0));
 
-    const VIZ = {
-      // a dodecahedron carved from a box: each face plane slices off what's outside it
-      carve(v) {
-        const normals = SOLIDS.dodecahedron.normals.map(normalize), colors = [...SOLIDS.dodecahedron.colors, "#3a3d48"];
-        const S = 1.2;
-        let cur = buildSolid(SOLIDS.cube.normals, SOLIDS.cube.normals.map(() => S));
-        cur = { polys: cur.polys.map((p) => ({ ...p, color: 12 })) }; // the box: plain gray
-        const sc = vizScene(), group = new THREE.Group();
-        group.scale.setScalar(1 / 1.7);
-        sc.root.add(group);
-        const make = (piece) => { const o = pieceObject(piece, colors, null, 0.035, 0.005); o.visible = false; vizPlace(o, [1, 0, 0, 0, 1, 0, 0, 0, 1]); group.add(o); return o; };
-        const box = make(cur), steps = normals.map((n, i) => {
-          const [kept, off] = splitPiece(cur, n, 1, i);
-          cur = kept;
-          return { n, kept: make(kept), off: off && make(off) };
+    // Carve a dodecahedron out of `start`: each face plane slices off what's outside it and
+    // the chunk slides away.
+    function carveViz(v, start, startText, endText) {
+      const normals = SOLIDS.dodecahedron.normals.map(normalize), colors = SOLIDS.dodecahedron.colors;
+      const sc = vizScene(), group = new THREE.Group();
+      group.scale.setScalar(1 / 1.7);
+      sc.root.add(group);
+      const gray = new THREE.MeshStandardMaterial({ color: 0x6a6e7a, roughness: 0.6, metalness: 0 });
+      const make = (piece) => {
+        // (faces edge to edge, no inset: a carved face's rim along the sphere is dozens of tiny
+        // edges, which an inset can't follow)
+        const o = pieceObject(piece, colors, null, 0, 0.004);
+        o.children[0].material = gray; // (the starting shape's surface; the carved faces are stickers)
+        o.visible = false; vizPlace(o, [1, 0, 0, 0, 1, 0, 0, 0, 1]); group.add(o);
+        return o;
+      };
+      let cur = { polys: start.polys.map((p) => ({ ...p, color: -1 })) };
+      const first = make(cur);
+      const steps = normals.map((n, i) => { const [kept, off] = splitPiece(cur, n, 1, i); cur = kept; return { n, kept: make(kept), off: off && make(off) }; });
+      const STEP = 0.6, HOLD = 2, ROUND = 1.2 + normals.length * STEP + HOLD;
+      return (t) => {
+        const u = t % ROUND, k = Math.floor((u - 1.2) / STEP), f = (u - 1.2) / STEP - k;
+        first.visible = u < 1.2;
+        steps.forEach((s, i) => {
+          s.kept.visible = u >= 1.2 && i === Math.min(k, steps.length - 1);
+          if (!s.off) return;
+          s.off.visible = i === k && f < 0.95;
+          if (s.off.visible) vizPlace(s.off, [1, 0, 0, 0, 1, 0, 0, 0, 1], scale(s.n, 1.6 * vizEase(f / 0.9)));
         });
-        const STEP = 0.75, HOLD = 2.5, total = normals.length * STEP + HOLD + 1;
-        return (t) => {
-          const u = t % total, k = Math.floor((u - 1) / STEP), f = (u - 1) / STEP - k;
-          box.visible = u < 1;
-          steps.forEach((s, i) => {
-            s.kept.visible = i === Math.min(k, steps.length - 1) && u >= 1;
-            if (s.off) {
-              s.off.visible = i === k && f < 0.95;
-              if (s.off.visible) vizPlace(s.off, [1, 0, 0, 0, 1, 0, 0, 0, 1], scale(s.n, 1.6 * vizEase(f / 0.9)));
-            }
-          });
-          v.caption(u < 1 ? "a box, bigger than the solid" : k < steps.length ? `face ${k + 1} of 12: slice off everything outside its plane` : "a dodecahedron");
-          vizSpin(sc, t, 0.45);
-          vizDraw(v, sc);
-        };
+        v.caption(u < 1.2 ? startText : k < steps.length ? `face ${k + 1} of 12: slice off everything outside its plane` : endText);
+        vizSpin(sc, t, 0.45);
+        vizDraw(v, sc);
+      };
+    }
+
+    const VIZ = {
+      // A dodecahedron carved from a sphere (the picture: a polyhedron with a few hundred
+      // faces, since the routine only cuts flat faces) ...
+      "carve-sphere"(v) {
+        // (evenly spread directions: a Fibonacci sphere)
+        const dirs = Array.from({ length: 300 }, (_, i) => { const z = 1 - (2 * i + 1) / 300, r = Math.sqrt(1 - z * z), a = i * Math.PI * (3 - Math.sqrt(5)); return [r * Math.cos(a), r * Math.sin(a), z]; });
+        return carveViz(v, buildSolid(dirs, dirs.map(() => 1.35)), "start with a shape the solid fits inside, like a sphere", "a dodecahedron, carved from a sphere");
+      },
+      // ... and from a box, what buildSolid starts from (the real one is much bigger)
+      "carve-box"(v) {
+        return carveViz(v, buildSolid(SOLIDS.cube.normals, SOLIDS.cube.normals.map(() => 1.2)), "what the code starts from: a box", "the same dodecahedron, carved from a box");
       },
 
-      // the same routine, with cut planes: pieces pull apart to show them
+      // Cut planes coming in one at a time, splitting the solid with the real splitPiece in
+      // buildPuzzle's order; then the pieces pull apart.
       cuts(v) {
-        const list = [["cube", 3], ["skewb", 2], ["pyraminx", 3], ["megaminx", 3]].map(([id, n]) => {
-          const P = vizPuzzle(id, n), sc = vizScene(), { group, objs } = vizPieces(P, n, sc.root);
-          const cuts = P.axes.reduce((s, a) => s + a.offsets.length, 0), shown = P.pieces.filter((p) => p.stickers.length).length;
-          return { P, sc, objs, text: `${puzzleTitle(P.spec, n)}: ${cuts} cuts, ${shown} pieces` };
+        const accent = getComputedStyle(document.body).getPropertyValue("--accent").trim() || "#f5c518";
+        const list = [["cube", 3], ["skewb", 2], ["megaminx", 3]].map(([id, n]) => {
+          const P = vizPuzzle(id, n), sc = vizScene(), group = new THREE.Group();
+          group.scale.setScalar(1 / P.R);
+          sc.root.add(group);
+          const planes = P.axes.flatMap((ax) => ax.offsets.map((off) => [ax.dir, off]));
+          const margin = 0.028 * P.R * Math.min(1, 3 / n), lift = 0.004 * P.R;
+          let pieces = [P.solid];
+          const stages = [pieces];
+          for (const [d, off] of planes) { pieces = pieces.flatMap((p) => splitPiece(p, d, off, -1).filter(Boolean)); stages.push(pieces); }
+          const stageObjs = stages.map((ps) => {
+            const g = new THREE.Group();
+            g.userData.parts = ps.map((p) => {
+              const o = pieceObject(p, P.colors, null, margin, lift);
+              const vs = p.polys.flatMap((q) => q.verts);
+              g.add(o);
+              return { o, centroid: scale(vs.reduce(add, [0, 0, 0]), 1 / vs.length) };
+            });
+            g.visible = false;
+            group.add(g);
+            return g;
+          });
+          const planeMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+          const plane = new THREE.Mesh(new THREE.CircleGeometry(P.R * 1.2, 72), planeMat);
+          group.add(plane);
+          const shown = pieces.filter((p) => p.polys.some((q) => q.color >= 0)).length;
+          const step = Math.min(1.3, 10 / planes.length);
+          return { P, sc, group, planes, stageObjs, plane, planeMat, step, n, shown, total: 1 + planes.length * step + 5.2 };
         });
-        const EACH = 4.6;
+        const cycle = list.reduce((s, it) => s + it.total, 0);
+        const Z = new THREE.Vector3(0, 0, 1);
         return (t) => {
-          const k = Math.floor(t / EACH) % list.length, u = t % EACH, e = vizEase((u - 0.5) / 1.1) - vizEase((u - 3.2) / 1.1);
-          const { P, sc, objs, text } = list[k];
-          objs[0].parent.scale.setScalar(1 / (P.R * (1 + 0.4 * e))); // (zoom out to keep them in view)
-          objs.forEach((o, i) => vizPlace(o, P.group.mats[0], scale(P.pieces[i].centroid, 0.6 * e)));
-          v.caption(text);
+          let u = t % cycle, it = list[0];
+          for (const x of list) { if (u < x.total) { it = x; break; } u -= x.total; }
+          const { P, sc, group, planes, stageObjs, plane, planeMat, step, n, shown } = it;
+          const cutT = u - 1, k = Math.floor(cutT / step), f = cutT / step - k;
+          // how many cuts have been made
+          const made = cutT < 0 ? 0 : k >= planes.length ? planes.length : k + (f >= 0.5 ? 1 : 0);
+          stageObjs.forEach((g, i) => { g.visible = i === made; });
+          // the plane being cut: fades in, the cut happens, fades out
+          if (cutT >= 0 && k < planes.length) {
+            const [d, off] = planes[k];
+            plane.quaternion.setFromUnitVectors(Z, new THREE.Vector3(...d));
+            plane.position.set(...scale(d, off));
+            planeMat.opacity = 0.32 * Math.min(1, f / 0.3, (1 - f) / 0.3);
+          } else planeMat.opacity = 0;
+          plane.visible = planeMat.opacity > 0;
+          // after the last cut: pull the pieces apart and back
+          const e = k >= planes.length ? vizEase((cutT - planes.length * step - 0.6) / 1.1) - vizEase((cutT - planes.length * step - 3.4) / 1.1) : 0;
+          group.scale.setScalar(1 / (P.R * (1 + 0.4 * e))); // (zoom out to keep them in view)
+          for (const { o, centroid } of stageObjs[made].userData.parts) vizPlace(o, P.group.mats[0], scale(centroid, 0.6 * e));
+          const title = puzzleTitle(P.spec, n);
+          v.caption(cutT < 0 ? `${title}: the solid, uncut` : k < planes.length ? `${title}: cut ${k + 1} of ${planes.length}` : `${title}: ${planes.length} cuts, ${shown} pieces`);
           vizSpin(sc, t, 0.5);
           vizDraw(v, sc);
         };
@@ -2286,23 +2372,25 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // turns on three puzzles: each rotates the solid onto itself
       turn(v) {
         const list = [["cube", 3, "a quarter turn about a face"], ["skewb", 2, "a third of a turn about a corner"], ["megaminx", 3, "a fifth of a turn about a face"]].map(([id, n, text]) => {
-          const P = vizPuzzle(id, n), sc = vizScene(), { objs } = vizPieces(P, n, sc.root);
-          return { P, sc, objs, text: `${puzzleTitle(P.spec, n)}: ${text}`, state: solvedState(P) };
+          const P = vizPuzzle(id, n), sc = vizScene(), { group, objs } = vizPieces(P, n, sc.root);
+          return { P, sc, objs, plane: vizCutPlane(P, group), text: `${puzzleTitle(P.spec, n)}: ${text}`, state: solvedState(P) };
         });
-        const TURN = 0.8, GAP = 0.45, PER = 3;
+        // each slot: the cut plane fades in (LEAD), the layer turns along it, the plane fades out
+        const LEAD = 0.3, TURN = 0.8, GAP = 0.5, SLOT = LEAD + TURN + GAP, PER = 3;
         let j = -1, move = null, turning = null, prev = null;
         return (t) => {
-          const slot = Math.floor(t / (TURN + GAP)), u = t % (TURN + GAP);
+          const slot = Math.floor(t / SLOT), s = t % SLOT, u = s - LEAD;
           const item = list[Math.floor(slot / PER) % list.length];
           if (slot !== j) {
             if (move) applyMove(prev.P, prev.state, move); // finish the last turn
             if (item !== prev) item.state = solvedState(item.P); // (each puzzle's turns start from solved)
             j = slot; prev = item;
-            move = randomMoves(item.P, 1)[0];
+            move = vizOuterMove(item.P);
             turning = new Set(piecesInLayer(item.P, item.state, move.axis, move.layer));
           }
           const ax = item.P.axes[move.axis], q = move.q > ax.order / 2 ? move.q - ax.order : move.q;
           vizPose(item.P, item.objs, item.state, turning, rotMat(ax.dir, (vizEase(u / TURN) * q * TAU) / ax.order));
+          item.plane(ax.dir, vizLayerCut(ax, move.layer), Math.min(1, s / LEAD, (TURN + 0.3 - u) / 0.3));
           v.caption(item.text);
           vizSpin(item.sc, t * 0.5, 0.5);
           vizDraw(v, item.sc);
@@ -2330,7 +2418,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           if (done !== null && t - done > HOLD) { reset(); t0 = t; }
           const target = Math.min(MAXN, Math.floor(10 ** ((5 * (t - t0)) / RUN)));
           for (let budget = 1500; n < target && budget > 0; budget--) {
-            const m = randomMoves(P, 1)[0], ax = P.axes[m.axis], R = rotMat(ax.dir, (m.q * TAU) / ax.order);
+            const m = vizOuterMove(P), ax = P.axes[m.axis], R = rotMat(ax.dir, (m.q * TAU) / ax.order);
             for (const i of piecesInLayer(P, state, m.axis, m.layer)) naive[i] = naive[i].map((x) => applyMat(R, x));
             applyMove(P, state, m);
             n++;
@@ -2384,10 +2472,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
       // a 2×2×2's whole state, 8 numbers, updated by table lookups
       table(v) {
-        const P = vizPuzzle("cube", 2), sc = vizScene(), { objs } = vizPieces(P, 2, sc.root);
+        const P = vizPuzzle("cube", 2), sc = vizScene(), { group, objs } = vizPieces(P, 2, sc.root), plane = vizCutPlane(P, group);
         const state = solvedState(P);
-        for (const m of randomMoves(P, 6)) applyMove(P, state, m); // (from solved, every lookup would start at 0)
-        const TURN = 0.8, GAP = 1.4;
+        for (let i = 0; i < 6; i++) applyMove(P, state, vizOuterMove(P)); // (from solved, every lookup would start at 0)
+        const LEAD = 0.3, TURN = 0.8, GAP = 1.4, SLOT = LEAD + TURN + GAP;
         let j = -1, move = null, turning = new Set(), before = null, r = 0;
         const light = (on) => objs.forEach((o, i) => {
           const hi = on && turning.has(i);
@@ -2395,11 +2483,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           if (o.children[1]) o.children[1].material = hi ? stickerHiMat : stickerMat;
         });
         return (t) => {
-          const slot = Math.floor(t / (TURN + GAP)), u = t % (TURN + GAP);
+          const slot = Math.floor(t / SLOT), s = t % SLOT, u = s - LEAD;
           if (slot !== j) {
             if (move) applyMove(P, state, move);
             j = slot;
-            move = randomMoves(P, 1)[0];
+            move = vizOuterMove(P);
             turning = new Set(piecesInLayer(P, state, move.axis, move.layer));
             before = Int32Array.from(state);
             r = P.axes[move.axis].rot[move.q];
@@ -2408,6 +2496,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           const ax = P.axes[move.axis], q = move.q > ax.order / 2 ? move.q - ax.order : move.q;
           const f = vizEase(u / TURN);
           vizPose(P, objs, state, turning, rotMat(ax.dir, (f * q * TAU) / ax.order));
+          plane(ax.dir, vizLayerCut(ax, move.layer), Math.min(1, s / LEAD, (TURN + 0.3 - u) / 0.3));
           const { ctx } = v, css = getComputedStyle(document.body);
           const accent = css.getPropertyValue("--accent").trim() || "#f5c518", muted = css.getPropertyValue("--muted").trim() || "#8e909b";
           const border = css.getPropertyValue("--border").trim() || "#2e3240", text = css.getPropertyValue("--text").trim() || "#ecebe6";
@@ -2453,7 +2542,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const t0 = performance.now();
       const loop = (now) => {
         vizRAF = requestAnimationFrame(loop);
-        const t = (now - t0) / 1000;
+        const t = Math.max(0, (now - t0) / 1000); // (a frame's timestamp can come before t0)
         for (const { v, frame } of vizzes) {
           const r = v.cv.getBoundingClientRect();
           if (r.bottom < 0 || r.top > innerHeight) continue; // (off screen in the modal's scroll)
