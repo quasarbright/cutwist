@@ -359,9 +359,9 @@ export const PRESETS = [
     params: [PRISM_SIDES, { key: "rows", label: "height", min: 1, title: "layers top to bottom, each half a side face wide" }],
     title: (n, s) => `${prismName(s)} prism crystal, height ${s.rows}` },
   { id: "pyraminx", name: "Pyraminx", solid: "tetrahedron", on: "vertex", rule: "layers", size: 3, names: { 3: "Pyraminx", 4: "Master Pyraminx", 5: "Professor Pyraminx" } },
-  // Deep face turning on a tetrahedron: each cut 1/9 of the way from the center to the face.
-  // 4 corners, 6 edges and 4 face centers.
-  { id: "pyraminx-crystal", name: "Pyraminx Crystal", solid: "tetrahedron", on: "face", rule: "depths", depths: [1 / 9], size: 2, fixed: true },
+  // Deep face turning on a tetrahedron: each cut a third of the way past the center, away
+  // from its face. The cuts meet, so no face centers are left: 4 corners and 6 edges.
+  { id: "pyraminx-crystal", name: "Pyraminx Crystal", solid: "tetrahedron", on: "face", rule: "depths", depths: [-1 / 3], size: 2, fixed: true },
   { id: "ftt", name: "Face-Turning Tetrahedron", solid: "tetrahedron", on: "face", rule: "steps", size: 3, names: { 3: "Face-Turning Tetrahedron" } },
   { id: "octahedron", name: "Octahedron", solid: "octahedron", on: "face", rule: "layers", size: 3, names: { 2: "Skewb Diamond", 3: "Face-Turning Octahedron" } },
   // Corner turning like a pyraminx: cuts at k/N of the way from each corner down to the

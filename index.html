@@ -1446,7 +1446,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const st = puzzleStats(P);
       const pct = st.smallest * 100;
       $("bStats").title = "how many pieces show, and the smallest sticker as a share of its face (red: slivers)";
-      $("bStats").innerHTML = `${st.pieces} pieces · smallest ` +
+      $("bStats").innerHTML = `${st.pieces} pieces<br>smallest ` +
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 

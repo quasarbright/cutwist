@@ -585,7 +585,7 @@ test("deep cuts: dino, helicopter, megaminx crystal, chopasaurus", () => {
   assert.deepEqual(kinds(preset("megaminx-crystal")), { 2: 30, 3: 20 });
   assert.deepEqual(kinds(preset("chopasaurus")), { 2: 30, 3: 20, 12: 1 }); // the face centers never move: one core
   assert.deepEqual(kinds(preset("icosahedron-crystal")), { 1: 60, 2: 90, 5: 12 });
-  assert.deepEqual(kinds(preset("pyraminx-crystal")), { 1: 4, 2: 6, 3: 4 });
+  assert.deepEqual(kinds(preset("pyraminx-crystal")), { 2: 6, 3: 4 }); // (cut past the center: no face centers)
   // corner-turning octahedron: cuts at 1/3 and 2/3 of each corner's height, 9 triangles a face
   const octa = preset("octa-corner");
   assert.deepEqual(kinds(octa), { 2: 12, 4: 12 });
