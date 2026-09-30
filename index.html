@@ -473,7 +473,9 @@
         puzzle, it finds all of these rotations and numbers them, with 0 meaning "not rotated".
         To find them, it tries every way of sending one face and a neighboring face onto another
         such pair, and keeps the rotations that carry every face onto a face. Here are all 24
-        for a cube, with their numbers, grouped by which face ends up on top.</p>
+        for a cube, numbered by which face ends up on top: 0 to 3 keep white on top, 4 to 7 put
+        yellow there, and so on, and each step down a column is one more quarter turn about the
+        vertical.</p>
       <canvas class="cw-viz" data-viz="orient"></canvas>
       <p class="cw-viz-caption" data-caption="orient">&nbsp;</p>
       <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
@@ -486,7 +488,7 @@
         lit. Each of the three layers the piece is in takes a quarter turn and back. Every turn
         is one of the rotations on the list, and it turns the lit piece exactly the way it turns
         the whole uncut cube, lit corner and all, so the piece's number becomes that rotation's
-        number. The gray label marks where the piece started.</p>
+        number.</p>
       <canvas class="cw-viz" data-viz="onepiece"></canvas>
       <p class="cw-viz-caption" data-caption="onepiece">&nbsp;</p>
       <p>A turn works like this:</p>
@@ -2504,24 +2506,45 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       ctx.fillText(text, x, y + 0.5);
     }
 
+    // The about modal's names for a cube's 24 rotations. (The engine numbers them in the order
+    // its search finds them, which reads as noise; the modal uses a tidier numbering and all
+    // its cube diagrams show that one.) Column by column through the rotation table: a column
+    // per face that can be on top, and down it, a quarter turn about the vertical at a time,
+    // starting from the smallest tip that brings that face up. name[g]: engine g → shown number.
+    const VIZ_TOP_FACES = [2, 3, 4, 5, 0, 1]; // white, yellow, green, blue, red, orange
+    let vizCubeNames = null;
+    function cubeNames() {
+      if (vizCubeNames) return vizCubeNames;
+      const G = vizPuzzle("cube", 1).group, UP = 2; // (face 2 is the one pointing up, +y)
+      const Y = G.find(rotMat([0, 1, 0], TAU / 4)), trace = (g) => G.mats[g][0] + G.mats[g][4] + G.mats[g][8];
+      const cols = VIZ_TOP_FACES.map((f) => {
+        const up = G.mats.map((_, g) => g).filter((g) => G.facePerm[g][f] === UP);
+        const col = [up.reduce((b, g) => (trace(g) > trace(b) + 1e-9 ? g : b))];
+        while (col.length < 4) col.push(G.mul[Y][col[col.length - 1]]);
+        return col;
+      });
+      const name = new Array(24);
+      cols.forEach((col, c) => col.forEach((g, r) => { name[g] = c * 4 + r; }));
+      return (vizCubeNames = { name, cols });
+    }
+    const cubeName = (g) => cubeNames().name[g];
+
     const VIZ = {
       // All of the uncut cube's 24 rotations, still, each labeled with its number in the
       // engine's list: a column for each face that can be on top (the engine's face table says
       // which face a rotation sends up), and in it the four ways to turn the cube with that face up
       orient(v) {
         const P = vizPuzzle("cube", 1), sc = vizOrthoScene(6);
-        const UP = P.normals.findIndex((n) => n[1] > 0.99);
-        const faces = [2, 3, 4, 5, 0, 1]; // white, yellow, green, blue, red, orange
+        const faces = VIZ_TOP_FACES;
         const names = { 0: "red", 1: "orange", 2: "white", 3: "yellow", 4: "green", 5: "blue" };
         const halfH = (6 * VIZ_H) / VIZ_W, headH = 0.6, rowH = (2 * halfH - headH) / 4;
-        const cells = faces.flatMap((f, col) => P.group.facePerm.map((fp, g) => g).filter((g) => P.group.facePerm[g][f] === UP)
-          .map((g, row) => {
-            const o = pieceObject(P.pieces[0], P.colors, null, 0.028 * P.R, 0.004 * P.R);
-            sc.root.add(o);
-            const pos = [-5 + col * 2 - 0.3, halfH - headH - rowH * (row + 0.5), 0];
-            vizPlaceQ(o, vizQuat(P.group.mats[g]), pos, 0.62 / P.R);
-            return { g, pos };
-          }));
+        const cells = cubeNames().cols.flatMap((col, c) => col.map((g, row) => {
+          const o = pieceObject(P.pieces[0], P.colors, null, 0.028 * P.R, 0.004 * P.R);
+          sc.root.add(o);
+          const pos = [-5 + c * 2 - 0.3, halfH - headH - rowH * (row + 0.5), 0];
+          vizPlaceQ(o, vizQuat(P.group.mats[g]), pos, 0.62 / P.R);
+          return { g, pos };
+        }));
         let drawn = null; // (still: drawn once per canvas, and again once the web fonts are in)
         document.fonts?.ready.then(() => { drawn = null; });
         return () => {
@@ -2544,7 +2567,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           });
           for (const c of cells) {
             const [x, y] = vizProject(sc, [c.pos[0] + 0.95, c.pos[1], 0]);
-            vizTag(ctx, x, y, String(c.g), false, C);
+            vizTag(ctx, x, y, String(cubeName(c.g)), false, C);
           }
           v.caption("all 24 of the cube's rotations, by which face ends up on top");
         };
@@ -2585,14 +2608,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             if (turning.has(i)) M = mulMat(rot, M);
             const p = new THREE.Vector3(...scale(applyMat(M, piece.centroid), 1.5 / P.R)).applyMatrix4(sc.root.matrixWorld);
             const depth = p.z, sp = p.project(sc.cam), on = turning.has(i), now = on ? P.group.mul[before.r][before.state[i]] : state[i];
-            return { x: (sp.x + 1) / 2 * VIZ_W, y: (1 - sp.y) / 2 * VIZ_H, depth, on, text: on && f > 0 && f < 1 ? `${before.state[i]}→${now}` : String(on && f >= 1 ? now : before.state[i]) };
+            const N = cubeName, was = N(before.state[i]);
+            return { x: (sp.x + 1) / 2 * VIZ_W, y: (1 - sp.y) / 2 * VIZ_H, depth, on, text: on && f > 0 && f < 1 ? `${was}→${N(now)}` : String(on && f >= 1 ? N(now) : was) };
           }).sort((a, b) => a.depth - b.depth);
           for (const tag of tags) { ctx.globalAlpha = tag.depth > 0 ? 1 : 0.45; vizTag(ctx, tag.x, tag.y, tag.text, tag.on && f > 0, C); }
           ctx.globalAlpha = 1;
           // solved or not, by the engine's own check, once this turn has landed
           const after = f >= 1 ? (() => { const s2 = Int32Array.from(state); applyMove(P, s2, m); return s2; })() : state;
           const solved = isSolved(P, after), same = after.every((g) => g === after[0]);
-          v.caption(`solved: ${solved ? "yes" : "no"}` + (solved && after[0] !== 0 && same ? ` · every piece is ${after[0]}, not 0: the whole cube turned` : solved && after[0] === 0 ? " · all zeros" : ""));
+          v.caption(`solved: ${solved ? "yes" : "no"}` + (solved && after[0] !== 0 && same ? ` · every piece is ${cubeName(after[0])}, not 0: the whole cube turned` : solved && after[0] === 0 ? " · all zeros" : ""));
         };
       },
 
@@ -2613,9 +2637,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           const layer = layerOf(P, state, i, axis);
           return { ax, r: ax.rot[1], qr: vizQuat(P.group.mats[ax.rot[1]]), turning: new Set(piecesInLayer(P, state, axis, layer)) };
         });
-        // the lit piece, and the same corner of the uncut cube: a see-through yellow shell
-        // just outside the piece's shape (its inner faces stay hidden inside)
-        const shellMat = new THREE.MeshBasicMaterial({ color: vizColors().accent, transparent: true, opacity: 0.38, depthWrite: false });
+        // the lit piece, and the same corner of the uncut cube: a see-through white shell just
+        // outside the piece's shape, lightening it (its inner faces stay hidden inside); white,
+        // not a color, so it can't be mistaken for a sticker's
+        const shellMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false });
         const shell = () => { const m = new THREE.Mesh(objs[i].children[0].geometry, shellMat); m.matrixAutoUpdate = false; sc.root.add(m); return m; };
         const pieceShell = shell(), cornerShell = shell();
         const L = [-1.35, 0, 0], Rp = [1.45, 0, 0], s = 0.95 / P.R;
@@ -2635,15 +2660,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
           // world point of piece i's centroid (pushed out a little), turned by qf, seen through the view
           const at = (c, quat, base, k) => new THREE.Vector3(...scale(c, s * k)).applyQuaternion(quat).applyQuaternion(VIZ_VIEW).add(new THREE.Vector3(...base)).toArray();
-          const home = vizProject(sc, at(P.pieces[i].centroid, I, L, 2.5));
-          vizHomeTag(ctx, home[0], home[1], `#${i}`, C);
-          const label = f > 0 && f < 1 ? (back ? `${r}→0` : `0→${r}`) : String(f >= 0.5 ? r : 0);
+          const rn = cubeName(r), label = f > 0 && f < 1 ? (back ? `${rn}→0` : `0→${rn}`) : String(f >= 0.5 ? rn : 0);
           const [px, py] = vizProject(sc, at(P.pieces[i].centroid, qf, L, 1.25));
           vizTag(ctx, px, py, label, f > 0, C);
           const [wx, wy] = vizProject(sc, [Rp[0], Rp[1] - 1.05, 0]);
           vizTag(ctx, wx, wy, label, f > 0, C);
-          v.caption(f === 0 && !back ? `piece #${i} and the uncut cube are both at rotation 0` : back ? "and back to 0"
-            : `turn ${n + 1} of ${turns.length} is rotation ${r}: the lit piece turns exactly like the uncut cube's lit corner`);
+          v.caption(f === 0 && !back ? "the lit piece and the uncut cube are both at rotation 0" : back ? "and back to 0"
+            : `turn ${n + 1} of ${turns.length} is rotation ${rn}: the lit piece turns exactly like the uncut cube's lit corner`);
         };
       },
 
@@ -2904,7 +2927,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             const p = new THREE.Vector3(...scale(applyMat(M, piece.centroid), 1.5 / P.R)).applyMatrix4(sc.root.matrixWorld);
             const depth = p.z, s = p.project(sc.cam);
             const on = turning.has(i), now = on ? P.group.mul[r][before[i]] : state[i];
-            return { x: (s.x + 1) / 2 * VIZ_W, y: (1 - s.y) / 2 * VIZ_H, depth, on, text: on && f < 1 ? `${before[i]}→${now}` : String(now) };
+            return { x: (s.x + 1) / 2 * VIZ_W, y: (1 - s.y) / 2 * VIZ_H, depth, on, text: on && f < 1 ? `${cubeName(before[i])}→${cubeName(now)}` : String(cubeName(now)) };
           }).sort((a, b) => a.depth - b.depth);
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
           // each piece's home, by its index: fixed to the cube, further out, never turning
@@ -2935,9 +2958,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             ctx.fillText(`#${i}`, x + bw / 2, y + 11);
             ctx.fillStyle = on ? accent : text; ctx.font = '13px "JetBrains Mono", ui-monospace, monospace';
             const now = on ? P.group.mul[r][before[i]] : state[i];
-            ctx.fillText(on && f < 1 ? `${before[i]}→${now}` : String(now), x + bw / 2, y + 28);
+            ctx.fillText(on && f < 1 ? `${cubeName(before[i])}→${cubeName(now)}` : String(cubeName(now)), x + bw / 2, y + 28);
           }
-          v.caption(`this turn is rotation ${r}: each lit piece's number g becomes the table's "g, then ${r}"`);
+          v.caption(`this turn is rotation ${cubeName(r)}: each lit piece's number g becomes the table's "g, then ${cubeName(r)}"`);
         };
       },
     };
