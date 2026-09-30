@@ -18,6 +18,10 @@ test("the about modal's diagrams run", async ({ page }) => {
     await page.locator(`.cohesion-about [data-viz="${kind}"]`).scrollIntoViewIfNeeded();
     await expect(page.locator(`.cohesion-about [data-caption="${kind}"]`)).not.toHaveText(/^\s*$/);
   }
+  // closed and opened again, the same (kept) diagrams draw into the new copy
+  await page.locator(".cohesion-modal-close").click();
+  await page.getByRole("button", { name: "about", exact: true }).click();
+  await expect(page.locator('.cohesion-about [data-caption="carve-sphere"]')).not.toHaveText(/^\s*$/);
   await noErrors(errors);
 });
 

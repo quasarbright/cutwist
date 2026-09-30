@@ -2211,6 +2211,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // while the modal is open (its content is a copy made on open, removed on close).
     const VIZ_W = 440, VIZ_H = 240, VIZ_DIST = 1.15 / Math.sin((15 * Math.PI) / 180);
     let vizRenderer = null, vizRAF = 0, vizzes = [];
+    const vizCache = {}; // kind → { v, frame }, built on first open
     const vizEase = (u) => (u <= 0 ? 0 : u >= 1 ? 1 : u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
     const vizBuilt = {}; // puzzles, built on first open
     const vizPuzzle = (id, size) => (vizBuilt[id + size] ??= buildPuzzle(PRESETS.find((p) => p.id === id), size));
@@ -2476,7 +2477,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         let t0 = null;
         const X = (m) => 46 + (Math.log10(m) / 5) * (VIZ_W - 62), Y = (e) => 18 + ((-11 - Math.log10(e)) / 6) * (VIZ_H - 58);
         return (t) => {
-          if (t0 === null) t0 = t;
+          if (t0 === null || t < t0) { reset(); t0 = t; } // (first frame, or the modal reopened: its clock restarts)
           if (done !== null && t - done > HOLD) { reset(); t0 = t; }
           const target = Math.min(MAXN, Math.floor(10 ** ((5 * (t - t0)) / RUN)));
           for (let budget = 1500; n < target && budget > 0; budget--) {
@@ -2598,8 +2599,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const kind = cv.dataset.viz, cap = el.querySelector(`[data-caption="${kind}"]`);
         const tall = kind === "table" ? 60 : 0;
         cv.width = VIZ_W * dpr; cv.height = (VIZ_H + tall) * dpr;
-        const v = { cv, ctx: cv.getContext("2d"), dpr, caption: (s) => { if (cap && cap.textContent !== s) cap.textContent = s; } };
-        return { v, frame: VIZ[kind](v) };
+        // Each diagram is built once and kept (its scene and meshes live on the GPU); a new
+        // open only points it at the modal's new canvas and caption.
+        const built = (vizCache[kind] ??= { v: {} });
+        Object.assign(built.v, { cv, ctx: cv.getContext("2d"), dpr, caption: (s) => { if (cap && cap.textContent !== s) cap.textContent = s; } });
+        built.frame ??= VIZ[kind](built.v);
+        return built;
       });
       const t0 = performance.now();
       const loop = (now) => {
