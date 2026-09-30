@@ -62,7 +62,8 @@
     /* rear view: the line between the two views, named at its foot */
     #surfaceShape[hidden] { display: none; } /* (the bar's own display would override hidden) */
     #rear { white-space: nowrap; }
-    #rear:disabled { opacity: .4; cursor: not-allowed; }
+    /* not applicable (a flat grid on screen): grayed out, flat, and it won't press */
+    #rear:disabled { color: var(--faint); background: transparent; border-color: var(--border); opacity: .6; cursor: not-allowed; }
     .tw-split { position: fixed; width: 1px; background: var(--border); z-index: 2; pointer-events: none; }
     .tw-split[hidden] { display: none; }
     .tw-split span {
@@ -255,8 +256,10 @@
     .tw-stats { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); line-height: 1.5; white-space: nowrap; }
     .tw-stats .warn { color: var(--danger); }
     /* ---- status line: move count, solved ---- */
+    /* the status sits just above the button row, however tall it is (--bar-h: the row's
+       height, measured by the page; it wraps to two rows on narrow screens) */
     .tw-tape {
-      position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 5;
+      position: fixed; left: 50%; bottom: calc(48px + var(--bar-h, 36px)); transform: translateX(-50%); z-index: 5;
       max-width: min(760px, calc(100vw - 32px));
       padding: 6px 12px; border-radius: var(--radius);
       background: color-mix(in srgb, var(--panel) 82%, transparent);
@@ -293,11 +296,22 @@
       position: absolute; top: 6px; left: 9px;
       font-family: var(--font-mono); font-size: .65rem; letter-spacing: .06em; color: var(--faint);
     }
+    /* with the rear view on: front and back side by side, a line between */
+    .tw-reference.is-rear { width: 264px; }
+    .tw-reference.is-rear::after { content: ""; position: absolute; left: 50%; top: 10px; bottom: 10px; width: 1px; background: var(--border); }
 
     @media (max-width: 600px) {
       .tw-title h1 { font-size: 1.05rem; }
-      .tw-tape { bottom: 80px; }
-      .tw-reference { width: 92px; height: 92px; bottom: 132px; right: 12px; }
+    }
+    /* narrow: the buttons wrap onto a second row rather than run off the screen, and the
+       solved card moves up above the status, smaller */
+    @media (max-width: 700px) {
+      .control-bar { flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 24px); row-gap: 6px; gap: 5px; }
+      .control-bar .btn { padding: 6px 9px; font-size: 14px; }
+      .tw-status { white-space: normal; text-align: center; }
+      .tw-tape { bottom: calc(44px + var(--bar-h, 36px)); }
+      .tw-reference { width: 92px; height: 92px; bottom: calc(52px + var(--bar-h, 36px) + var(--tape-h, 34px)); right: 12px; }
+      .tw-reference.is-rear { width: 184px; }
     }
   </style>
 </head>
@@ -627,7 +641,7 @@
     // front's lights: reflected, they're lit the way the front's are, so colors read the same.
     const KEY_AT = keyLight.position.clone(), FILL_AT = fillLight.position.clone();
     function lightFor(cam) {
-      const s = cam === rearCamera ? -1 : 1;
+      const s = cam.position.z < 0 ? -1 : 1; // (the rear cameras sit behind, at −z)
       keyLight.position.copy(KEY_AT).multiplyScalar(s);
       fillLight.position.copy(FILL_AT).multiplyScalar(s);
       skyLight.position.set(0, s, 0);
@@ -755,6 +769,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       camera.updateProjectionMatrix();
     }
     addEventListener("resize", resize);
+    // the button row's and status's heights, for what's stacked above them (both wrap when narrow)
+    const stackObserver = new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--bar-h", document.querySelector(".control-bar").offsetHeight + "px");
+      document.documentElement.style.setProperty("--tape-h", $("tape").offsetHeight + "px");
+    });
+    stackObserver.observe(document.querySelector(".control-bar"));
+    stackObserver.observe($("tape"));
 
     // ---------- puzzle meshes ----------
     let P = null, state = null, pieceObjs = [], bodyMeshes = [];
@@ -1604,6 +1625,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("rear").setAttribute("aria-pressed", String(rearOn()));
       $("rear").title = ok ? "show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same"
         : "rear view needs the 3D view to be the only one on screen (turn off the flat view)";
+      $("reference").classList.toggle("is-rear", rearOn()); // (the solved card shows the back too)
       placeSplit();
     }
     // the line between the two views (and the regions under it follow the panel opening and
@@ -2107,12 +2129,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function renderSolvedSurface(look) {
       const key = [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join();
       if (key !== solvedKey) { solvedKey = key; solvedView.drawBare(P, solvedPlanarState(P), null, look); solvedTexture.needsUpdate = true; }
-      const box = $("reference").getBoundingClientRect(), pad = 6, size = box.width - 2 * pad;
       surfaceMesh.material = solvedMat;
       renderer.setScissorTest(true);
-      renderer.setViewport(box.left + pad, H - box.bottom + pad, size, size);
-      renderer.setScissor(box.left + pad, H - box.bottom + pad, size, size);
-      renderer.render(scene, refCamera);
+      for (const { cam, x, y, size } of refSquares()) {
+        renderer.setViewport(x, y, size, size);
+        renderer.setScissor(x, y, size, size);
+        lightFor(cam);
+        renderer.render(scene, cam);
+      }
+      lightFor(camera);
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, W, H);
       surfaceMesh.material = surfaceMat;
@@ -2316,6 +2341,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // rotation that best matches the current state (refG), eased so it doesn't snap.
     const refCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
     refCamera.position.set(0, 0, 1.08 / Math.sin((30 * Math.PI) / 360));
+    // with the rear view on, the card shows the back too, from behind like the main rear view
+    const refRearCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+    refRearCamera.position.set(0, 0, -refCamera.position.z);
+    refRearCamera.lookAt(0, 0, 0);
+    refRearCamera.updateMatrixWorld();
+    // the card's squares (WebGL viewport coordinates): one, or front and back side by side
+    function refSquares() {
+      const box = $("reference").getBoundingClientRect(), pad = 6, size = box.height - 2 * pad;
+      const out = [{ cam: refCamera, x: box.left + pad }];
+      if (rearOn()) out.push({ cam: refRearCamera, x: box.left + box.width / 2 + pad });
+      return out.map((q) => ({ ...q, y: H - box.bottom + pad, size }));
+    }
     let refG = 0;
     const refQ = new THREE.Quaternion(), refTarget = new THREE.Quaternion(), refM = new THREE.Matrix4();
     function updateReferenceTarget(snap = false) {
@@ -2327,17 +2364,19 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (snap) refQ.copy(refTarget);
     }
     function renderReference() {
-      const box = $("reference").getBoundingClientRect();
-      const pad = 6, size = box.width - 2 * pad;
       updatePieces(true);
       refQ.slerp(refTarget, 0.15);
       puzzleGroup.quaternion.copy(refQ);
       if (axisGroup) axisGroup.visible = false; // the reference shows only the puzzle
       renderer.setScissorTest(true);
-      renderer.setViewport(box.left + pad, H - box.bottom + pad, size, size);
-      renderer.setScissor(box.left + pad, H - box.bottom + pad, size, size);
-      renderer.clear();
-      renderer.render(scene, refCamera);
+      for (const { cam, x, y, size } of refSquares()) {
+        renderer.setViewport(x, y, size, size);
+        renderer.setScissor(x, y, size, size);
+        renderer.clear();
+        lightFor(cam);
+        renderer.render(scene, cam);
+      }
+      lightFor(camera);
       renderer.setScissorTest(false);
       // Put the real poses back now, not next frame: pointer events arrive between frames,
       // and hit-testing and screen projection read these world matrices. Left in the solved
