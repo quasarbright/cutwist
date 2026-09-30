@@ -485,7 +485,8 @@
         as well as turning it: one number says both which spot the piece is in and which way it
         faces. The whole puzzle is a list of numbers, starting as all zeros.</p>
       <p>Here's a solved 2×2×2 with one piece lit, next to an uncut cube with the same corner
-        lit. Each of the three layers the piece is in takes a quarter turn and back. Every turn
+        lit. Each of the three layers the piece is in takes a quarter turn each way, going back
+        to the start after each. Every turn
         is one of the rotations on the list, and it turns the lit piece exactly the way it turns
         the whole uncut cube, lit corner and all, so the piece's number becomes that rotation's
         number.</p>
@@ -2621,7 +2622,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       },
 
       // A solved 2×2×2 with one piece lit, and an uncut cube beside it with the piece's corner
-      // lit. Each layer the piece is in takes a quarter turn and back, in turn: each turn is a
+      // lit. Each layer the piece is in takes a quarter turn each way and back, in turn: each is a
       // rotation r, the same one that takes the uncut cube (and its lit corner) from 0 to r, so
       // the piece's number becomes r
       onepiece(v) {
@@ -2632,11 +2633,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         // the piece: the one nearest the viewer's top front right
         const state = solvedState(P);
         const i = P.pieces.reduce((b, p, k) => (p.centroid[0] + p.centroid[1] + p.centroid[2] > P.pieces[b].centroid.reduce((s, x) => s + x, 0) ? k : b), 0);
-        // the turns: a quarter turn of each layer it's in
-        const turns = P.axes.map((ax, axis) => {
-          const layer = layerOf(P, state, i, axis);
-          return { ax, r: ax.rot[1], qr: vizQuat(P.group.mats[ax.rot[1]]), turning: new Set(piecesInLayer(P, state, axis, layer)) };
-        });
+        // the turns: a quarter turn each way of each layer it's in (six), in this order of their
+        // numbers as the modal shows them (see cubeNames)
+        const ORDER = [1, 3, 20, 12, 16, 8];
+        const turns = P.axes.flatMap((ax, axis) => {
+          const turning = new Set(piecesInLayer(P, state, axis, layerOf(P, state, i, axis)));
+          return [1, ax.order - 1].map((q) => ({ r: ax.rot[q], qr: vizQuat(P.group.mats[ax.rot[q]]), turning }));
+        }).sort((a, b) => ORDER.indexOf(cubeName(a.r)) - ORDER.indexOf(cubeName(b.r)));
         // the lit piece, and the same corner of the uncut cube: a see-through white shell just
         // outside the piece's shape, lightening it (its inner faces stay hidden inside); white,
         // not a color, so it can't be mistaken for a sticker's
