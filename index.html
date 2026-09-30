@@ -476,7 +476,8 @@
       </ol>
       <p>Pieces outside the layer keep their numbers. Undoing a turn is the same lookup with the
         opposite rotation. Here's a 2×2×2, mixed up a little, whose 8 pieces each hold one of its
-        24 rotations.</p>
+        24 rotations. The boxed number on each piece is its rotation, and it rides along with the
+        piece. The gray #0 to #7 around the cube mark where each piece started, and stay put.</p>
       <canvas class="cw-viz" data-viz="table"></canvas>
       <p class="cw-viz-caption" data-caption="table">&nbsp;</p>
 
@@ -2580,8 +2581,17 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             const on = turning.has(i), now = on ? P.group.mul[r][before[i]] : state[i];
             return { x: (s.x + 1) / 2 * VIZ_W, y: (1 - s.y) / 2 * VIZ_H, depth, on, text: on && f < 1 ? `${before[i]}→${now}` : String(now) };
           }).sort((a, b) => a.depth - b.depth);
-          ctx.font = '600 12px "JetBrains Mono", ui-monospace, monospace';
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          // each piece's home, by its index: fixed to the cube, further out, never turning
+          ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
+          for (const [i, piece] of P.pieces.entries()) {
+            const p = new THREE.Vector3(...scale(piece.centroid, 2.05 / P.R)).applyMatrix4(sc.root.matrixWorld);
+            const depth = p.z, s = p.project(sc.cam);
+            ctx.globalAlpha = depth > 0 ? 0.9 : 0.4;
+            ctx.fillStyle = muted;
+            ctx.fillText(`#${i}`, (s.x + 1) / 2 * VIZ_W, (1 - s.y) / 2 * VIZ_H);
+          }
+          ctx.font = '600 12px "JetBrains Mono", ui-monospace, monospace';
           for (const tag of tags) {
             const w = ctx.measureText(tag.text).width + 10;
             ctx.globalAlpha = tag.depth > 0 ? 1 : 0.45;
@@ -2599,7 +2609,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             ctx.strokeStyle = on ? accent : border; ctx.lineWidth = on ? 1.5 : 1;
             ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, 40);
             ctx.fillStyle = muted; ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
-            ctx.fillText(`piece ${i}`, x + bw / 2, y + 11);
+            ctx.fillText(`#${i}`, x + bw / 2, y + 11);
             ctx.fillStyle = on ? accent : text; ctx.font = '13px "JetBrains Mono", ui-monospace, monospace';
             const now = on ? P.group.mul[r][before[i]] : state[i];
             ctx.fillText(on && f < 1 ? `${before[i]}→${now}` : String(now), x + bw / 2, y + 28);
