@@ -491,11 +491,18 @@
         start after each. Each turn moves the lit piece exactly the way it moves the whole uncut
         cube, lit corner and all, so the piece's number becomes that rotation's number. On the
         right is the piece by itself, turned the same way, with the rest of the cube as a
-        wireframe: you can think of every piece as carrying its own whole copy of the shape,
-        with everything but its own corner hidden.</p>
+        wireframe.</p>
       <canvas class="cw-viz" data-viz="onepiece"></canvas>
       <p class="cw-viz-caption" data-caption="onepiece">&nbsp;</p>
-      <p>A turn works like this:</p>
+      <p>That right-hand picture is the whole idea. Think of every piece as its own complete copy
+        of the puzzle's shape, with all of it hidden except the piece's own chunk, like a
+        <b>mask</b>. To turn a layer, find the pieces whose visible chunk is in that layer, and
+        rotate their whole copies by the turn. The chunk is off-center, so rotating the copy
+        about the center carries it to a new spot and turns it at the same time: the rotation
+        takes care of where the piece is and which way it faces, and the mask never changes.</p>
+      <p>So the engine barely needs to know about pieces at all. It needs to know how to rotate
+        the whole shape (the 24 rotations, and what doing one after another gives) and which
+        chunk each piece shows. Everything else follows. Precisely, a turn works like this:</p>
       <ol>
         <li><b>Find the pieces in the layer.</b> For each piece, rotate the center of its home
           shape by the piece's current rotation, and see which side of the cut it lands on.</li>
