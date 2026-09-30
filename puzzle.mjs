@@ -1102,33 +1102,67 @@ export function isSolved(P, state) {
   return true;
 }
 
-// The whole-puzzle rotation of the solved puzzle that best matches the current state:
-// the one putting the most stickers on the face where they currently are. On a cube,
-// middle-slice turns move the centers, so "solved" can mean any of 24 orientations.
-// Pieces sitting on a turning axis (a 3×3's centers) get the deciding vote, since that's
-// how people read a cube's orientation. They vote by where they sit, not which way they're
-// twisted: a pyraminx tip twisted in place is still where orientation g puts it. The other
-// stickers break ties (a 4×4 has no such pieces). Ties keep `prefer`, so the answer
-// doesn't flicker between equal orientations. On puzzles whose scrambles hold one corner
-// still (skewb, pentultimate: see scrambleLayers), that corner is the orientation.
+// The whole-puzzle rotation g of the solved puzzle that best matches the current state (the
+// solved card shows the puzzle turned by it). On a cube, middle-slice turns move the
+// centers, so "solved" can mean any of 24 orientations. In order, ties going to the next:
+//  1. Pieces sitting on a turning axis (a 3×3's centers, and hidden ones) that are where g
+//     puts them, since that's how people read a cube's orientation. By where they sit, not
+//     which way they're twisted: a pyraminx tip twisted in place is still where g puts it.
+//     (Not on puzzles whose scrambles hold one corner still: there the pieces on axes are
+//     corners that move about.)
+//  2. A group of pieces that fit g: every sticker on the face g puts its color on (with two
+//     or more stickers, that's the right spot and the right twist). Pieces solved relative
+//     to each other fit the same g (it's the number they share), so this follows real
+//     progress, like a finished layer or a block, where a plain sticker count can be swayed
+//     by scattered stickers that happen to agree with some other orientation (a 2×2's solved
+//     layer, or a crystal prism's white face shown turned). Only once it's a face's worth.
+//     Between groups the same size: the one with more white in it (white is where people
+//     start).
+//  3. On puzzles whose scrambles hold one corner still (2×2, skewb, pentultimate: see
+//     scrambleLayers), that corner being where g puts it: a fresh scramble keeps showing the
+//     orientation it started in, until a group takes over.
+//  4. Stickers on the face g puts them on.
+// Full ties keep `prefer`, so the answer doesn't flicker between equal orientations.
 export function closestOrientation(P, state, prefer = 0) {
   scrambleLayers(P);
-  if (P.anchor !== null && P.pieces.length) return state[P.anchor];
+  const G = P.group;
+  const pieces = P.pieces.map((piece, i) => ({ piece, at: applyMat(G.mats[state[i]], piece.centroid), perm: G.facePerm[state[i]] }));
+  // Groups count pieces with two or more stickers (a one-sticker piece fits just by being on
+  // the right face, so they pad out chance matches), and only once they're real progress,
+  // not a scramble's coincidence: a face's worth, the fewest such pieces showing any one
+  // color (a 2×2's four corners per face, a hexagonal crystal prism's six wedges)
+  const multi = (piece) => piece.stickers.length >= 2;
+  if (P.faceWorth === undefined) {
+    const per = new Array(P.normals.length).fill(0);
+    for (const piece of P.pieces) if (multi(piece)) for (const c of new Set(piece.stickers.map((s) => s.color))) per[c]++;
+    const counts = per.filter((n) => n > 0);
+    P.faceWorth = counts.length ? Math.max(2, Math.min(...counts)) : Infinity;
+  }
+  const anchored = P.anchor !== null && P.pieces.length;
+  const WHITE = P.colors.findIndex((c) => c.toLowerCase() === "#f4f4ee");
+  // the group: [size, white pieces in it], or zeros if it's too small to count. Then
+  // anchored: [group…, the anchor fits, stickers]; otherwise
+  // [on-axis pieces in place, group…, stickers] (compared in order)
   const score = (g) => {
-    const ref = P.group.facePerm[g], G = P.group.mats[g];
-    let count = 0;
-    for (let i = 0; i < P.pieces.length; i++) {
-      const piece = P.pieces[i];
-      if (piece.onAxis && close(applyMat(P.group.mats[state[i]], piece.centroid), applyMat(G, piece.centroid), 1e-6)) count += 1000;
-      const perm = P.group.facePerm[state[i]];
-      for (const s of piece.stickers) if (perm[s.color] === ref[s.color]) count++;
+    const ref = G.facePerm[g], M = G.mats[g];
+    let axis = 0, fit = 0, white = 0, stickers = 0;
+    for (const { piece, at, perm } of pieces) {
+      if (!anchored && piece.onAxis && close(at, applyMat(M, piece.centroid), 1e-6)) axis++;
+      if (!piece.stickers.length) continue;
+      let all = true;
+      for (const s of piece.stickers) if (perm[s.color] === ref[s.color]) stickers++; else all = false;
+      if (!all || !multi(piece)) continue;
+      fit++;
+      if (piece.stickers.some((s) => s.color === WHITE)) white++;
     }
-    return count;
+    const group = fit >= P.faceWorth ? [fit, white] : [0, 0];
+    return anchored ? [...group, state[P.anchor] === g ? 1 : 0, stickers] : [axis, ...group, stickers];
   };
-  let best = prefer, bestCount = score(prefer);
-  for (let g = 0; g < P.group.mats.length; g++) {
+  const better = (a, b) => { for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return a[k] > b[k]; return false; };
+  let best = prefer, bestScore = score(prefer);
+  for (let g = 0; g < G.mats.length; g++) {
     const c = score(g);
-    if (c > bestCount) { best = g; bestCount = c; }
+    if (better(c, bestScore)) { best = g; bestScore = c; }
   }
   return best;
 }

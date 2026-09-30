@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PRESETS, buildPuzzle, solvedState, applyMove, inverseMove, isSolved, randomMoves, moveLabel,
-  piecesInLayer, closestOrientation, puzzleTitle, snapSize, scrambleMoves, puzzleStats, snapDepths, toCustom, pieceFinder, faceTextures, colorDistance, dot, sub, cross, len,
+  piecesInLayer, closestOrientation, puzzleTitle, snapSize, scrambleMoves, puzzleStats, snapDepths, toCustom, pieceFinder, faceTextures, colorDistance, dot, sub, cross, len, rotMat,
 } from "./puzzle.mjs";
 
 const family = (id) => PRESETS.find((p) => p.id === id);
@@ -381,17 +381,66 @@ test("cube labels read like cubing notation", () => {
   assert.equal(moveLabel(M, { axis: 0, layer: 2, q: 2 }).suffix, "2'");
 });
 
-test("scrambles never reorient the puzzle", () => {
+// pieces with two or more stickers that fit orientation g (every sticker on the face g puts
+// its color on): see closestOrientation
+const fitting = (P, s, g) => P.pieces.filter((p, i) => p.stickers.length >= 2 && p.stickers.every((x) => P.group.facePerm[s[i]][x.color] === P.group.facePerm[g][x.color])).length;
+// After a scramble the solved card stays as it started (0), unless the scramble left a real
+// block of pieces solved relative to each other in another orientation: a face's worth or
+// more, at least as big as what fits 0 (a cuboid's half-turned slab can do that; the same
+// size, it won on white). Never a flip to an orientation with nothing behind it.
+const keepsOrientation = (P, s, id) => {
+  const g = closestOrientation(P, s);
+  if (g === 0) return;
+  assert.ok(fitting(P, s, g) >= P.faceWorth && fitting(P, s, g) >= fitting(P, s, 0), `${id}: turned to ${g} (${fitting(P, s, g)} fit) over 0 (${fitting(P, s, 0)})`);
+};
+
+test("scrambles don't reorient the puzzle without a reason", () => {
   for (const { id, P } of ALL) {
     const s = solvedState(P);
     for (const m of scrambleMoves(P, 150, seeded(11))) applyMove(P, s, m);
-    assert.equal(closestOrientation(P, s), 0, id);
+    keepsOrientation(P, s, id);
     assert.ok(!isSolved(P, s), `${id}: scrambled`);
   }
   // a 3×3 scramble is face turns only, so the centers never move
   const cube = preset("cube", 3), s = solvedState(cube);
   for (const m of scrambleMoves(cube, 100, seeded(5))) applyMove(cube, s, m);
   cube.pieces.forEach((p, i) => { if (p.onAxis) assert.equal(cube.group.facePerm[s[i]][p.stickers[0].color], p.stickers[0].color); });
+});
+
+// every piece turned by rotation h, as if the whole puzzle were picked up and turned
+const turnWhole = (P, s, h) => { for (let i = 0; i < s.length; i++) s[i] = P.group.mul[h][s[i]]; };
+
+test("the solved card follows a solved layer, however the puzzle is held (2×2)", () => {
+  const P = preset("cube", 2), G = P.group;
+  const R = P.axes.findIndex((a) => Math.abs(a.dir[0]) > 0.99), U = P.axes.findIndex((a) => Math.abs(a.dir[1]) > 0.99);
+  const up = (a) => (P.axes[a].dir[a === U ? 1 : 0] > 0 ? 1 : 0); // the layer on the + side
+  const bottom = P.pieces.map((p, i) => i).filter((i) => P.pieces[i].centroid[1] < 0);
+  // Sune (R U R' U R U2 R'), in whichever turn directions keep the bottom layer here
+  let s = null;
+  for (const [r, u] of [[1, 1], [1, 3], [3, 1], [3, 3]]) {
+    const t = solvedState(P);
+    for (const [a, q] of [[R, r], [U, u], [R, 4 - r], [U, u], [R, r], [U, 2 * u], [R, 4 - r]]) applyMove(P, t, { axis: a, layer: up(a), q: q % 4 });
+    if (bottom.every((i) => t[i] === 0) && !isSolved(P, t)) { s = t; break; }
+  }
+  assert.ok(s, "a Sune that keeps the bottom layer");
+  // picked up and turned over: the bottom layer, still solved, is now held differently
+  const h = G.find(rotMat([1, 0, 0], Math.PI / 2));
+  turnWhole(P, s, h);
+  assert.equal(closestOrientation(P, s), h);
+});
+
+test("between solved groups the same size, the one with white wins", () => {
+  // a 2×2 with its top (white) layer turned: two solved layers, four pieces each
+  const P = preset("cube", 2), U = P.axes.findIndex((a) => Math.abs(a.dir[1]) > 0.99);
+  const top = P.axes[U].dir[1] > 0 ? 1 : 0, s = solvedState(P);
+  applyMove(P, s, { axis: U, layer: top, q: 1 });
+  assert.equal(closestOrientation(P, s), P.axes[U].rot[1]);
+  // and a crystal prism with its white half turned: the card turns with the white face
+  const C = buildPuzzle({ ...family("prism-crystal"), sides: 6, rows: 2 }), cap = C.axes.findIndex((a) => Math.abs(a.dir[2]) > 0.99);
+  const white = C.colors.findIndex((c) => c === "#f4f4ee"), t = solvedState(C);
+  const whiteLayer = C.normals[white][2] * C.axes[cap].dir[2] > 0 ? C.axes[cap].layers - 1 : 0;
+  applyMove(C, t, { axis: cap, layer: whiteLayer, q: 1 });
+  assert.equal(closestOrientation(C, t), C.axes[cap].rot[1]);
 });
 
 test("reference orientation follows a 3×3's centers", () => {
@@ -517,7 +566,7 @@ test("prisms: every kind and side count scrambles cleanly", () => {
         for (const seed of [1, 2, 3]) {
           const s = solvedState(P);
           for (const m of scrambleMoves(P, 80, seeded(sides * 10 + variant.cuts + 1000 * seed))) applyMove(P, s, m);
-          assert.equal(closestOrientation(P, s), 0, id);
+          keepsOrientation(P, s, id);
           unsolved ||= !isSolved(P, s);
         }
         assert.ok(unsolved, id);
