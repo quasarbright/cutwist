@@ -436,6 +436,11 @@
         instead of faces, say) and other depths gives every other puzzle.</p>
       <canvas class="cw-viz" data-viz="cuts"></canvas>
       <p class="cw-viz-caption" data-caption="cuts">&nbsp;</p>
+      <p>Every cut is made in all the directions of its kind at once, like every face or every
+        corner. So the pattern of cuts has the same symmetry as the solid: turn the solid any way
+        that lands it back in its own outline, and the cuts land on cuts.</p>
+      <canvas class="cw-viz" data-viz="symcuts"></canvas>
+      <p class="cw-viz-caption" data-caption="symcuts">&nbsp;</p>
 
       <div class="section-label">turning a layer</div>
       <p>Parallel cuts split the puzzle into layers, and a turn rotates one layer about the line
@@ -443,14 +448,10 @@
         the turn has to land every piece exactly on a spot where a piece was. That works when the
         rotation carries the whole solid onto itself: a quarter turn about a cube's face, a third
         of a turn about its corner (the skewb), a fifth of a turn about a dodecahedron's face (the
-        megaminx).</p>
+        megaminx). The cuts share the solid's symmetry, so those rotations carry the cuts onto
+        cuts too, and the turned layer fits.</p>
       <canvas class="cw-viz" data-viz="turn"></canvas>
       <p class="cw-viz-caption" data-caption="turn">&nbsp;</p>
-      <p>Every cut is made in all the directions of its kind at once, like every face or every
-        corner. So the pattern of cuts has the same symmetry as the solid, and each of those
-        rotations carries the cuts onto themselves too.</p>
-      <canvas class="cw-viz" data-viz="symcuts"></canvas>
-      <p class="cw-viz-caption" data-caption="symcuts">&nbsp;</p>
 
       <div class="section-label">how a turn is stored</div>
       <p>A cube can be picked up and set back down in its own outline in 24 ways: any of its 6
