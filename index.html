@@ -51,6 +51,10 @@
     #c[hidden], #plane[hidden], #refPlane[hidden] { display: none; }
     #refPlane { position: absolute; inset: 0; width: 100%; height: 100%; }
 
+    /* about-modal diagrams */
+    .cw-viz { display: block; width: 100%; max-width: 440px; margin: 14px auto 4px; }
+    .cw-viz-caption { font-size: .8rem; color: var(--muted); text-align: center; margin-top: 2px; min-height: 1.3em; }
+
     /* shown instead of the puzzle when the browser can't start WebGL */
     .tw-nogl {
       position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px;
@@ -401,8 +405,82 @@
     <button class="btn" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
     <about-modal label="about">
       <h2 class="title">Cutwist</h2>
-      <p class="intro">A twisty puzzle is a solid cut by flat planes. Turning a layer rotates every piece between two neighboring parallel cuts.</p>
-      <p>Full explainer coming once the mechanism settles.</p>
+      <p class="intro">A twisty puzzle is a solid cut by flat planes. Every 3D puzzle here is made by
+        one routine that splits a shape with a plane, and every puzzle's state is a list of whole
+        numbers, which is what keeps it exact however long you turn it.</p>
+
+      <div class="section-label">carving the solid</div>
+      <p>Each flat face of a solid lies on a plane, and the solid is everything on the inner side of
+        all its face planes. So any of them can be made the same way: start with a box bigger than
+        the solid, and slice off whatever is outside each face's plane, one plane at a time.</p>
+      <p>Slicing a shape with no dents by a plane leaves two shapes with no dents, so the whole
+        program only needs one geometric routine: split a shape by a plane. Here it carves a
+        dodecahedron out of a box.</p>
+      <canvas class="cw-viz" data-viz="carve"></canvas>
+      <p class="cw-viz-caption" data-caption="carve">&nbsp;</p>
+
+      <div class="section-label">cuts make pieces</div>
+      <p>The pieces come from the same routine. Take the finished solid and split it by every cut
+        plane: wherever a plane passes through a piece, that piece becomes two. The new faces a cut
+        exposes are marked as plastic instead of sticker, so they're drawn black. A 3×3×3 cube is
+        six cuts, two across each of its three directions. Choosing other directions (corners
+        instead of faces, say) and other depths gives every other puzzle.</p>
+      <canvas class="cw-viz" data-viz="cuts"></canvas>
+      <p class="cw-viz-caption" data-caption="cuts">&nbsp;</p>
+
+      <div class="section-label">turning a layer</div>
+      <p>Parallel cuts split the puzzle into layers, and a turn rotates one layer about the line
+        through the center perpendicular to those cuts. For the layer to fit back into the shape,
+        the turn has to land every piece exactly on a spot where a piece was. That works when the
+        rotation carries the whole solid onto itself: a quarter turn about a cube's face, a third
+        of a turn about its corner (the skewb), a fifth of a turn about a dodecahedron's face (the
+        megaminx).</p>
+      <p>Every cut is made in all the directions of its kind at once, like every face or every
+        corner. So the pattern of cuts has the same symmetry as the solid, and each of those
+        rotations carries it onto itself too.</p>
+      <canvas class="cw-viz" data-viz="turn"></canvas>
+      <p class="cw-viz-caption" data-caption="turn">&nbsp;</p>
+
+      <div class="section-label">why not just rotate the pieces?</div>
+      <p>The obvious way to store a puzzle is its geometry: every corner of every piece as an x, y
+        and z, and a turn rotates the corners of each piece in the layer. The trouble is that a
+        computer can't do those rotations exactly. A quarter turn uses cos 90°, which is 0, and
+        in floating point comes out as 6.1×10<sup>−17</sup>. Turn the point (1, 0, 0) by a
+        quarter turn four times and it comes back as (1, −2.4×10<sup>−16</sup>, 0).</p>
+      <p>That's far too small to see, and it grows slowly. The chart below turns a megaminx at
+        random with exactly that method and measures how far the corners have wandered from where
+        they should be. The problem is the questions a puzzle has to answer with a yes or no: is
+        this piece back where it started, which side of this cut is it on, is the puzzle solved.
+        With numbers that keep wandering, each of those needs a tolerance, a guess at how much
+        error has built up so far, and the error grows the longer you play.</p>
+      <canvas class="cw-viz" data-viz="drift"></canvas>
+      <p class="cw-viz-caption" data-caption="drift">&nbsp;</p>
+
+      <div class="section-label">never moving the pieces</div>
+      <p>So Cutwist never moves the pieces. Each piece keeps its home geometry, and the state only
+        records which rotation has been applied to it. There are few choices: a cube lands back
+        in its own outline in 24 ways (any of 6 faces on top, turned any of 4 ways), and a
+        dodecahedron in 60. The engine finds them once, when it builds a puzzle, by trying every
+        way of sending one face and a neighbor onto another face and neighbor, and keeping the
+        rotations that carry every face onto a face. It numbers them, with 0 for no rotation.</p>
+      <p>Doing one of these rotations and then another always gives a third one on the list, so
+        the engine also builds a table: rotation g followed by rotation r is rotation
+        mul[r][g]. The puzzle's whole state is one of these numbers per piece, and a turn looks
+        up a new number for each piece in the layer. Here's a 2×2×2, mixed up a little, whose 8
+        pieces each hold one of its 24 rotations.</p>
+      <canvas class="cw-viz" data-viz="table"></canvas>
+      <p class="cw-viz-caption" data-caption="table">&nbsp;</p>
+      <p>Whole numbers don't drift. After a million turns every entry is still exactly one of the
+        rotations, so undo, reversed algorithms and "is it solved?" all have exact answers. To
+        draw a piece, or to see which layer it's in, the engine rotates its home geometry by its
+        current rotation. That's one rotation from the original numbers every time, so the
+        rounding error is always that of a single multiply and never adds up.</p>
+
+      <div class="section-label">the sliding puzzles</div>
+      <p>The torus, Klein bottle and projective plane use the same idea in 2D. The state is one
+        whole number per cell: which piece is there, times 4, plus two bits for whether it's been
+        mirrored left-right or top-bottom by sliding across a flipped edge. A slide moves the
+        numbers around a loop and flips those bits where the loop crosses a mirrored edge.</p>
     </about-modal>
   </div>
 
@@ -412,7 +490,7 @@
     import * as THREE from "three";
     import {
       PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, toCustom, CUT_RANGE, TRIM_RANGE,
-      piecesInLayer, layerOf, closestOrientation, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
+      piecesInLayer, layerOf, closestOrientation, SOLIDS, buildSolid, splitPiece, randomMoves, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
     import {
@@ -576,49 +654,55 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const layers = sp.rule === "cuboid" ? Math.max(sp.a, sp.b, sp.c)
         : sp.rule === "prism" ? (sp.crystal ? 2 : Math.max(sp.rows, 2 * sp.cuts)) : size;
       const margin = 0.028 * P.R * solidGap * Math.min(1, 3 / Math.max(1, layers)), lift = 0.004 * P.R;
-      const color = new THREE.Color();
-
       P.pieces.forEach((piece, i) => {
-        const pos = [], nor = [], triPoly = [];
-        piece.polys.forEach((poly, pi) => {
-          const before = pos.length;
-          fan(poly.verts, pos, nor, poly.normal);
-          for (let t = 0; t < (pos.length - before) / 9; t++) triPoly.push(pi);
-        });
-        const bodyGeo = new THREE.BufferGeometry();
-        bodyGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-        bodyGeo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.userData = { piece: i, triPoly };
-
-        const sp = [], sn = [], sc = [], sx = [];
-        for (const s of piece.stickers) {
-          const vs = inset(s.verts, s.normal, margin).map((v) => add(v, scale(s.normal, lift)));
-          const before = sp.length;
-          fan(vs, sp, sn, s.normal);
-          color.set(P.colors[s.color]);
-          const kind = P.textures ? P.textures[s.color] : 0; // (an older cached engine has none for small puzzles)
-          for (let t = before; t < sp.length; t += 3) {
-            sc.push(color.r, color.g, color.b);
-            sx.push(kind);
-          }
-        }
-        const obj = new THREE.Group();
-        obj.matrixAutoUpdate = false;
-        obj.add(body);
-        if (sp.length) {
-          const g = new THREE.BufferGeometry();
-          g.setAttribute("position", new THREE.Float32BufferAttribute(sp, 3));
-          g.setAttribute("normal", new THREE.Float32BufferAttribute(sn, 3));
-          g.setAttribute("color", new THREE.Float32BufferAttribute(sc, 3));
-          g.setAttribute("tex", new THREE.Float32BufferAttribute(sx, 1));
-          obj.add(new THREE.Mesh(g, stickerMat));
-        }
+        const obj = pieceObject(piece, P.colors, P.textures, margin, lift);
+        obj.children[0].userData.piece = i;
         puzzleGroup.add(obj);
         pieceObjs.push(obj);
-        bodyMeshes.push(body);
+        bodyMeshes.push(obj.children[0]);
       });
       buildAxes();
+    }
+    // One piece: its black body (child 0) and its stickers, inset by margin and lifted off the
+    // body a little. Also used by the about modal's diagrams.
+    function pieceObject(piece, colors, textures, margin, lift) {
+      const color = new THREE.Color();
+      const pos = [], nor = [], triPoly = [];
+      piece.polys.forEach((poly, pi) => {
+        const before = pos.length;
+        fan(poly.verts, pos, nor, poly.normal);
+        for (let t = 0; t < (pos.length - before) / 9; t++) triPoly.push(pi);
+      });
+      const bodyGeo = new THREE.BufferGeometry();
+      bodyGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      bodyGeo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.userData = { triPoly };
+
+      const sp = [], sn = [], sc = [], sx = [];
+      for (const s of piece.polys.filter((q) => q.color >= 0)) {
+        const vs = inset(s.verts, s.normal, margin).map((v) => add(v, scale(s.normal, lift)));
+        const before = sp.length;
+        fan(vs, sp, sn, s.normal);
+        color.set(colors[s.color]);
+        const kind = textures ? textures[s.color] : 0; // (an older cached engine has none for small puzzles)
+        for (let t = before; t < sp.length; t += 3) {
+          sc.push(color.r, color.g, color.b);
+          sx.push(kind);
+        }
+      }
+      const obj = new THREE.Group();
+      obj.matrixAutoUpdate = false;
+      obj.add(body);
+      if (sp.length) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(sp, 3));
+        g.setAttribute("normal", new THREE.Float32BufferAttribute(sn, 3));
+        g.setAttribute("color", new THREE.Float32BufferAttribute(sc, 3));
+        g.setAttribute("tex", new THREE.Float32BufferAttribute(sx, 1));
+        obj.add(new THREE.Mesh(g, stickerMat));
+      }
+      return obj;
     }
 
     // ---------- turn handles: the axes sticking out of the puzzle ----------
@@ -2099,6 +2183,289 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderLook();
       $("viewFlat").checked = viewFlat; $("view3D").checked = view3D;
     }
+
+    // ---------- the about modal's diagrams ----------
+    // Each one runs the real engine (puzzle.mjs) on a small puzzle. They share one renderer of
+    // their own, drawing into an offscreen canvas that's copied onto each diagram, and run only
+    // while the modal is open (its content is a copy made on open, removed on close).
+    const VIZ_W = 440, VIZ_H = 240, VIZ_DIST = 1.15 / Math.sin((15 * Math.PI) / 180);
+    let vizRenderer = null, vizRAF = 0, vizzes = [];
+    const vizEase = (u) => (u <= 0 ? 0 : u >= 1 ? 1 : u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
+    const vizBuilt = {}; // puzzles, built on first open
+    const vizPuzzle = (id, size) => (vizBuilt[id + size] ??= buildPuzzle(PRESETS.find((p) => p.id === id), size));
+
+    function vizScene() {
+      const scene = new THREE.Scene();
+      scene.add(new THREE.HemisphereLight(0xf2f4ff, 0x6a6660, 2.1));
+      const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(-2, 3, 4); scene.add(key);
+      const fill = new THREE.DirectionalLight(0xffffff, 0.8); fill.position.set(4, 0.5, 1.5); scene.add(fill);
+      const root = new THREE.Group(); scene.add(root);
+      const cam = new THREE.PerspectiveCamera(30, VIZ_W / VIZ_H, 0.1, 100);
+      cam.position.set(0, 0, VIZ_DIST);
+      return { scene, root, cam };
+    }
+    // a puzzle's pieces as meshes, scaled to unit radius, with margins like the main view's
+    function vizPieces(P, layers, root) {
+      const group = new THREE.Group();
+      group.scale.setScalar(1 / P.R);
+      const objs = P.pieces.map((p) => { const o = pieceObject(p, P.colors, null, 0.028 * P.R * Math.min(1, 3 / layers), 0.004 * P.R); group.add(o); return o; });
+      root.add(group);
+      return { group, objs };
+    }
+    const vizMat = new THREE.Matrix4();
+    function vizPlace(obj, M, off = [0, 0, 0]) {
+      obj.matrix.copy(vizMat.set(M[0], M[1], M[2], off[0], M[3], M[4], M[5], off[1], M[6], M[7], M[8], off[2], 0, 0, 0, 1));
+      obj.matrixWorldNeedsUpdate = true;
+    }
+    // every piece where the state puts it, and the turning ones (a set) rotated by rot on top
+    function vizPose(P, objs, state, turning = null, rot = null) {
+      objs.forEach((o, i) => {
+        let M = P.group.mats[state[i]];
+        if (rot && turning.has(i)) M = mulMat(rot, M);
+        vizPlace(o, M);
+      });
+    }
+    function vizDraw(v, sc, top = 0) {
+      vizRenderer.render(sc.scene, sc.cam);
+      v.ctx.drawImage(vizRenderer.domElement, 0, top * v.dpr, VIZ_W * v.dpr, VIZ_H * v.dpr);
+    }
+    const vizSpin = (sc, t, tilt = 0.5) => sc.root.quaternion.setFromEuler(new THREE.Euler(tilt, 0.6 + t * 0.25, 0));
+
+    const VIZ = {
+      // a dodecahedron carved from a box: each face plane slices off what's outside it
+      carve(v) {
+        const normals = SOLIDS.dodecahedron.normals.map(normalize), colors = [...SOLIDS.dodecahedron.colors, "#3a3d48"];
+        const S = 1.2;
+        let cur = buildSolid(SOLIDS.cube.normals, SOLIDS.cube.normals.map(() => S));
+        cur = { polys: cur.polys.map((p) => ({ ...p, color: 12 })) }; // the box: plain gray
+        const sc = vizScene(), group = new THREE.Group();
+        group.scale.setScalar(1 / 1.7);
+        sc.root.add(group);
+        const make = (piece) => { const o = pieceObject(piece, colors, null, 0.035, 0.005); o.visible = false; vizPlace(o, [1, 0, 0, 0, 1, 0, 0, 0, 1]); group.add(o); return o; };
+        const box = make(cur), steps = normals.map((n, i) => {
+          const [kept, off] = splitPiece(cur, n, 1, i);
+          cur = kept;
+          return { n, kept: make(kept), off: off && make(off) };
+        });
+        const STEP = 0.75, HOLD = 2.5, total = normals.length * STEP + HOLD + 1;
+        return (t) => {
+          const u = t % total, k = Math.floor((u - 1) / STEP), f = (u - 1) / STEP - k;
+          box.visible = u < 1;
+          steps.forEach((s, i) => {
+            s.kept.visible = i === Math.min(k, steps.length - 1) && u >= 1;
+            if (s.off) {
+              s.off.visible = i === k && f < 0.95;
+              if (s.off.visible) vizPlace(s.off, [1, 0, 0, 0, 1, 0, 0, 0, 1], scale(s.n, 1.6 * vizEase(f / 0.9)));
+            }
+          });
+          v.caption(u < 1 ? "a box, bigger than the solid" : k < steps.length ? `face ${k + 1} of 12: slice off everything outside its plane` : "a dodecahedron");
+          vizSpin(sc, t, 0.45);
+          vizDraw(v, sc);
+        };
+      },
+
+      // the same routine, with cut planes: pieces pull apart to show them
+      cuts(v) {
+        const list = [["cube", 3], ["skewb", 2], ["pyraminx", 3], ["megaminx", 3]].map(([id, n]) => {
+          const P = vizPuzzle(id, n), sc = vizScene(), { group, objs } = vizPieces(P, n, sc.root);
+          const cuts = P.axes.reduce((s, a) => s + a.offsets.length, 0), shown = P.pieces.filter((p) => p.stickers.length).length;
+          return { P, sc, objs, text: `${puzzleTitle(P.spec, n)}: ${cuts} cuts, ${shown} pieces` };
+        });
+        const EACH = 4.6;
+        return (t) => {
+          const k = Math.floor(t / EACH) % list.length, u = t % EACH, e = vizEase((u - 0.5) / 1.1) - vizEase((u - 3.2) / 1.1);
+          const { P, sc, objs, text } = list[k];
+          objs[0].parent.scale.setScalar(1 / (P.R * (1 + 0.4 * e))); // (zoom out to keep them in view)
+          objs.forEach((o, i) => vizPlace(o, P.group.mats[0], scale(P.pieces[i].centroid, 0.6 * e)));
+          v.caption(text);
+          vizSpin(sc, t, 0.5);
+          vizDraw(v, sc);
+        };
+      },
+
+      // turns on three puzzles: each rotates the solid onto itself
+      turn(v) {
+        const list = [["cube", 3, "a quarter turn about a face"], ["skewb", 2, "a third of a turn about a corner"], ["megaminx", 3, "a fifth of a turn about a face"]].map(([id, n, text]) => {
+          const P = vizPuzzle(id, n), sc = vizScene(), { objs } = vizPieces(P, n, sc.root);
+          return { P, sc, objs, text: `${puzzleTitle(P.spec, n)}: ${text}`, state: solvedState(P) };
+        });
+        const TURN = 0.8, GAP = 0.45, PER = 3;
+        let j = -1, move = null, turning = null, prev = null;
+        return (t) => {
+          const slot = Math.floor(t / (TURN + GAP)), u = t % (TURN + GAP);
+          const item = list[Math.floor(slot / PER) % list.length];
+          if (slot !== j) {
+            if (move) applyMove(prev.P, prev.state, move); // finish the last turn
+            if (item !== prev) item.state = solvedState(item.P); // (each puzzle's turns start from solved)
+            j = slot; prev = item;
+            move = randomMoves(item.P, 1)[0];
+            turning = new Set(piecesInLayer(item.P, item.state, move.axis, move.layer));
+          }
+          const ax = item.P.axes[move.axis], q = move.q > ax.order / 2 ? move.q - ax.order : move.q;
+          vizPose(item.P, item.objs, item.state, turning, rotMat(ax.dir, (vizEase(u / TURN) * q * TAU) / ax.order));
+          v.caption(item.text);
+          vizSpin(item.sc, t * 0.5, 0.5);
+          vizDraw(v, item.sc);
+        };
+      },
+
+      // rotating the corners themselves, turn after turn, against the exact positions the
+      // whole-number state gives: the gap is floating-point error, piling up
+      drift(v) {
+        const P = vizPuzzle("megaminx", 3);
+        const home = P.pieces.map((p) => p.polys.flatMap((q) => q.verts));
+        let state, naive, n, points, done;
+        const reset = () => { state = solvedState(P); naive = home.map((vs) => vs.map((x) => [...x])); n = 0; points = []; done = null; };
+        reset();
+        const err = () => {
+          let e = 0;
+          home.forEach((vs, i) => { const M = P.group.mats[state[i]]; vs.forEach((x, k) => { e = Math.max(e, len(sub(applyMat(M, x), naive[i][k]))); }); });
+          return e;
+        };
+        const RUN = 7, HOLD = 3, MAXN = 1e5;
+        let t0 = null;
+        const X = (m) => 46 + (Math.log10(m) / 5) * (VIZ_W - 62), Y = (e) => 18 + ((-11 - Math.log10(e)) / 6) * (VIZ_H - 58);
+        return (t) => {
+          if (t0 === null) t0 = t;
+          if (done !== null && t - done > HOLD) { reset(); t0 = t; }
+          const target = Math.min(MAXN, Math.floor(10 ** ((5 * (t - t0)) / RUN)));
+          for (let budget = 1500; n < target && budget > 0; budget--) {
+            const m = randomMoves(P, 1)[0], ax = P.axes[m.axis], R = rotMat(ax.dir, (m.q * TAU) / ax.order);
+            for (const i of piecesInLayer(P, state, m.axis, m.layer)) naive[i] = naive[i].map((x) => applyMat(R, x));
+            applyMove(P, state, m);
+            n++;
+          }
+          if (n > 0 && (!points.length || points[points.length - 1][0] !== n)) points.push([n, Math.max(1e-17, err())]);
+          if (n >= MAXN && done === null) done = t;
+
+          const { ctx } = v, css = getComputedStyle(document.body);
+          const muted = css.getPropertyValue("--muted").trim() || "#8e909b", faint = css.getPropertyValue("--faint").trim() || "#5a5d69";
+          const accent = css.getPropertyValue("--accent").trim() || "#f5c518", text = css.getPropertyValue("--text").trim() || "#ecebe6";
+          ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+          ctx.clearRect(0, 0, VIZ_W, VIZ_H);
+          ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
+          ctx.lineWidth = 1;
+          // grid and axis labels
+          ctx.fillStyle = muted; ctx.strokeStyle = faint; ctx.globalAlpha = 0.6;
+          ctx.textAlign = "center"; ctx.textBaseline = "top";
+          ["1", "10", "100", "1k", "10k", "100k"].forEach((s, i) => {
+            const x = X(10 ** i);
+            ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, VIZ_H - 40); ctx.stroke();
+            ctx.fillText(s, x, VIZ_H - 36);
+          });
+          ctx.fillText("turns", X(10 ** 2.5), VIZ_H - 20);
+          ctx.textAlign = "right"; ctx.textBaseline = "middle";
+          for (const p of [-16, -14, -12]) {
+            const y = Y(10 ** p);
+            ctx.beginPath(); ctx.moveTo(46, y); ctx.lineTo(VIZ_W - 16, y); ctx.stroke();
+            ctx.fillText(`1e${p}`, 40, y);
+          }
+          ctx.globalAlpha = 1;
+          // the exact state: always 0 (drawn along the bottom)
+          const y0 = VIZ_H - 40;
+          ctx.strokeStyle = text; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(X(1), y0); ctx.lineTo(X(Math.max(1, n)), y0); ctx.stroke();
+          ctx.fillStyle = text; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+          ctx.fillText("whole numbers: off by exactly 0", 52, y0 - 4);
+          // the rotated corners
+          ctx.strokeStyle = accent; ctx.lineWidth = 2;
+          ctx.beginPath();
+          points.forEach(([m, e], i) => (i ? ctx.lineTo(X(m), Y(e)) : ctx.moveTo(X(m), Y(e))));
+          ctx.stroke();
+          if (points.length) {
+            const [m, e] = points[points.length - 1];
+            ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(X(m), Y(e), 3, 0, TAU); ctx.fill();
+            v.caption(`${n.toLocaleString()} turns: rotated corners off by up to ${e.toExponential(1)}`);
+          }
+          ctx.fillStyle = accent; ctx.textAlign = "left"; ctx.textBaseline = "top";
+          ctx.fillText("rotating the corners", 52, 20);
+        };
+      },
+
+      // a 2×2×2's whole state, 8 numbers, updated by table lookups
+      table(v) {
+        const P = vizPuzzle("cube", 2), sc = vizScene(), { objs } = vizPieces(P, 2, sc.root);
+        const state = solvedState(P);
+        for (const m of randomMoves(P, 6)) applyMove(P, state, m); // (from solved, every lookup would start at 0)
+        const TURN = 0.8, GAP = 1.4;
+        let j = -1, move = null, turning = new Set(), before = null, r = 0;
+        const light = (on) => objs.forEach((o, i) => {
+          const hi = on && turning.has(i);
+          o.children[0].material = hi ? bodyHiMat : bodyMat;
+          if (o.children[1]) o.children[1].material = hi ? stickerHiMat : stickerMat;
+        });
+        return (t) => {
+          const slot = Math.floor(t / (TURN + GAP)), u = t % (TURN + GAP);
+          if (slot !== j) {
+            if (move) applyMove(P, state, move);
+            j = slot;
+            move = randomMoves(P, 1)[0];
+            turning = new Set(piecesInLayer(P, state, move.axis, move.layer));
+            before = Int32Array.from(state);
+            r = P.axes[move.axis].rot[move.q];
+            light(true);
+          }
+          const ax = P.axes[move.axis], q = move.q > ax.order / 2 ? move.q - ax.order : move.q;
+          const f = vizEase(u / TURN);
+          vizPose(P, objs, state, turning, rotMat(ax.dir, (f * q * TAU) / ax.order));
+          const { ctx } = v, css = getComputedStyle(document.body);
+          const accent = css.getPropertyValue("--accent").trim() || "#f5c518", muted = css.getPropertyValue("--muted").trim() || "#8e909b";
+          const border = css.getPropertyValue("--border").trim() || "#2e3240", text = css.getPropertyValue("--text").trim() || "#ecebe6";
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, v.cv.width, v.cv.height);
+          vizSpin(sc, t * 0.4, 0.55);
+          vizDraw(v, sc);
+          // the state: one box per piece, the turning ones showing their lookup
+          ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+          const bw = 48, gap = 4, x0 = (VIZ_W - (8 * bw + 7 * gap)) / 2, y = VIZ_H + 8;
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          for (let i = 0; i < 8; i++) {
+            const x = x0 + i * (bw + gap), on = turning.has(i);
+            ctx.strokeStyle = on ? accent : border; ctx.lineWidth = on ? 1.5 : 1;
+            ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, 40);
+            ctx.fillStyle = muted; ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
+            ctx.fillText(`piece ${i}`, x + bw / 2, y + 11);
+            ctx.fillStyle = on ? accent : text; ctx.font = '13px "JetBrains Mono", ui-monospace, monospace';
+            const now = on ? P.group.mul[r][before[i]] : state[i];
+            ctx.fillText(on && f < 1 ? `${before[i]}→${now}` : String(now), x + bw / 2, y + 28);
+          }
+          v.caption(`this turn is rotation ${r}: each lit piece's g becomes mul[${r}][g]`);
+        };
+      },
+    };
+
+    function startViz(el) {
+      stopViz();
+      if (!vizRenderer) {
+        vizRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        vizRenderer.setClearColor(0x000000, 0);
+      }
+      const dpr = Math.min(devicePixelRatio, 2);
+      vizRenderer.setPixelRatio(dpr);
+      vizRenderer.setSize(VIZ_W, VIZ_H, false);
+      vizzes = [...el.querySelectorAll(".cw-viz")].map((cv) => {
+        const kind = cv.dataset.viz, cap = el.querySelector(`[data-caption="${kind}"]`);
+        const tall = kind === "table" ? 60 : 0;
+        cv.width = VIZ_W * dpr; cv.height = (VIZ_H + tall) * dpr;
+        const v = { cv, ctx: cv.getContext("2d"), dpr, caption: (s) => { if (cap && cap.textContent !== s) cap.textContent = s; } };
+        return { v, frame: VIZ[kind](v) };
+      });
+      const t0 = performance.now();
+      const loop = (now) => {
+        vizRAF = requestAnimationFrame(loop);
+        const t = (now - t0) / 1000;
+        for (const { v, frame } of vizzes) {
+          const r = v.cv.getBoundingClientRect();
+          if (r.bottom < 0 || r.top > innerHeight) continue; // (off screen in the modal's scroll)
+          if (v.cv.dataset.viz !== "drift" && v.cv.dataset.viz !== "table") { v.ctx.setTransform(1, 0, 0, 1, 0, 0); v.ctx.clearRect(0, 0, v.cv.width, v.cv.height); }
+          frame(t);
+        }
+      };
+      vizRAF = requestAnimationFrame(loop);
+    }
+    function stopViz() { cancelAnimationFrame(vizRAF); vizzes = []; }
+    document.addEventListener("cohesion-modal-open", (e) => { if (e.detail?.className?.includes("cohesion-about")) startViz(e.detail.el); });
+    document.addEventListener("cohesion-modal-close", (e) => { if (e.detail?.className?.includes("cohesion-about")) stopViz(); });
 
     // ---------- test hook ----------
     // For the browser tests (e2e/) and poking at things from the console: drive the page

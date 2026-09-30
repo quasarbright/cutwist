@@ -10,6 +10,17 @@ test("the page loads a 3×3×3 cube with no errors", async ({ page }) => {
   await noErrors(errors);
 });
 
+test("the about modal's diagrams run", async ({ page }) => {
+  const errors = await open(page);
+  await page.getByRole("button", { name: "about", exact: true }).click();
+  // each diagram fills in its caption from its animation loop once it's on screen
+  for (const kind of ["carve", "cuts", "turn", "drift", "table"]) {
+    await page.locator(`.cohesion-about [data-viz="${kind}"]`).scrollIntoViewIfNeeded();
+    await expect(page.locator(`.cohesion-about [data-caption="${kind}"]`)).not.toHaveText(/^\s*$/);
+  }
+  await noErrors(errors);
+});
+
 test("without WebGL the page says so and how to turn it on", async ({ page }) => {
   // (as with graphics acceleration off: the browser hands back no WebGL context)
   await page.addInitScript(() => {
