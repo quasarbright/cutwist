@@ -479,7 +479,9 @@
       <p>Every piece of the puzzle ends up rotated by one of these, because turns are made of
         them. So the engine doesn't store where the pieces are. It keeps each piece's home shape,
         from the solved puzzle, and stores one number per piece: which of the rotations that
-        piece has gone through. The whole puzzle is a list of numbers, starting as all zeros.</p>
+        piece has gone through. The rotation is about the puzzle's center, so it moves the piece
+        as well as turning it: one number says both which spot the piece is in and which way it
+        faces. The whole puzzle is a list of numbers, starting as all zeros.</p>
       <p>Here's one turn of a solved 2×2×2, with one piece lit, next to an uncut cube. The turn
         is a quarter turn, which is one of the rotations on the list. It turns the lit piece
         exactly the way it turns the whole uncut cube, so the piece's number becomes that
@@ -503,6 +505,18 @@
         piece. The gray #0 to #7 around the cube mark where each piece started, and stay put.</p>
       <canvas class="cw-viz" data-viz="table"></canvas>
       <p class="cw-viz-caption" data-caption="table">&nbsp;</p>
+
+      <div class="section-label">what counts as solved</div>
+      <p>All zeros is the state the puzzle starts in, but it isn't the only solved one. Turn both
+        layers of a 2×2×2 the same way, one after the other, and the whole cube has turned: every
+        piece now holds the same number, and every face is still one color.</p>
+      <canvas class="cw-viz" data-viz="solved"></canvas>
+      <p class="cw-viz-caption" data-caption="solved">&nbsp;</p>
+      <p>So the engine doesn't look for zeros. It keeps a second table: for each rotation, which
+        face it sends each face to. With it, it works out which face every sticker points at now,
+        and calls the puzzle solved when every face shows a single color. That also covers pieces
+        that look alike. A 3×3×3's center spun in place has a new number but looks the same, and
+        on a 4×4×4 two centers of the same color can swap places without anything changing.</p>
 
       <div class="section-label">why not move the pieces themselves?</div>
       <p>The obvious way to build this is to store every corner of every piece as an x, y and z,
@@ -2514,6 +2528,52 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
             vizTag(ctx, x, y, moving ? `0→${c.g}` : String(f >= 0.5 ? c.g : 0), c.g !== 0 && f > 0, C);
           }
           v.caption(f === 0 ? "every cube starts at rotation 0" : "all 24 of the cube's rotations, each labeled with its number");
+        };
+      },
+
+      // Both layers of a 2×2×2 turned the same way, one after the other: every piece ends up
+      // with the same number, and the real solved check (isSolved) says yes again; then back
+      solved(v) {
+        const P = vizPuzzle("cube", 2), sc = vizScene(), { group, objs } = vizPieces(P, 2, sc.root), plane = vizCutPlane(P.R * 1.2, group);
+        const state = solvedState(P), ax = P.axes[0];
+        const moves = [{ axis: 0, layer: 0, q: 1 }, { axis: 0, layer: 1, q: 1 }, { axis: 0, layer: 1, q: ax.order - 1 }, { axis: 0, layer: 0, q: ax.order - 1 }];
+        const LEAD = 0.3, TURN = 0.9, HOLDS = [1.4, 3, 1.4, 2], SLOTS = HOLDS.map((h) => LEAD + TURN + h);
+        const ROUND = SLOTS.reduce((a, b) => a + b, 0);
+        let done = -1, turning = new Set(), before = null;
+        return (t) => {
+          let u = t % ROUND, k = 0;
+          while (u >= SLOTS[k]) { u -= SLOTS[k]; k++; }
+          // catch the state up: moves before k done, this one starting (a new round starts from solved)
+          if (k < done) { state.set(solvedState(P)); done = -1; }
+          while (done < k - 1) { done++; applyMove(P, state, moves[done]); }
+          if (done === k - 1 && before?.k !== k) {
+            const m = moves[k];
+            turning = new Set(piecesInLayer(P, state, m.axis, m.layer));
+            before = { k, state: Int32Array.from(state), r: ax.rot[m.q] };
+          }
+          const m = moves[k], s = u, w = s - LEAD, f = vizEase(w / TURN), q = m.q > ax.order / 2 ? m.q - ax.order : m.q;
+          const rot = rotMat(ax.dir, (f * q * TAU) / ax.order);
+          vizPose(P, objs, state, turning, rot);
+          plane(ax.dir, vizLayerCut(ax, m.layer), Math.min(1, s / LEAD, (TURN + 0.3 - w) / 0.3));
+          vizSpin(sc, 0.9 + Math.sin(t * 0.3) * 0.5, 0.55);
+          vizDraw(v, sc);
+          // each piece's number, riding along; the turning ones show their lookup
+          const { ctx } = v, C = vizColors();
+          ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+          sc.root.updateMatrixWorld();
+          const tags = P.pieces.map((piece, i) => {
+            let M = P.group.mats[state[i]];
+            if (turning.has(i)) M = mulMat(rot, M);
+            const p = new THREE.Vector3(...scale(applyMat(M, piece.centroid), 1.5 / P.R)).applyMatrix4(sc.root.matrixWorld);
+            const depth = p.z, sp = p.project(sc.cam), on = turning.has(i), now = on ? P.group.mul[before.r][before.state[i]] : state[i];
+            return { x: (sp.x + 1) / 2 * VIZ_W, y: (1 - sp.y) / 2 * VIZ_H, depth, on, text: on && f > 0 && f < 1 ? `${before.state[i]}→${now}` : String(on && f >= 1 ? now : before.state[i]) };
+          }).sort((a, b) => a.depth - b.depth);
+          for (const tag of tags) { ctx.globalAlpha = tag.depth > 0 ? 1 : 0.45; vizTag(ctx, tag.x, tag.y, tag.text, tag.on && f > 0, C); }
+          ctx.globalAlpha = 1;
+          // solved or not, by the engine's own check, once this turn has landed
+          const after = f >= 1 ? (() => { const s2 = Int32Array.from(state); applyMove(P, s2, m); return s2; })() : state;
+          const solved = isSolved(P, after), same = after.every((g) => g === after[0]);
+          v.caption(`solved: ${solved ? "yes" : "no"}` + (solved && after[0] !== 0 && same ? ` · every piece is ${after[0]}, not 0: the whole cube turned` : solved && after[0] === 0 ? " · all zeros" : ""));
         };
       },
 
