@@ -9,3 +9,16 @@ test("the page loads a 3×3×3 cube with no errors", async ({ page }) => {
   expect(s.solved).toBe(true);
   await noErrors(errors);
 });
+
+test("without WebGL the page says so and how to turn it on", async ({ page }) => {
+  // (as with graphics acceleration off: the browser hands back no WebGL context)
+  await page.addInitScript(() => {
+    const get = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+      return /webgl/.test(type) ? null : get.call(this, type, ...rest);
+    };
+  });
+  await page.goto("/index.html", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#nogl")).toBeVisible();
+  await expect(page.locator("#nogl")).toContainText("graphics acceleration");
+});
