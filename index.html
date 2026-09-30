@@ -2335,7 +2335,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // buildPuzzle's order; then the pieces pull apart.
       cuts(v) {
         const accent = getComputedStyle(document.body).getPropertyValue("--accent").trim() || "#f5c518";
-        const list = [["cube", 3], ["skewb", 2], ["megaminx", 3]].map(([id, n]) => {
+        const list = [["cube", 3], ["pyraminx", 3], ["megaminx", 3]].map(([id, n]) => {
           const P = vizPuzzle(id, n), sc = vizScene(), group = new THREE.Group();
           group.scale.setScalar(1 / P.R);
           sc.root.add(group);
