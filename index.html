@@ -489,7 +489,10 @@
         Here's a solved 2×2×2 with one piece lit, next to an uncut cube with the same corner lit.
         Each of the three layers the piece is in takes a quarter turn each way, going back to the
         start after each. Each turn moves the lit piece exactly the way it moves the whole uncut
-        cube, lit corner and all, so the piece's number becomes that rotation's number.</p>
+        cube, lit corner and all, so the piece's number becomes that rotation's number. On the
+        right is the piece by itself, turned the same way, with the rest of the cube as a
+        wireframe: you can think of every piece as carrying its own whole copy of the shape,
+        with everything but its own corner hidden.</p>
       <canvas class="cw-viz" data-viz="onepiece"></canvas>
       <p class="cw-viz-caption" data-caption="onepiece">&nbsp;</p>
       <p>A turn works like this:</p>
@@ -2627,7 +2630,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // rotation r, the same one that takes the uncut cube (and its lit corner) from 0 to r, so
       // the piece's number becomes r
       onepiece(v) {
-        const P = vizPuzzle("cube", 2), U = vizPuzzle("cube", 1), sc = vizOrthoScene(2.75);
+        const P = vizPuzzle("cube", 2), U = vizPuzzle("cube", 1), sc = vizOrthoScene(4);
         const objs = P.pieces.map((p) => { const o = pieceObject(p, P.colors, null, 0.028 * P.R * 1.5, 0.004 * P.R); sc.root.add(o); return o; });
         const whole = pieceObject(U.pieces[0], U.colors, null, 0.028 * U.R, 0.004 * U.R);
         sc.root.add(whole);
@@ -2647,7 +2650,17 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const shellMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false });
         const shell = () => { const m = new THREE.Mesh(objs[i].children[0].geometry, shellMat); m.matrixAutoUpdate = false; sc.root.add(m); return m; };
         const pieceShell = shell(), cornerShell = shell();
-        const L = [-1.35, 0, 0], Rp = [1.45, 0, 0], s = 0.95 / P.R;
+        // and the piece on its own, turning about the same center as the uncut cube: that
+        // cube's lit corner and nothing else (its inside faces are plain black plastic)
+        const alone = pieceObject(P.pieces[i], P.colors, null, 0.028 * P.R * 1.5, 0.004 * P.R);
+        sc.root.add(alone);
+        // ... inside a wireframe of the rest of its copy: the other pieces' edges
+        const wire = new THREE.Group();
+        wire.matrixAutoUpdate = false;
+        const wireMat = new THREE.LineBasicMaterial({ color: 0x8e909b, transparent: true, opacity: 0.55 });
+        objs.forEach((o, k) => { if (k !== i) wire.add(new THREE.LineSegments(new THREE.EdgesGeometry(o.children[0].geometry, 20), wireMat)); });
+        sc.root.add(wire);
+        const L = [-2.7, 0, 0], Rp = [0, 0, 0], A = [2.7, 0, 0], s = 0.95 / P.R;
         const HOLD0 = 0.9, MOVE = 1.1, HOLD = 2.2, BACK = 1, EACH = HOLD0 + MOVE + HOLD + BACK;
         const I = new THREE.Quaternion();
         return (t) => {
@@ -2659,6 +2672,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           vizPlaceQ(whole, qf, Rp, s);
           vizPlaceQ(pieceShell, qf, L, s * 1.012);
           vizPlaceQ(cornerShell, qf, Rp, s * 1.012);
+          vizPlaceQ(alone, qf, A, s);
+          vizPlaceQ(wire, qf, A, s);
           vizDraw(v, sc);
           const { ctx } = v, C = vizColors();
           ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
@@ -2667,8 +2682,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           const rn = cubeName(r), label = f > 0 && f < 1 ? (back ? `${rn}→0` : `0→${rn}`) : String(f >= 0.5 ? rn : 0);
           const [px, py] = vizProject(sc, at(P.pieces[i].centroid, qf, L, 1.25));
           vizTag(ctx, px, py, label, f > 0, C);
-          const [wx, wy] = vizProject(sc, [Rp[0], Rp[1] - 1.05, 0]);
-          vizTag(ctx, wx, wy, label, f > 0, C);
+          for (const base of [Rp, A]) {
+            const [wx, wy] = vizProject(sc, [base[0], base[1] - 1.05, 0]);
+            vizTag(ctx, wx, wy, label, f > 0, C);
+          }
           v.caption(f === 0 && !back ? "the lit piece and the uncut cube are both at rotation 0" : back ? "and back to 0"
             : `turn ${n + 1} of ${turns.length} is rotation ${rn}: the lit piece turns exactly like the uncut cube's lit corner`);
         };
