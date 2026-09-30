@@ -3,7 +3,7 @@
 // Run: node --test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { surfacePoint } from "./surfaces.mjs";
+import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
 
 const same = (a, b, msg) => assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-7, `${msg}: ${a} vs ${b}`);
 const samples = Array.from({ length: 21 }, (_, i) => i / 20);
@@ -29,8 +29,29 @@ test("Boy's surface: both pairs of edges meet mirrored (opposite boundary points
   }
 });
 
+test("figure-8 Klein bottle: glued like the bottle", () => {
+  for (const u of samples) {
+    same(surfacePoint("klein8", 0, u), surfacePoint("klein8", 1, u), `s edge at t=${u}`);
+    same(surfacePoint("klein8", u, 1), surfacePoint("klein8", 1 - u, 0), `t edge at s=${u}`);
+  }
+});
+
+test("Roman surface: glued like Boy's surface (opposite boundary points)", () => {
+  for (const u of samples) {
+    same(surfacePoint("roman", 1, u), surfacePoint("roman", 0, 1 - u), `s edge at t=${u}`);
+    same(surfacePoint("roman", u, 1), surfacePoint("roman", 1 - u, 0), `t edge at s=${u}`);
+  }
+});
+
+test("each puzzle's shapes are real ones, its own first", () => {
+  for (const [topology, shapes] of Object.entries(SURFACE_SHAPES)) {
+    assert.equal(shapes[0].id, topology);
+    for (const { id } of shapes) assert.equal(surfacePoint(id, 0.3, 0.6).length, 3);
+  }
+});
+
 test("every surface fits the unit sphere, and fills it", () => {
-  for (const topology of ["torus", "klein", "rp2"]) {
+  for (const topology of ["torus", "klein", "rp2", "klein8", "roman"]) {
     let r = 0;
     for (const s of samples) for (const t of samples) r = Math.max(r, Math.hypot(...surfacePoint(topology, s, t)));
     assert.ok(r <= 1 + 1e-9 && r > 0.9, `${topology}: ${r}`);
@@ -39,7 +60,7 @@ test("every surface fits the unit sphere, and fills it", () => {
 
 test("no jumps: walking any surface in small steps moves a small distance (pieces meet)", () => {
   const N = 400;
-  for (const topology of ["torus", "klein", "rp2"])
+  for (const topology of ["torus", "klein", "rp2", "klein8", "roman"])
     for (let i = 0; i <= 8; i++) {
       const s = i / 8;
       for (let j = 0; j < N; j++) {

@@ -60,6 +60,7 @@
     html.background #bg { display: block !important; position: fixed; inset: 0; width: 100vw; height: 100vh; }
 
     /* rear view: the line between the two views, named at its foot */
+    #surfaceShape[hidden] { display: none; } /* (the bar's own display would override hidden) */
     #rear { white-space: nowrap; }
     #rear:disabled { opacity: .4; cursor: not-allowed; }
     .tw-split { position: fixed; width: 1px; background: var(--border); z-index: 2; pointer-events: none; }
@@ -349,6 +350,8 @@
       <div class="control-head"><span class="name" title="the flat grid, the surface it glues into, or both side by side (one is always on)">view</span></div>
       <label class="check" title="the grid laid flat, its glued edges shown as faint copies past each side"><input type="checkbox" id="viewFlat" checked /> flat</label>
       <label class="check" title="the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way"><input type="checkbox" id="view3D" checked /> 3D surface</label>
+      <!-- the shape the surface is drawn as, where there's a choice (filled in by renderShapeChoice) -->
+      <div class="tw-seg tw-fill tw-sub" role="radiogroup" id="surfaceShape" aria-label="surface shape" title="the same surface drawn another way: both glue the grid's edges the same, so the puzzle is the same" hidden></div>
     </div>
     <div class="control tw-look" id="planarControls" hidden>
       <div class="control-head"><span class="name" title="how the cells are marked">look</span></div>
@@ -586,7 +589,7 @@
       PLANAR_PRESETS, buildPlanar, solvedPlanarState, isPlanarSolved, applyPlanarMove, inversePlanarMove, planarScrambleMoves,
     } from "./planar.mjs";
     import { PlanarView } from "./planar-view.mjs";
-    import { surfacePoint } from "./surfaces.mjs";
+    import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
 
     const $ = (id) => document.getElementById(id);
     const TAU = Math.PI * 2;
@@ -1499,6 +1502,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         buildSurface();
         if (resetView) root.quaternion.copy(surfaceView());
       }
+      renderShapeChoice();
       planeBox = "";
       placeCamera();
       $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
@@ -2005,7 +2009,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       for (let j = 0; j <= nv; j++)
         for (let i = 0; i <= nu; i++) {
           const k = j * (nu + 1) + i, s = i / nu, t = j / nv;
-          pos.set(surfacePoint(P.topology, s, t), k * 3);
+          pos.set(surfacePoint(shapeId(), s, t), k * 3);
           uv.set([s, 1 - t], k * 2); // the canvas's top row (t = 0) is the texture's top
           if (i < nu && j < nv) idx.push(k, k + nu + 1, k + 1, k + 1, k + nu + 1, k + nu + 2);
         }
@@ -2039,9 +2043,36 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function surfaceView() {
       // (the bottle turned like a glass one on a shelf, neck looping over to its left side;
       // Boy's surface seen straight down its axis of threefold symmetry: the dome over the
-      // triple point, with the three lobes curling around it)
-      const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[P.topology];
+      // triple point, with the three lobes curling around it; the figure 8 from above its
+      // ring; the Roman surface turned so its lobes and pinches show)
+      const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0], klein8: [0.6, 0], roman: [0.55, 0.8] }[shapeId()];
       return new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
+    }
+    // Which shape a planar puzzle's surface is drawn as (SURFACE_SHAPES: the Klein bottle as a
+    // bottle or a figure 8, the projective plane as Boy's or the Roman surface), per puzzle
+    // kind, kept across puzzles for the session. The first is the default.
+    const shapeChoice = {};
+    const shapeId = () => shapeChoice[P.topology] || P.topology;
+    function renderShapeChoice() {
+      const shapes = isPlanar() ? SURFACE_SHAPES[P.topology] : [];
+      const bar = $("surfaceShape");
+      bar.hidden = shapes.length < 2;
+      bar.replaceChildren(...shapes.map(({ id, name }) => {
+        const b = document.createElement("button");
+        b.setAttribute("role", "radio");
+        b.setAttribute("aria-checked", String(id === shapeId()));
+        b.dataset.shape = id;
+        b.textContent = name;
+        b.onclick = () => {
+          if (id === shapeId()) return;
+          shapeChoice[P.topology] = id;
+          buildSurface();
+          root.quaternion.copy(surfaceView());
+          renderShapeChoice();
+          writeURL();
+        };
+        return b;
+      }));
     }
     function renderSurface(region, slide, look) {
       const hints = slide ? null : edgeHints; // (none while a line moves)
@@ -2100,7 +2131,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     // screen position (CSS px) of the surface at flat coordinates (s, t)
     function surfaceToScreen(s, t) {
-      const v = new THREE.Vector3(...surfacePoint(P.topology, s, t));
+      const v = new THREE.Vector3(...surfacePoint(shapeId(), s, t));
       surfaceMesh.localToWorld(v).project(inputCam);
       return [((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H];
     }
@@ -2336,6 +2367,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (rearView) q.set("rear", "on");
       if (isPlanar()) {
         if (planarTextures) q.set("textures", "on");
+        if (shapeId() !== P.topology) q.set("shape", shapeId());
         if (!viewFlat) q.set("flat", "off");
         if (!view3D) q.set("3d", "off");
         if (!showLabels) q.set("labels", "off");
@@ -2373,6 +2405,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         if (currentSpec().rule === "planar") planarTextures = on("textures");
         else textureChoice = on("textures");
       }
+      const topo = currentSpec().topology;
+      if (topo && (SURFACE_SHAPES[topo] || []).some((s) => s.id === q.get("shape"))) shapeChoice[topo] = q.get("shape");
       viewFlat = !off("flat"); view3D = !off("3d");
       if (!viewFlat && !view3D) viewFlat = true;
       showLabels = !off("labels");
@@ -3089,7 +3123,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           id: isCustom() ? "custom" : MENU[presetIdx].id, title: $("name").textContent, size, rear: rearOn(),
           ...(isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
-                views: { flat: viewFlat, surface: view3D } }
+                views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,

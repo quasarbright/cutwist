@@ -4,6 +4,8 @@
 //   torus         f(0, t) = f(1, t),  f(s, 0) = f(s, 1)
 //   Klein bottle  f(0, t) = f(1, t),  f(s, 1) = f(1 − s, 0)
 //   Boy's surface f(1, t) = f(0, 1 − t),  f(s, 1) = f(1 − s, 0)   (the projective plane)
+// and a second picture of each of the last two: the figure-8 Klein bottle and the Roman
+// surface, glued the same ways.
 // The Klein bottle and projective plane can't sit in 3D without passing through themselves,
 // so these shapes do (the bottle's neck, Boy's surface's curve of self-crossing). Every shape is centered and
 // scaled to fit a unit sphere, like the 3D puzzles.
@@ -97,7 +99,39 @@ function boy(s, t) {
   return [M[0] / m2, M[1] / m2, M[2] / m2];
 }
 
-const SHAPES = { torus, klein, rp2: boy };
+// The figure-8 Klein bottle: a figure-eight cross section swept around a circle, turning half
+// over on the way, so after one lap the eight comes back upside down and joins its start
+// mirrored. Rows (t) go around the circle; that's the mirrored direction, so the flat grid's
+// top-bottom gluing works out: f(s, 1) = f(1 − s, 0). Columns (s) go around the eight.
+// (Upright: the circle lies flat, around the vertical axis.)
+function klein8(s, t) {
+  const R = 2, u = TAU * t, v = TAU * s, c = Math.cos(u / 2), sn = Math.sin(u / 2);
+  const w = R + c * Math.sin(v) - sn * Math.sin(2 * v);
+  return [w * Math.cos(u), sn * Math.sin(v) + c * Math.sin(2 * v), w * Math.sin(u)];
+}
+
+// Steiner's Roman surface: a point (x, y, z) of the unit sphere goes to (yz, xz, xy), which is
+// the same for a point and its opposite, so the sphere folds onto the projective plane. The
+// flat grid goes onto the disk as for Boy's surface (opposite rim points opposite), and the disk
+// onto the upper half of the sphere (the rim onto the equator, where opposite points are
+// glued); the center of the grid is the top of the sphere. It crosses itself along three
+// lines through a triple point, and pinches to a point at their six ends.
+function roman(s, t) {
+  const X = 2 * s - 1, Y = 2 * t - 1;
+  const zx = X * Math.sqrt(Math.max(0, 1 - (Y * Y) / 2)), zy = Y * Math.sqrt(Math.max(0, 1 - (X * X) / 2));
+  const rho = Math.min(1, Math.hypot(zx, zy)), th = (rho * Math.PI) / 2, k = rho ? Math.sin(th) / rho : 0;
+  const x = zx * k, y = zy * k, z = Math.cos(th);
+  return [y * z, x * y, x * z];
+}
+
+// each shape: its function and the gluing it has (the topology it's a picture of)
+const SHAPES = { torus, klein, klein8, rp2: boy, roman };
+// The shapes each planar puzzle can be shown as, the first the default: { id, name }
+export const SURFACE_SHAPES = {
+  torus: [{ id: "torus", name: "torus" }],
+  klein: [{ id: "klein", name: "bottle" }, { id: "klein8", name: "figure 8" }],
+  rp2: [{ id: "rp2", name: "Boy's surface" }, { id: "roman", name: "Roman surface" }],
+};
 
 // center and scale each shape into the unit sphere, from a sample of its points
 const FIT = {};
@@ -121,13 +155,13 @@ for (const [name, f] of Object.entries(SHAPES)) {
 // Which way the grid runs on each shape: reversing s keeps every gluing (both edges it
 // joins swap together) but turns the texture over. Chosen so the torus and most of the other
 // two's outsides read the right way round; the one-sided shapes can't read right everywhere.
-const FLIP_S = { torus: true, klein: true, rp2: false };
+const FLIP_S = { torus: true, klein: true, rp2: false, klein8: false, roman: false };
 // Reversing t keeps the gluings too. Reversing both s and t turns the texture a half turn
 // (upright instead of upside down, still not mirrored): the bottle's rows run up its wall.
-const FLIP_T = { torus: false, klein: true, rp2: false };
+const FLIP_T = { torus: false, klein: true, rp2: false, klein8: false, roman: false };
 
-// the point of `topology`'s surface at flat coordinates (s, t)
-export function surfacePoint(topology, s, t) {
-  const p = SHAPES[topology](FLIP_S[topology] ? 1 - s : s, FLIP_T[topology] ? 1 - t : t), { c, r } = FIT[topology];
+// the point of a shape (an id from SURFACE_SHAPES) at flat coordinates (s, t)
+export function surfacePoint(shape, s, t) {
+  const p = SHAPES[shape](FLIP_S[shape] ? 1 - s : s, FLIP_T[shape] ? 1 - t : t), { c, r } = FIT[shape];
   return [(p[0] - c[0]) / r, (p[1] - c[1]) / r, (p[2] - c[2]) / r];
 }

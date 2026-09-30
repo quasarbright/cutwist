@@ -187,3 +187,24 @@ test("the corner card: the solved surface in 3D with the 3D view on, the flat gr
   await page.locator("#viewFlat").uncheck();
   await expect(page.locator("#refPlane")).toBeHidden();
 });
+
+test("the Klein bottle and projective plane can be drawn as another shape; the URL keeps it", async ({ page }) => {
+  const errors = await open(page);
+  await load(page);
+  await expect(page.locator("#surfaceShape")).toBeHidden(); // a torus has one shape
+  await load(page, { topology: "klein" });
+  expect((await info(page)).shape).toBe("klein");
+  await page.locator('#surfaceShape [data-shape="klein8"]').click();
+  expect((await info(page)).shape).toBe("klein8");
+  expect(new URL(page.url()).searchParams.get("shape")).toBe("klein8");
+  // still the same puzzle: a slide moves cells as before
+  await turn(page, [0, 1, 1]);
+  expect((await info(page)).moves).toBe(1);
+  await load(page, { topology: "rp2" });
+  await page.locator('#surfaceShape [data-shape="roman"]').click();
+  expect((await info(page)).shape).toBe("roman");
+  await page.reload();
+  await page.waitForFunction(() => !!window.cutwist);
+  expect((await info(page)).shape).toBe("roman");
+  await noErrors(errors);
+});
