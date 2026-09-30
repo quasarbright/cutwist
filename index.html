@@ -2247,17 +2247,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       vizRenderer.render(sc.scene, sc.cam);
       v.ctx.drawImage(vizRenderer.domElement, 0, top * v.dpr, VIZ_W * v.dpr, VIZ_H * v.dpr);
     }
-    // A translucent cut plane, like the cuts diagram's: show(dir, offset, opacity) puts it on
+    // A translucent cut plane, like the cuts diagram's: show(dir, offset, opacity, color?) puts it on
     // the plane dir·x = offset (in `group`'s units), a disc of the given radius.
     function vizCutPlane(radius, group) {
       const accent = getComputedStyle(document.body).getPropertyValue("--accent").trim() || "#f5c518";
       const mat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
       const mesh = new THREE.Mesh(new THREE.CircleGeometry(radius, 72), mat), Z = new THREE.Vector3(0, 0, 1);
       group.add(mesh);
-      return (dir, off, opacity) => {
+      return (dir, off, opacity, color = accent) => {
         mesh.visible = opacity > 0;
         mat.opacity = 0.32 * opacity;
         if (!mesh.visible) return;
+        mat.color.set(color);
         mesh.quaternion.setFromUnitVectors(Z, new THREE.Vector3(...dir));
         mesh.position.set(...scale(dir, off));
       };
@@ -2307,7 +2308,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           if (s.off.visible) vizPlace(s.off, [1, 0, 0, 0, 1, 0, 0, 0, 1], scale(s.n, 1.6 * vizEase(g / 0.9)));
         });
         const inStep = u >= 1.2 && k < steps.length;
-        plane(inStep ? steps[k].n : [0, 0, 1], 1, inStep ? Math.min(1, f / 0.2, (1 - f) / 0.3) : 0);
+        // (in the color of the face it makes)
+        plane(inStep ? steps[k].n : [0, 0, 1], 1, inStep ? Math.min(1, f / 0.2, (1 - f) / 0.3) : 0, inStep ? colors[k] : undefined);
         v.caption(u < 1.2 ? startText : k < steps.length ? `face ${k + 1} of 12: slice off everything outside its plane` : endText);
         vizSpin(sc, t, 0.45);
         vizDraw(v, sc);
