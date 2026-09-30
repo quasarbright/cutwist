@@ -2433,7 +2433,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
       // turns on three puzzles: each rotates the solid onto itself
       turn(v) {
-        const list = [["cube", 3, "a quarter turn about a face"], ["skewb", 2, "a third of a turn about a corner"], ["octa-corner", 3, "a quarter turn about a corner"], ["megaminx", 3, "a fifth of a turn about a face"]].map(([id, n, text]) => {
+        const list = [["cube", 3, "a quarter turn about a face"], ["skewb", 2, "a third of a turn about a corner"], ["octa-corner", 2, "a quarter turn about a corner"], ["megaminx", 3, "a fifth of a turn about a face"]].map(([id, n, text]) => {
           const P = vizPuzzle(id, n), sc = vizScene(), { group, objs } = vizPieces(P, n, sc.root);
           return { P, sc, objs, plane: vizCutPlane(P.R * 1.2, group), text: `${puzzleTitle(P.spec, n)}: ${text}`, state: solvedState(P) };
         });
