@@ -116,6 +116,22 @@ export class PlanarView {
     if (look.edgeHints) this.drawEdgeHints(look.edgeHints, c);
   }
 
+  // Just the cells, stretched to fill the whole canvas (a little off square when the grid's
+  // shape isn't quite the canvas's): the idle background (background.mjs).
+  drawFill(P, state, slide, look) {
+    const { ctx, canvas } = this;
+    this.P = P;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#0a0b0e";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(canvas.width / P.W, 0, 0, canvas.height / P.H, 0, 0); // one unit per cell
+    const slots = this.slots(state, slide);
+    for (let i = 0; i < P.n; i++) {
+      const at = { x: i % P.W, y: Math.floor(i / P.W) };
+      this.drawSlot(slots[i], at.x, at.y, 1, 0, look, at);
+    }
+  }
+
   // The cell under the pointer on the 3D surface: a chevron at each edge, pointing out, the way
   // a click near that edge slides it; the one whose zone the pointer is in lit up. Drawn on the
   // grid, not the piece, so they point along the surface whatever way the piece is turned.

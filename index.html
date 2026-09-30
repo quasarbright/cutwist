@@ -17,6 +17,10 @@
   }
   </script>
 
+  <!-- ?background: only the idle animation (background.mjs), full screen. Set before the body
+       draws, so the controls never flash in. -->
+  <script>if (new URLSearchParams(location.search).has("background")) document.documentElement.classList.add("background");</script>
+
   <link rel="stylesheet" href="https://quasarbright.github.io/sketches/shared/cohesion.css" />
   <script type="module" src="https://quasarbright.github.io/sketches/shared/cohesion.js"></script>
 
@@ -50,6 +54,10 @@
     #c, #plane { position: fixed; top: 0; left: 0; z-index: 1; display: block; touch-action: none; }
     #c[hidden], #plane[hidden], #refPlane[hidden] { display: none; }
     #refPlane { position: absolute; inset: 0; width: 100%; height: 100%; }
+    /* ?background: nothing but the animation's canvas */
+    #bg { display: none; }
+    html.background body > * { display: none !important; }
+    html.background #bg { display: block !important; position: fixed; inset: 0; width: 100vw; height: 100vh; }
 
     /* rear view: the line between the two views, named at its foot */
     #rear { white-space: nowrap; }
@@ -293,6 +301,7 @@
   </style>
 </head>
 <body>
+  <canvas id="bg"></canvas>
   <canvas id="c"></canvas>
   <canvas id="plane" hidden></canvas>
   <div class="tw-split" id="rearSplit" hidden><span>front</span><span>back</span></div>
@@ -562,6 +571,11 @@
   <mike-footer overlay></mike-footer>
 
   <script type="module">
+    // ?background: only the idle animation, full screen (it needs nothing from the script below)
+    if (document.documentElement.classList.contains("background"))
+      import("./background.mjs").then(({ startBackground }) => startBackground(document.getElementById("bg")));
+  </script>
+  <script type="module">
     import * as THREE from "three";
     import {
       PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, toCustom, CUT_RANGE, TRIM_RANGE,
@@ -577,6 +591,10 @@
     const $ = (id) => document.getElementById(id);
     const TAU = Math.PI * 2;
     const mod = (a, n) => ((a % n) + n) % n;
+
+    // ?background: the idle animation (the module above) runs instead of the page, and the rest
+    // of this script never does: it waits on a promise that never settles
+    if (document.documentElement.classList.contains("background")) await new Promise(() => {});
 
     // ---------- three.js scene ----------
     const canvas = $("c");
