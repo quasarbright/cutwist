@@ -373,7 +373,8 @@ export const PRESETS = [
   { id: "megaminx-crystal", name: "Megaminx Crystal", solid: "dodecahedron", on: "face", rule: "neighbor-centers", size: 2, fixed: true, names: { 2: "Megaminx Crystal" } },
   { id: "pentultimate", name: "Pentultimate", solid: "dodecahedron", on: "face", rule: "layers", size: 2, fixed: true, names: { 2: "Pentultimate" } },
   // Corner turning, cut through the corners next to each one (a dino dodecahedron).
-  { id: "chopasaurus", name: "Chopasaurus", solid: "dodecahedron", on: "vertex", rule: "neighbor-corners", size: 2, fixed: true, names: { 2: "Chopasaurus" } },
+  // (size 2 is the Chopasaurus; the id stays for old links)
+  { id: "chopasaurus", name: "Corner-Turning Megaminx", solid: "dodecahedron", on: "vertex", rule: "neighbor-corners", size: 2 },
   // Shallow minx-style cuts. Each face is also crossed by the cuts of the 6 faces that only
   // share a corner with it, and no shallow depth lines those up with the edge neighbors'
   // cuts (only 1/φ does), so they leave small extra pieces around each corner. Those get
