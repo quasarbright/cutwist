@@ -2146,13 +2146,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     // ---- the two views: flat and 3D surface ----
     // With both on they split the free space: side by side when it's wide, stacked when it's
-    // tall. The flat view's canvas covers just its part; the 3D view draws on the page-wide
-    // WebGL canvas, clipped to its part, with the camera centered there.
+    // tall, and always stacked on a phone (like the rear view). The flat view's canvas covers
+    // just its part; the 3D view draws on the page-wide WebGL canvas, clipped to its part, with
+    // the camera centered there.
     let viewFlat = true, view3D = true, planeBox = "";
     function viewRegions() {
+      planeView.showArrows = !phone.matches; // (on a phone, no arrow buttons: the grid gets their room)
       const r = safeRect(), w = r.right - r.left, h = r.bottom - r.top;
       if (!(viewFlat && view3D)) return { flat: viewFlat ? r : null, surface: view3D ? r : null };
-      if (w >= h) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
+      if (w >= h && !phone.matches) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
       // (stacked: the grid gets the height its width calls for, up to 65%; the surface, wider
       // than it is tall, the rest)
       const m = r.top + Math.max(h / 2, Math.min(0.65 * h, planeView.heightFor(P, w)));
@@ -2417,7 +2419,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       plane.hidden = !reg.flat;
       canvas.hidden = !reg.surface;
       const slide = anim ? { axis: anim.axis, layer: anim.layer, p: anim.theta } : null;
-      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: true, hover: hoverArrow, lit: algLit };
+      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: planeView.showArrows, hover: hoverArrow, lit: algLit };
       if (reg.flat) {
         placePlane(reg.flat);
         planeView.layout(P, reg.flat);

@@ -21,18 +21,22 @@ export class PlanarView {
     this.P = null;
     this.cell = 40; this.ox = 0; this.oy = 0; // layout, in CSS px: cell size and the grid's top-left
     this.origin = { x: 0, y: 0 }; // where the canvas's top-left is on the page (it may cover part of it)
+    this.showArrows = true; // the arrow buttons around the grid (off: no band for them, so a bigger grid)
   }
+
+  // how far past each edge the grid's surroundings reach, in cells
+  band() { return GHOST + COORD + (this.showArrows ? ARROW : 0); }
 
   // the height the grid, its wrapped copies and arrows take up at width w (when width is what limits it)
   heightFor(P, w) {
-    const band = GHOST + COORD + ARROW;
+    const band = this.band();
     return (w * (P.H + 2 * band)) / (P.W + 2 * band);
   }
 
   // fit the grid, its wrapped copies and arrows inside `safe` ({ left, top, right, bottom })
   layout(P, safe) {
     this.P = P;
-    const band = GHOST + COORD + ARROW;
+    const band = this.band();
     const w = Math.max(40, safe.right - safe.left), h = Math.max(40, safe.bottom - safe.top);
     this.cell = Math.max(6, Math.min(110, w / (P.W + 2 * band), h / (P.H + 2 * band)));
     this.ox = safe.left + (w - P.W * this.cell) / 2;
@@ -47,6 +51,7 @@ export class PlanarView {
   }
   // every arrow button: the move it makes and where it is
   arrows() {
+    if (!this.showArrows) return [];
     const { W, H } = this.P, c = this.cell, d = GHOST + COORD + ARROW / 2, out = [];
     for (let r = 0; r < H; r++) {
       out.push({ axis: 0, layer: r, q: -1, x: this.ox - d * c, y: this.oy + (r + 0.5) * c, dir: [-1, 0] });
