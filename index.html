@@ -73,6 +73,103 @@
     .tw-split span:first-child { right: 10px; }
     .tw-split span:last-child { left: 10px; }
 
+    /* ---- the next UI (?ui=next): a prototype of the redesign, issue #2 ---- */
+    body.nx control-panel#panel, body.nx .control-bar, body.nx #tape { display: none; }
+    /* (the solved card sits above the bottom stack, clear of the tape) */
+    body.nx .tw-reference { bottom: 176px; }
+    body.nx .tw-title { pointer-events: none; }
+    .nx-pickrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; pointer-events: auto; }
+    .nx-pick {
+      display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+      font: 500 .95rem var(--font-ui); color: var(--text); background: var(--panel);
+      border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px;
+    }
+    .nx-pick:hover { border-color: var(--faint); }
+    .nx-pick .tw-name { margin: 0; color: var(--text); font-size: .95rem; }
+    .nx-caret { color: var(--muted); font-size: .7rem; }
+    .nx-sizes { display: flex; gap: 6px; }
+    .nx-sizes .control { margin: 0; padding: 0; border: 0; }
+    .nx-sizes .control-head { display: none; }
+    .nx-sizes .tw-size input { width: 3.2em; }
+    #nx-toggles { position: fixed; top: 16px; right: 16px; z-index: 5; display: flex; gap: 6px; align-items: center; font-family: var(--font-mono); }
+    #nx-toggles .btn { padding: 6px 10px; }
+    body:not(.nx-planar) .nx-viewbtn { display: none; }
+    .nx-pop {
+      position: fixed; top: 58px; right: 16px; z-index: 7; width: 240px; padding: 12px 14px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .nx-pop[hidden] { display: none; }
+    #nx-chips {
+      position: fixed; left: 50%; transform: translateX(-50%); bottom: 132px; z-index: 5;
+      width: min(760px, calc(100vw - 32px)); display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      font-family: var(--font-mono); font-size: .78rem;
+    }
+    .nx-lbl { color: var(--faint); text-transform: uppercase; letter-spacing: .08em; font-size: .68rem; margin-right: 2px; }
+    .nx-chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 11px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 999px; color: var(--text); font: inherit;
+    }
+    .nx-chip b { color: var(--accent); }
+    .nx-chip .nx-len { color: var(--muted); }
+    .nx-chip button { font: inherit; color: var(--muted); background: none; border: 0; border-left: 1px solid var(--border); padding: 0 7px; cursor: pointer; }
+    .nx-chip button:hover { color: var(--text); }
+    .nx-rec { padding: 3px 11px; cursor: pointer; color: var(--muted); border-style: dashed; }
+    .nx-rec.is-on { color: var(--danger, #ef4444); border-color: currentColor; border-style: solid; }
+    #nx-tape {
+      position: fixed; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 5;
+      width: min(760px, calc(100vw - 32px)); display: flex; align-items: stretch;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px; transition: border-color .3s;
+    }
+    #nx-tape.is-solved { border-color: var(--accent); }
+    .nx-moves { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; padding: 8px 10px; overflow-x: auto; scrollbar-width: none; }
+    .nx-moves::-webkit-scrollbar { display: none; }
+    .nx-empty { color: var(--muted); font: .8rem var(--font-mono); white-space: nowrap; padding: 3px 4px; }
+    .nx-mv {
+      position: relative; flex: none; min-width: 26px; padding: 3px 5px 6px; border: 0; border-radius: 4px; cursor: pointer;
+      font: 600 .92rem var(--font-mono); color: var(--text); background: none;
+    }
+    .nx-mv::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 2px; height: 3px; border-radius: 2px; background: var(--c); }
+    .nx-mv.is-dot { color: var(--c); }
+    .nx-mv:hover { background: var(--panel-2); }
+    .nx-mv.is-future { opacity: .32; }
+    .nx-head { flex: none; width: 2px; align-self: stretch; margin: 0 3px; border-radius: 1px; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+    .nx-sep { flex: none; width: 1px; align-self: stretch; margin: 3px 5px; background: var(--border); }
+    .nx-side { flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-left: 1px solid var(--border); font-family: var(--font-mono); }
+    .nx-status { color: var(--muted); font-size: .75rem; white-space: nowrap; }
+    #nx-tape.is-solved .nx-status { color: var(--accent); }
+    .nx-side .tw-clock { font-size: 1rem; }
+    #nx-actions { position: fixed; left: 50%; transform: translateX(-50%); bottom: 36px; z-index: 5; display: flex; gap: 4px; font-family: var(--font-mono); }
+    .nx-act { font: .85rem var(--font-mono); color: var(--muted); background: none; border: 0; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
+    .nx-act:hover { color: var(--text); background: var(--panel); }
+    #nx-shelf { position: fixed; inset: 0; z-index: 60; background: var(--bg); overflow-y: auto; padding: 18px 24px 40px; }
+    #nx-shelf[hidden] { display: none; }
+    .nx-shelfhead { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+    .nx-wm { font-family: var(--font-display); font-size: 1.1rem; letter-spacing: .04em; }
+    .nx-search { flex: 0 1 340px; margin: 0 auto; font: .9rem var(--font-ui); color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; }
+    .nx-close { font: 1rem var(--font-mono); color: var(--muted); background: none; border: 0; cursor: pointer; }
+    .nx-fam { font: .68rem var(--font-mono); color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 18px 0 8px; }
+    .nx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+    .nx-card {
+      display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px 12px; cursor: pointer;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font: .82rem var(--font-ui); text-align: center;
+    }
+    .nx-card:hover { border-color: var(--faint); }
+    .nx-card.is-cur { border-color: var(--accent); }
+    .nx-card img { width: 96px; height: 96px; }
+    /* build: the editor as a full-height column on the left; solving's chrome steps aside */
+    body.nx-build control-panel#panel {
+      display: block; position: fixed; left: 0; top: 0; bottom: 0; right: auto; width: 360px; max-height: none;
+      border-radius: 0; border-width: 0 1px 0 0; z-index: 6; overflow-y: auto;
+    }
+    body.nx-build #panel .control:has(#preset), body.nx-build #panel .tw-algorithms, body.nx-build #customize { display: none; }
+    body.nx-build .tw-title, body.nx-build #nx-chips, body.nx-build #nx-tape, body.nx-build #nx-actions { display: none; }
+    .nx-solve { display: none; }
+    body.nx-build .nx-solve {
+      display: block; width: 100%; padding: 10px; border: 0; border-radius: 8px; cursor: pointer;
+      background: var(--accent); color: var(--on-accent); font: 500 .95rem var(--font-ui);
+    }
+
     /* about-modal diagrams */
     .cw-viz { display: block; width: 100%; max-width: 440px; margin: 14px auto 4px; }
     .cohesion-about ol { padding-left: 1.3em; }
@@ -609,7 +706,7 @@
     import * as THREE from "three";
     import {
       PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, toCustom, CUT_RANGE, TRIM_RANGE,
-      piecesInLayer, layerOf, closestOrientation, SOLIDS, buildSolid, splitPiece, randomMoves, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
+      piecesInLayer, layerOf, closestOrientation, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
     import {
@@ -619,6 +716,10 @@
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
 
     const $ = (id) => document.getElementById(id);
+    // ?ui=next: a prototype of the redesigned layout (issue #2), on the real puzzle: see
+    // "the next UI" near the end. The current layout is untouched without it.
+    const NEXT = new URLSearchParams(location.search).get("ui") === "next";
+    if (NEXT) document.body.classList.add("nx");
     const TAU = Math.PI * 2;
     const mod = (a, n) => ((a % n) + n) % n;
 
@@ -776,8 +877,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         // fit a unit sphere (plus margin) in the narrower direction
         const half = camera.aspect >= 1 ? vHalf : Math.atan(Math.tan(vHalf) * camera.aspect);
         camera.position.set(0, 0, (1.3 / Math.sin(half)) * zoom);
-        // center the puzzle in the space above the tape and control bar
-        camera.setViewOffset(W, H, 0, 45, W, H);
+        // center the puzzle in the space above the tape and control bar (the next UI: above
+        // its taller tape, and right of the builder's column while building)
+        const building = NEXT && document.body.classList.contains("nx-build");
+        camera.setViewOffset(W, H, building ? -180 : 0, NEXT ? 75 : 45, W, H);
       }
       camera.updateProjectionMatrix();
     }
@@ -1075,6 +1178,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         : scrambled && !idle ? "scrambling…"
         : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : "scrambled · drag a sticker to turn")
         : isPlanar() ? "drag a row or column to slide it" : "drag a sticker to turn · drag outside to rotate";
+      if (NEXT) nxRenderTape(solved);
     }
 
     // Look at the corner where face 0 meets its two nearest neighbors, with the first
@@ -1541,6 +1645,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("plane").hidden = !isPlanar() || !viewFlat;
       $("planarControls").hidden = !isPlanar();
       $("planarViews").hidden = !isPlanar();
+      document.body.classList.toggle("nx-planar", isPlanar()); // (the next UI's view options)
       $("refPlane").hidden = !isPlanar();
       if (puzzleGroup) puzzleGroup.visible = !isPlanar();
       surfaceGroup.visible = isPlanar();
@@ -1679,6 +1784,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // however it's held, quickly, as one undo step.
     const count = (n) => (n === 1 ? "1 move" : `${n} moves`);
     function renderAlgorithms() {
+      if (NEXT) nxRenderChips();
       const rec = $("mRecord"), on = history.isRecording;
       rec.classList.toggle("is-recording", on);
       rec.setAttribute("aria-pressed", String(on));
@@ -1983,7 +2089,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       let top = r(".tw-title").bottom + pad, right = W - pad;
       if (open && panel.width) right = Math.min(right, panel.left - pad);
       else top = Math.max(top, panel.bottom + pad);
-      const bottom = Math.min(r("#tape").top, r(".control-bar").top, r("#reference").top) - pad;
+      // (whatever's stacked along the bottom, and showing)
+      const stack = NEXT ? ["#nx-chips", "#nx-tape", "#reference"] : ["#tape", ".control-bar", "#reference"];
+      const bottom = Math.min(...stack.map(r).filter((b) => b.height).map((b) => b.top)) - pad;
+      if (NEXT) top = Math.max(top, r("#nx-toggles").bottom + pad);
       return { left: pad, top, right, bottom };
     }
     // the picture cropped to the grid's shape
@@ -2454,6 +2563,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
       if (!showAxes) q.set("axes", "off");
       if (rearView) q.set("rear", "on");
+      if (NEXT) q.set("ui", "next");
       if (isPlanar()) {
         if (planarTextures) q.set("textures", "on");
         if (shapeId() !== P.topology) q.set("shape", shapeId());
@@ -3172,6 +3282,201 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function stopViz() { cancelAnimationFrame(vizRAF); vizzes = []; }
     document.addEventListener("cohesion-modal-open", (e) => { if (e.detail?.className?.includes("cohesion-about")) startViz(e.detail.el); });
     document.addEventListener("cohesion-modal-close", (e) => { if (e.detail?.className?.includes("cohesion-about")) stopViz(); });
+
+    // ---------- the next UI (?ui=next): a prototype of the redesign, issue #2 ----------
+    // The same controls, moved into the new layout, plus three new pieces: the tape (the
+    // turn history as a strip of notation you can click to jump back and forth), algorithm
+    // chips above it, and the shelf (every puzzle as a picture). Build is the existing editor
+    // docked as a full-height column. Rough on purpose: enough to judge the layout.
+    const nx = {};
+    // a turn as notation: on a cube its face letter, anywhere else a dot in its face's color;
+    // an inner layer gets its depth first (2R), and the turn its ′ or 2
+    const CUBE_LETTER = { "#c8102e": "R", "#ff6a13": "L", "#f4f4ee": "U", "#ffe600": "D", "#009e60": "F", "#0051ba": "B" };
+    function nxGlyph(m) {
+      if (isPlanar()) {
+        const n = Math.abs(m.q), arrow = m.axis === 0 ? (m.q > 0 ? "→" : "←") : (m.q > 0 ? "↓" : "↑");
+        return { text: (m.axis === 0 ? String(m.layer + 1) : String.fromCharCode(65 + m.layer)) + arrow + (n > 1 ? n : ""), color: "var(--muted)" };
+      }
+      const l = moveLabel(P, m), c = l.colors[0];
+      const face = P.colors.length === 6 && CUBE_LETTER[c] ? CUBE_LETTER[c] : "●";
+      return { text: (l.depth ? l.depth : "") + face + l.suffix.replace("'", "′"), color: c, dot: face === "●" };
+    }
+    function nxRenderTape(solved) {
+      if (!nx.tape) return;
+      const flat = [];
+      history.entries.forEach((moves, e) => moves.forEach((m, k) => flat.push({ m, e, first: k === 0, alg: moves.length > 1 })));
+      const at = history.entries.slice(0, history.cursor).reduce((s, x) => s + x.length, 0);
+      nx.moves.replaceChildren();
+      if (!flat.length) nx.moves.append(Object.assign(document.createElement("span"), { className: "nx-empty", textContent: $("status").textContent }));
+      flat.forEach(({ m, e, first, alg }, i) => {
+        if (i === at) nx.moves.append(Object.assign(document.createElement("span"), { className: "nx-head" }));
+        if (first && alg) nx.moves.append(Object.assign(document.createElement("span"), { className: "nx-sep" }));
+        const g = nxGlyph(m), b = document.createElement("button");
+        b.className = "nx-mv" + (i >= at ? " is-future" : "") + (g.dot ? " is-dot" : "");
+        b.style.setProperty("--c", g.color);
+        b.textContent = g.text;
+        b.title = "jump to just after this turn";
+        b.onclick = () => nxJump(e + 1); // (an algorithm's turns are one step: jump to its end)
+        nx.moves.append(b);
+      });
+      if (flat.length && at === flat.length) nx.moves.append(Object.assign(document.createElement("span"), { className: "nx-head" }));
+      nx.tape.classList.toggle("is-solved", !!solved);
+      nx.moves.querySelector(".nx-head")?.scrollIntoView({ block: "nearest", inline: "center" });
+      nx.status.textContent = flat.length ? $("status").textContent : "";
+    }
+    // undo or redo until the history's cursor is at `cursor`
+    function nxJump(cursor) {
+      flush();
+      while (history.cursor > cursor && history.canUndo) undo();
+      while (history.cursor < cursor && history.canRedo) redo();
+    }
+    function nxRenderChips() {
+      if (!nx.chips) return;
+      nx.chips.replaceChildren(Object.assign(document.createElement("span"), { className: "nx-lbl", textContent: "algorithms" }));
+      for (const alg of history.algorithms) {
+        const chip = document.createElement("span");
+        chip.className = "nx-chip";
+        chip.innerHTML = `<b></b><span class="nx-len"></span><button title="play it">▶</button><button title="play it in reverse">◀</button><button title="delete it">✕</button>`;
+        chip.querySelector("b").textContent = alg.name;
+        chip.querySelector(".nx-len").textContent = count(alg.moves.length);
+        const [fwd, back, del] = chip.querySelectorAll("button");
+        for (const [btn, rev] of [[fwd, false], [back, true]]) {
+          btn.onclick = () => { showAffected(null); playAlgorithm(alg.name, rev); };
+          btn.onpointerenter = () => showAffected(affectedBy(rev ? history.inverseOf(alg.moves) : alg.moves));
+          btn.onpointerleave = () => showAffected(null);
+        }
+        del.onclick = () => { history.deleteAlgorithm(alg.name); renderAlgorithms(); };
+        nx.chips.append(chip);
+      }
+      const rec = document.createElement("button");
+      rec.className = "nx-chip nx-rec" + (history.isRecording ? " is-on" : "");
+      rec.textContent = history.isRecording ? `■ stop · ${count(history.recorded.length)}` : "● record";
+      rec.title = history.isRecording ? "stop, and save the turns since as an algorithm" : "record your next turns as an algorithm";
+      rec.onclick = () => $("mRecord").click();
+      nx.chips.append(rec);
+    }
+
+    // the shelf: every puzzle as a picture, by family; clicking one loads it
+    function nxFamily(spec) {
+      if (spec.rule === "planar") return "sliding surfaces";
+      if (spec.rule === "prism") return "prisms";
+      if (spec.rule === "cuboid" || spec.solid === "cube") return "cubes";
+      if (spec.solid === "tetrahedron" || spec.solid === "octahedron") return "tetrahedra and octahedra";
+      if (spec.solid === "dodecahedron" || spec.solid === "icosahedron") return "dodecahedra and icosahedra";
+      return "other solids";
+    }
+    const nxThumbs = {};
+    let nxThumbRenderer = null;
+    // a picture of a puzzle, solved, from the start view's sort of angle (rendered once)
+    function nxThumb(spec) {
+      if (nxThumbs[spec.id]) return nxThumbs[spec.id];
+      const S = 160, cv = document.createElement("canvas");
+      cv.width = cv.height = S;
+      if (spec.rule === "planar") {
+        const pv = new PlanarView(cv);
+        pv.P = buildPlanar(spec);
+        pv.drawReference({ left: 0, top: 0, width: S, height: S }, { labels: false, textures: false });
+      } else {
+        nxThumbRenderer ??= new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        nxThumbRenderer.setSize(S, S, false);
+        nxThumbRenderer.setClearColor(0x000000, 0);
+        const Q = buildPuzzle(spec, spec.size), sc = vizScene(), group = new THREE.Group();
+        group.scale.setScalar(1 / Q.R);
+        for (const p of Q.pieces) { const o = pieceObject(p, Q.colors, null, 0.028 * Q.R, 0.004 * Q.R); vizPlace(o, Q.group.mats[0]); group.add(o); }
+        sc.root.add(group);
+        sc.root.quaternion.setFromEuler(new THREE.Euler(0.5, -0.65, 0));
+        sc.cam.aspect = 1; sc.cam.position.set(0, 0, 4.6); sc.cam.updateProjectionMatrix();
+        nxThumbRenderer.render(sc.scene, sc.cam);
+        cv.getContext("2d").drawImage(nxThumbRenderer.domElement, 0, 0);
+        group.traverse((o) => o.geometry && o.geometry.dispose());
+      }
+      return (nxThumbs[spec.id] = cv.toDataURL());
+    }
+    function nxOpenShelf() {
+      nx.shelf.hidden = false;
+      nx.search.value = "";
+      nxFillShelf("");
+      nx.search.focus();
+    }
+    function nxFillShelf(q) {
+      const groups = new Map();
+      MENU.forEach((spec, i) => {
+        if (q && !spec.name.toLowerCase().includes(q.toLowerCase())) return;
+        const fam = nxFamily(spec);
+        if (!groups.has(fam)) groups.set(fam, []);
+        groups.get(fam).push([spec, i]);
+      });
+      nx.shelfBody.replaceChildren();
+      const pending = [];
+      for (const [fam, items] of groups) {
+        nx.shelfBody.append(Object.assign(document.createElement("div"), { className: "nx-fam", textContent: fam }));
+        const grid = Object.assign(document.createElement("div"), { className: "nx-grid" });
+        for (const [spec, i] of items) {
+          const card = document.createElement("button");
+          card.className = "nx-card" + (presetIdx === i ? " is-cur" : "");
+          const img = document.createElement("img");
+          img.alt = "";
+          card.append(img, Object.assign(document.createElement("span"), { textContent: spec.name }));
+          card.onclick = () => { $("preset").value = i; $("preset").onchange(); nx.shelf.hidden = true; };
+          grid.append(card);
+          pending.push([spec, img]);
+        }
+        nx.shelfBody.append(grid);
+      }
+      // pictures one per frame, so the shelf opens at once and fills in
+      const next = () => {
+        if (nx.shelf.hidden || !pending.length) return;
+        const [spec, img] = pending.shift();
+        try { img.src = nxThumb(spec); } catch { /* (a puzzle too big to picture quickly) */ }
+        requestAnimationFrame(next);
+      };
+      requestAnimationFrame(next);
+    }
+
+    function nxBuild(on) {
+      if (on && !isCustom()) $("customize").click();
+      document.body.classList.toggle("nx-build", on);
+      $("panel").removeAttribute("collapsed");
+      resize();
+    }
+
+    if (NEXT) {
+      const make = (tag, props = {}, ...kids) => { const el = Object.assign(document.createElement(tag), props); el.append(...kids); return el; };
+      // top left: the puzzle's name opens the shelf; its size (or a family's numbers) beside it
+      const pick = make("button", { className: "nx-pick", title: "choose a puzzle" });
+      pick.append($("name"), make("span", { className: "nx-caret", textContent: "▾" }));
+      pick.onclick = nxOpenShelf;
+      const sizes = make("div", { className: "nx-sizes" }, $("paramControls"), $("sizeControl"));
+      document.querySelector(".tw-title").append(make("div", { className: "nx-pickrow" }, pick, sizes));
+      // top right: how you see it (and, on planar puzzles, a popover with their view options)
+      const view = make("button", { className: "btn nx-viewbtn", textContent: "view ▾", title: "flat and 3D views, the surface's shape, and how cells look" });
+      const pop = make("div", { className: "nx-pop", hidden: true }, $("planarViews"), $("planarControls"));
+      view.onclick = () => { pop.hidden = !pop.hidden; };
+      const about = document.querySelector(".control-bar about-modal");
+      document.body.append(make("div", { id: "nx-toggles" }, view, $("axes"), $("textures"), $("rear"), about), pop);
+      nx.viewBtn = view;
+      // bottom: algorithm chips, the tape, and the quiet actions under it
+      nx.chips = make("div", { id: "nx-chips" });
+      nx.moves = make("div", { className: "nx-moves" });
+      nx.status = make("span", { className: "nx-status" });
+      nx.tape = make("div", { id: "nx-tape" }, nx.moves, make("div", { className: "nx-side" }, nx.status, $("clock")));
+      const build = make("button", { className: "nx-act", textContent: "build", title: "open this puzzle in the editor" });
+      build.onclick = () => nxBuild(true);
+      const undoB = make("button", { className: "nx-act", textContent: "↶", title: "undo (⌘Z)" }), redoB = make("button", { className: "nx-act", textContent: "↷", title: "redo (⇧⌘Z)" });
+      undoB.onclick = () => $("undo").click(); redoB.onclick = () => $("redo").click();
+      for (const id of ["scramble", "reset"]) $(id).className = "nx-act";
+      document.body.append(nx.chips, nx.tape, make("div", { id: "nx-actions" }, undoB, redoB, $("scramble"), $("reset"), build));
+      // the shelf
+      nx.search = make("input", { className: "nx-search", type: "search", placeholder: "search puzzles", oninput: () => nxFillShelf(nx.search.value) });
+      const close = make("button", { className: "nx-close", textContent: "✕", title: "close", onclick: () => { nx.shelf.hidden = true; } });
+      nx.shelfBody = make("div", { className: "nx-shelfbody" });
+      nx.shelf = make("div", { id: "nx-shelf", hidden: true }, make("div", { className: "nx-shelfhead" }, make("span", { className: "nx-wm", textContent: "CUTWIST" }), nx.search, close), nx.shelfBody);
+      document.body.append(nx.shelf);
+      addEventListener("keydown", (e) => { if (e.key === "Escape") { nx.shelf.hidden = true; pop.hidden = true; } });
+      // build: the editor as a column, and a way back to solving
+      const solveBtn = make("button", { className: "nx-solve", textContent: "Solve this puzzle", onclick: () => nxBuild(false) });
+      $("builder").append(solveBtn);
+    }
 
     // ---------- test hook ----------
     // For the browser tests (e2e/) and poking at things from the console: drive the page
