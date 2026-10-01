@@ -806,7 +806,10 @@
       throw err;
     }
     renderer.setClearColor(0x000000, 0);
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    // drawing pixels per CSS pixel: the screen's own, up to 3 (a phone's; at 2 its thin grid
+    // lines and labels came out soft)
+    const pixelRatio = () => Math.min(devicePixelRatio, 3);
+    renderer.setPixelRatio(pixelRatio());
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
     const skyLight = new THREE.HemisphereLight(0xf2f4ff, 0x6a6660, 2.1);
@@ -889,6 +892,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function resize() {
       W = document.documentElement.clientWidth;
       H = document.documentElement.clientHeight;
+      renderer.setPixelRatio(pixelRatio()); // (it can change: a page zoom, another screen)
       renderer.setSize(W, H);
       planeBox = ""; // re-place the flat view's canvas on the next frame
       texturePeriod.value = TEXTURE_PX * renderer.getPixelRatio();
@@ -2165,7 +2169,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const key = [r.left, r.top, r.right, r.bottom].map(Math.round).join();
       if (key === planeBox) return;
       planeBox = key;
-      const dpr = Math.min(devicePixelRatio, 2), w = r.right - r.left, h = r.bottom - r.top;
+      const dpr = pixelRatio(), w = r.right - r.left, h = r.bottom - r.top;
       Object.assign(plane.style, { left: r.left + "px", top: r.top + "px", width: w + "px", height: h + "px" });
       plane.width = Math.max(1, Math.round(w * dpr)); plane.height = Math.max(1, Math.round(h * dpr));
       planeView.origin = { x: r.left, y: r.top };
@@ -2431,7 +2435,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const card = $("refPlane");
       card.hidden = !!reg.surface;
       if (!reg.surface) {
-        const dpr = Math.min(devicePixelRatio, 2);
+        const dpr = pixelRatio();
         if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
         refView.drawSolvedCard(P, look);
       }
