@@ -9,13 +9,13 @@ test("every puzzle on the shelf loads solved, with no errors", async ({ page }) 
   const ids = await page.$$eval(".nx-card", (cs) => cs.map((c) => c.dataset.id));
   await page.keyboard.press("Escape");
   expect(ids.length).toBeGreaterThan(20);
-  for (const text of ids) {
-    await pick(page, text);
+  for (const id of ids) {
+    await pick(page, id);
     const s = await info(page);
-    expect(s.pieces, text).toBeGreaterThan(0);
-    expect(s.solved, text).toBe(true);
-    expect(s.moves, text).toBe(0);
-    expect(await page.textContent("#name"), text).toBe(s.title);
+    expect(s.id, id).toBe(id);
+    expect(s.pieces, id).toBeGreaterThan(0);
+    expect(s.solved, id).toBe(true);
+    expect(s.moves, id).toBe(0);
   }
   await noErrors(errors);
 });
@@ -97,7 +97,7 @@ test("customize opens the editor on presets it can express, and is hidden on the
   await expect(page.locator("#builder")).toBeHidden();
   await page.click(".nx-custombtn");
   await expect(page.locator("#builder")).toBeVisible();
-  expect(await page.inputValue("#preset")).toBe("custom");
+  expect((await info(page)).id).toBe("custom");
   expect((await info(page)).pieces).toBe(27); // the same puzzle, now editable
   await page.click(".nx-done");
   await page.evaluate(() => window.cutwist.load("cuboid"));

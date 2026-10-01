@@ -23,7 +23,7 @@ test("the sliding torus opens as a 5×5 torus, flat and in 3D", async ({ page })
   await openView(page);
   await expect(page.locator("#planarControls")).toBeVisible();
   await expect(page.locator("#textures")).toBeHidden();
-  await expect(page.locator("#status")).toHaveText("drag a row or column to slide it");
+  await expect(page.locator(".nx-empty")).toHaveText("drag a row or column to slide it"); // (the empty tape)
 });
 
 test("one puzzle per surface in the menu, each with width and height (no surface picker)", async ({ page }) => {

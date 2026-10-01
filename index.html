@@ -73,11 +73,7 @@
     .tw-split span:first-child { right: 10px; }
     .tw-split span:last-child { left: 10px; }
 
-    /* ---- the layout (issue #2): built from the markup's controls, which stay hidden in place ---- */
-    body.nx control-panel#panel, body.nx .control-bar, body.nx #tape { display: none; }
-    /* every corner the same 16 px in: the solved card bottom right (the tape stays clear of it) */
-    body.nx .tw-reference { bottom: 16px; right: 16px; }
-    body.nx .tw-title { pointer-events: none; }
+    /* ---- the layout (issue #2) ---- */
     .nx-pickrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; pointer-events: auto; }
     .nx-pick {
       display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
@@ -85,7 +81,6 @@
       border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px;
     }
     .nx-pick:hover { border-color: var(--faint); }
-    .nx-pick .tw-name { margin: 0; color: var(--text); font-size: .95rem; }
     .nx-caret { color: var(--muted); font-size: .7rem; }
     /* the puzzle's numbers (size, or a family's width, height, sides…): small labeled
        steppers stacked under the name, labels in one column and steppers in the next */
@@ -110,14 +105,14 @@
     #nx-toggles .btn { padding: 6px 10px; }
     body:not(.nx-planar) .nx-viewbtn { display: none; }
     /* (a sliding puzzle's arrows are always on: no axes button for them) */
-    body.nx.nx-planar #axes { display: none; }
+    body.nx-planar #axes { display: none; }
     .nx-pop {
       position: fixed; z-index: 7; width: 240px; padding: 12px 14px;
       background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
       display: flex; flex-direction: column; gap: 12px;
     }
     .nx-pop[hidden] { display: none; }
-    body.nx:not(.nx-planar) .nx-pop { width: max-content; } /* (just the toggles: one row) */
+    body:not(.nx-planar) .nx-pop { width: max-content; } /* (just the toggles: one row) */
     .nx-poptoggles { display: flex; flex-wrap: wrap; gap: 6px; font-family: var(--font-mono); }
     .nx-poptoggles .btn { padding: 5px 9px; font-size: .8rem; }
     .nx-poptoggles:empty { display: none; }
@@ -219,17 +214,16 @@
       border: 1px dashed var(--border); border-radius: 8px; padding: 5px 10px;
     }
     .nx-custombtn:hover { color: var(--text); border-color: var(--faint); }
-    body.nx-planar .nx-custombtn, body.nx-custom .nx-custombtn, body.nx-nocustom .nx-custombtn { display: none; }
+    .nx-custombtn[hidden], body.nx-custom .nx-custombtn { display: none; }
     body.nx-custom { --nx-left: 360px; }
     body.nx-custom .tw-title { left: calc(var(--nx-left) + 22px); }
     /* (the footer centers in the space beside the drawer, clear of the algorithms) */
     body.nx-custom mike-footer { padding-left: var(--nx-left) !important; }
-    body.nx-custom control-panel#panel {
-      display: block; position: fixed; left: 0; top: 0; bottom: 0; right: auto;
-      width: var(--nx-left) !important; max-width: none !important; max-height: none; /* (the component sets its own width) */
-      border-radius: 0; border-width: 0 1px 0 0; z-index: 6; overflow-y: auto;
+    #panel {
+      display: none; position: fixed; left: 0; top: 0; bottom: 0; z-index: 6; width: var(--nx-left);
+      overflow-y: auto; padding: 14px; background: var(--panel); border-right: 1px solid var(--border);
     }
-    body.nx-custom #panel .panel-header, body.nx-custom #panel .control:has(#preset), body.nx-custom #panel .tw-algorithms, body.nx-custom #customize { display: none; }
+    body.nx-custom #panel { display: block; }
     .nx-drawerhead { display: flex; align-items: center; justify-content: space-between; }
     .nx-drawertitle { font-family: var(--font-display); font-size: .95rem; letter-spacing: .04em; text-transform: uppercase; }
     .nx-done {
@@ -265,30 +259,13 @@
       margin: 0; font-family: var(--font-display); font-weight: 400;
       font-size: 1.35rem; letter-spacing: .04em; color: var(--text);
     }
-    .tw-title .tw-name { margin-top: 2px; font-size: .9rem; color: var(--muted); }
 
-    .control-panel .panel-title { font-family: var(--font-display); font-weight: 400; font-size: .8rem; letter-spacing: .05em; }
     .tw-select {
       width: 100%; padding: 7px 8px; border-radius: var(--radius-sm);
       background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
       font: inherit; font-size: .9rem;
     }
     .control[hidden] { display: none; } /* cohesion's .control display:flex beats [hidden] */
-    .tw-size { display: flex; gap: 6px; }
-    .tw-size .btn { width: 34px; padding: 6px 0; font-family: var(--font-mono); }
-    .tw-size input {
-      flex: 1; min-width: 0; text-align: center; padding: 6px 8px; border-radius: var(--radius-sm);
-      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
-      font-family: var(--font-mono); font-size: .95rem; -moz-appearance: textfield;
-    }
-    .tw-size input::-webkit-inner-spin-button, .tw-size input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-
-    .tw-customize { width: 100%; padding: 6px 10px; font-size: .85rem; }
-    .tw-customize[hidden] { display: none; }
-    /* a family's own numbers and choices: spaced like the panel's other controls (they sit
-       inside this wrapper, out of reach of the panel's own spacing) */
-    #paramControls { display: flex; flex-direction: column; gap: 16px; }
-    #paramControls:empty { display: none; }
     /* planar look: a two-way fill choice, then checkboxes */
     .tw-look { gap: 8px; }
     .tw-seg.tw-fill { grid-template-columns: 1fr 1fr; } /* (beats the editor's 3-column .tw-seg, defined later) */
@@ -305,20 +282,7 @@
     .tw-look label.check.tw-sub { padding-left: 24px; margin-top: -4px; }
     .tw-look label.check:has(input:disabled) { opacity: .45; cursor: default; }
 
-    /* ---- algorithms: record turns, play them back forward or inverted ---- */
-    .tw-algorithms { display: flex; flex-direction: column; gap: 6px; }
-    .tw-algorithms .control-head { display: flex; align-items: center; justify-content: space-between; }
-    .tw-rec { padding: 3px 9px; font-size: .78rem; }
-    .tw-rec .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e5484d; margin-right: 6px; vertical-align: 1px; }
-    .tw-rec.is-recording { color: #ffb4b0; border-color: #e5484d; }
-    .tw-rec.is-recording .dot { animation: tw-blink 1s steps(2, start) infinite; }
-    @keyframes tw-blink { to { visibility: hidden; } }
-    .tw-mlist { display: flex; flex-direction: column; gap: 3px; }
-    .tw-mlist:empty::before { content: "none yet: record some turns"; color: var(--faint); font-size: .75rem; }
-    .tw-mrow { display: flex; align-items: center; gap: 4px; }
-    .tw-mname { width: 1.6em; font-family: var(--font-mono); font-size: .85rem; color: var(--text); }
-    .tw-mlen { flex: 1; font-family: var(--font-mono); font-size: .72rem; color: var(--muted); white-space: nowrap; }
-    .tw-mrow .btn { padding: 2px 8px; font-size: .78rem; font-family: var(--font-mono); }
+    @keyframes tw-blink { to { visibility: hidden; } } /* (the record dot, while recording) */
 
     /* ---- puzzle builder ---- */
     .tw-builder { display: flex; flex-direction: column; gap: 16px; }
@@ -347,7 +311,7 @@
     /* depth ruler: cuts are handles on one axis, center to surface. The handles' centers
        run from 8px in on each side (half a handle), so values map to the inner box. */
     .tw-icons { display: flex; align-items: center; gap: 4px; text-transform: none; letter-spacing: 0; }
-    /* the same buttons as the turn undo/redo in the control bar, smaller */
+    /* the design's own undo/redo: small buttons with a step count */
     .tw-builder .tw-hist { padding: 1px 7px; font-family: var(--font-mono); font-size: .8rem; line-height: 1.4; }
     .tw-builder .tw-hist:disabled { opacity: .35; cursor: default; }
     .tw-builder .tw-hist:disabled:hover { background: var(--panel-2); }
@@ -422,22 +386,7 @@
     }
     .tw-stats { font-family: var(--font-mono); font-size: .72rem; color: var(--muted); line-height: 1.5; white-space: nowrap; }
     .tw-stats .warn { color: var(--danger); }
-    /* ---- status line: move count, solved ---- */
-    /* the status sits just above the button row, however tall it is (--bar-h: the row's
-       height, measured by the page; it wraps to two rows on narrow screens) */
-    .tw-tape {
-      position: fixed; left: 50%; bottom: calc(48px + var(--bar-h, 36px)); transform: translateX(-50%); z-index: 5;
-      max-width: min(760px, calc(100vw - 32px));
-      padding: 6px 12px; border-radius: var(--radius);
-      background: color-mix(in srgb, var(--panel) 82%, transparent);
-      border: 1px solid var(--border); backdrop-filter: blur(6px);
-      font-family: var(--font-mono); font-size: .8rem;
-      transition: border-color .3s;
-    }
-    .tw-tape.is-solved { border-color: var(--accent); }
-    .tw-status { color: var(--muted); white-space: nowrap; }
-    .tw-tape.is-solved .tw-status { color: var(--accent); }
-    /* solve timer: shown after a scramble, left of the status */
+    /* solve timer: shown after a scramble, at the tape's right end */
     .tw-clock { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; padding-right: 8px; border-right: 1px solid var(--border); }
     .tw-clock[hidden] { display: none; }
     .tw-timer { color: var(--text); font-variant-numeric: tabular-nums; }
@@ -470,39 +419,30 @@
     @media (max-width: 600px) {
       .tw-title h1 { font-size: 1.05rem; }
     }
-    /* narrow: the buttons wrap onto a second row rather than run off the screen, and the
-       solved card moves up above the status, smaller */
+    /* stacked (a phone, or too little room beside the customize drawer; set by the script):
+       along the bottom, up from the footer, the actions, the tape across the whole width, and
+       the algorithms and the solved card side by side above it */
+    body.nx-stack #nx-actions { bottom: 30px; left: calc(var(--nx-left, 0px) + 12px); right: 12px; transform: none; justify-content: center; gap: 0; }
+    body.nx-stack .nx-act { padding: 4px 7px; font-size: .8rem; }
+    body.nx-stack #nx-tape { left: calc(var(--nx-left, 0px) + 12px); right: 12px; width: auto; transform: none; bottom: 62px; }
+    body.nx-stack .nx-side { padding: 0 10px; gap: 8px; }
+    body.nx-stack .nx-status { display: none; } /* (the empty tape says it already) */
+    body.nx-stack .nx-empty { white-space: normal; font-size: .75rem; }
+    /* (above the tape, however tall it is) */
+    body.nx-stack #nx-algs { left: calc(var(--nx-left, 0px) + 12px); bottom: calc(72px + var(--nx-tape-h, 44px)); max-width: calc(100vw - var(--nx-left, 0px) - 24px - 92px - 12px); }
+    body.nx-stack .tw-reference { width: 92px; height: 92px; right: 12px; bottom: calc(72px + var(--nx-tape-h, 44px)); }
+    body.nx-stack .tw-reference.is-rear { width: 184px; }
+    /* on a phone: the name on the top row beside view (which holds the toggles) and about.
+       Customize is a sheet over the bottom half, with the puzzle above it. */
     @media (max-width: 700px) {
-      .control-bar { flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 24px); row-gap: 6px; gap: 5px; }
-      .control-bar .btn { padding: 6px 9px; font-size: 14px; }
-      .tw-status { white-space: normal; text-align: center; }
-      .tw-tape { bottom: calc(44px + var(--bar-h, 36px)); }
-      .tw-reference { width: 92px; height: 92px; bottom: calc(52px + var(--bar-h, 36px) + var(--tape-h, 34px)); right: 12px; }
-      .tw-reference.is-rear { width: 184px; }
-    }
-    /* on a phone: the name on the top row beside view (which holds the toggles) and about;
-       along the bottom, up from the footer: the actions, the tape across the whole width, and
-       the algorithms and the solved card side by side above it. Customize is a sheet over the
-       bottom half, with the puzzle above it. */
-    @media (max-width: 700px) {
-      body.nx #nx-toggles { top: 12px; right: 12px; gap: 4px; }
-      body.nx #nx-toggles .btn { height: 30px; padding: 0 9px; font-size: .8rem; }
-      body.nx .nx-viewbtn { display: inline-block !important; } /* (it holds the toggles here) */
-      body.nx .tw-title { top: 12px; left: 12px; }
-      body.nx .tw-title h1 { line-height: 30px; }
-      body.nx #nx-actions { bottom: 30px; left: 12px; right: 12px; transform: none; justify-content: center; gap: 0; }
-      body.nx .nx-act { padding: 4px 7px; font-size: .8rem; }
-      body.nx #nx-tape { left: 12px; right: 12px; width: auto; transform: none; bottom: 62px; }
-      body.nx .nx-side { padding: 0 10px; gap: 8px; }
-      body.nx .nx-status { display: none; } /* (the empty tape says it already) */
-      body.nx .nx-empty { white-space: normal; font-size: .75rem; }
-      /* (above the tape, however tall it is) */
-      body.nx #nx-algs { left: 12px; bottom: calc(72px + var(--nx-tape-h, 44px)); max-width: calc(100vw - 24px - 92px - 12px); }
-      body.nx .tw-reference { width: 92px; height: 92px; right: 12px; bottom: calc(72px + var(--nx-tape-h, 44px)); }
-      body.nx .tw-reference.is-rear { width: 184px; }
+      #nx-toggles { top: 12px; right: 12px; gap: 4px; }
+      #nx-toggles .btn { height: 30px; padding: 0 9px; font-size: .8rem; }
+      .nx-viewbtn { display: inline-block !important; } /* (it holds the toggles here) */
+      .tw-title { top: 12px; left: 12px; }
+      .tw-title h1 { line-height: 30px; }
       body.nx-custom { --nx-left: 0px; }
-      body.nx-custom control-panel#panel {
-        top: 50%; right: 0; width: auto !important; border-width: 1px 0 0; border-radius: 12px 12px 0 0;
+      body.nx-custom #panel {
+        top: 50%; right: 0; width: auto; border: 0; border-top: 1px solid var(--border); border-radius: 12px 12px 0 0;
         padding-bottom: 40px; /* (scrolls its last control clear of the footer) */
       }
       body.nx-custom mike-footer { padding-left: 0 !important; }
@@ -528,29 +468,32 @@
   </div>
   <div class="tw-reference" id="reference" title="the solved puzzle, turned to match your view"><span>SOLVED</span><canvas id="refPlane" hidden></canvas></div>
 
+  <!-- top left: the puzzle's name (it opens the shelf) and customize, its numbers under them -->
   <div class="tw-title">
     <h1>CUTWIST</h1>
-    <div class="tw-name" id="name"></div>
+    <div class="nx-pickrow">
+      <button class="nx-pick" id="pick" title="choose a puzzle"><span class="nx-pickname" id="pickName"></span><span class="nx-caret">▾</span></button>
+      <button class="nx-custombtn" id="customize" title="change this puzzle's solid and cuts, beside it">customize</button>
+    </div>
+    <div class="nx-sizes">
+      <div id="paramControls"></div>
+      <div class="control" id="sizeControl">
+        <div class="control-head">
+          <span class="name" title="how many layers each turn axis has, like the 3 in 3×3×3. More layers means more cuts and smaller pieces">size</span>
+        </div>
+        <div class="tw-size">
+          <button class="btn" id="sizeDown" title="one fewer layer per axis">−</button>
+          <input type="number" id="size" min="0" step="1" value="3" inputmode="numeric" title="how many layers each turn axis has, like the 3 in 3×3×3. More layers means more cuts and smaller pieces" />
+          <button class="btn" id="sizeUp" title="one more layer per axis">+</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <control-panel floating title="PUZZLE" id="panel">
-    <div class="control">
-      <div class="control-head"><span class="name" title="which solid, and how it's cut">puzzle</span></div>
-      <select class="tw-select" id="preset" title="which solid, and how it's cut"></select>
-    </div>
-    <div id="paramControls"></div>
-    <div class="control" id="sizeControl">
-      <div class="control-head">
-        <span class="name" title="how many layers each turn axis has, like the 3 in 3×3×3. More layers means more cuts and smaller pieces">size</span>
-      </div>
-      <div class="tw-size">
-        <button class="btn" id="sizeDown" title="one fewer layer per axis">−</button>
-        <input type="number" id="size" min="0" step="1" value="3" inputmode="numeric" title="how many layers each turn axis has, like the 3 in 3×3×3. More layers means more cuts and smaller pieces" />
-        <button class="btn" id="sizeUp" title="one more layer per axis">+</button>
-      </div>
-    </div>
-    <button class="btn tw-customize" id="customize" title="open this puzzle in the editor, with its cuts and blacked-out pieces filled in, to change it">customize</button>
-
+  <!-- the view dropdown, under its button top right: a sliding puzzle's views and look, and on
+       a phone the toggles too (moved in by placeToggles) -->
+  <div class="nx-pop" id="viewPop" hidden>
+    <div class="nx-poptoggles" id="popToggles"></div>
     <!-- planar puzzles: how the cells look. What fills a cell is a choice of two (a segmented
          bar, like the editor's); everything else is on/off (checkboxes), with an option that
          depends on another indented under it and grayed out when it doesn't apply. -->
@@ -574,17 +517,16 @@
       <label class="check" id="texturesRow" title="a pattern per column on top of the colors"><input type="checkbox" id="planarTextures" /> textures</label>
     </div>
 
-    <!-- algorithms: turns recorded while "record" is on, played back as one undo step -->
-    <div class="control tw-algorithms">
-      <div class="control-head">
-        <span class="name" title="record a sequence of turns, then play it back forward or inverted (for commutators). Cleared when you switch puzzles">algorithms</span>
-        <button class="btn tw-rec" id="mRecord" title="start recording turns into a new algorithm" aria-pressed="false"><span class="dot"></span><span id="mRecordLabel">record</span></button>
-      </div>
-      <div class="tw-mlist" id="mList"></div>
-    </div>
+  </div>
 
-    <!-- puzzle builder: shown for "Custom…" -->
+  <!-- customize: the puzzle builder, a drawer on the left (on a phone, a sheet along the bottom)
+       beside the live puzzle -->
+  <aside id="panel">
     <div class="tw-builder" id="builder" hidden>
+      <div class="nx-drawerhead">
+        <span class="nx-drawertitle">Customize</span>
+        <button class="nx-done" id="customizeDone" title="close the editor; the puzzle stays as you made it">done</button>
+      </div>
       <!-- undo and redo for the whole design (solid, truncation, cuts, blacked-out pieces); the
            puzzle's own undo, for turns, is at the bottom -->
       <section>
@@ -635,20 +577,38 @@
         <button class="tw-link" id="bShare" title="copy a link that opens this puzzle">copy link</button>
       </footer>
     </div>
-  </control-panel>
+  </aside>
 
-  <div class="tw-tape" id="tape">
-    <span class="tw-clock" id="clock" hidden><button class="tw-pause" id="pause" hidden></button><span class="tw-timer" id="timer" title="solve time: starts on your first turn after a scramble and stops when it's solved">0.00</span></span><span class="tw-status" id="status"></span>
+  <!-- bottom: the algorithms down the left (turns recorded while "record" is on, played back
+       as one undo step), the tape, and the actions under it -->
+  <div id="nx-algs"></div>
+  <div class="nx-preview" id="algPreview" hidden></div>
+  <div id="nx-tape">
+    <div class="nx-moves" id="tapeMoves"></div>
+    <div class="nx-side">
+      <span class="nx-status" id="tapeStatus"></span>
+      <span class="tw-clock" id="clock" hidden><button class="tw-pause" id="pause" hidden></button><span class="tw-timer" id="timer" title="solve time: starts on your first turn after a scramble and stops when it's solved">0.00</span></span>
+    </div>
+  </div>
+  <div id="nx-actions">
+    <button class="nx-act" id="undo" title="undo the last turn (⌘Z)">↶ undo</button>
+    <button class="nx-act" id="redo" title="redo a turn you undid (⇧⌘Z)">redo ↷</button>
+    <button class="nx-act" id="scramble" title="mix the puzzle up with random turns">scramble</button>
+    <button class="nx-act" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
   </div>
 
-  <div class="control-bar">
-    <button class="btn" id="undo" title="undo the last turn (⌘Z)">↶</button>
-    <button class="btn" id="redo" title="redo a turn you undid (⇧⌘Z)">↷</button>
+  <!-- the shelf: every puzzle as a picture, dropping down from the name -->
+  <div id="nx-shelf" hidden>
+    <div class="nx-shelfhead"><input class="nx-search" id="shelfSearch" type="search" placeholder="Search puzzles" /></div>
+    <div class="nx-shelfbody" id="shelfBody"></div>
+  </div>
+
+  <!-- top right: view (only shown when it has something in it), the toggles, about -->
+  <div id="nx-toggles">
+    <button class="btn nx-viewbtn" id="view" title="flat and 3D views, the surface's shape, and how cells look">view ▾</button>
     <button class="btn is-active" id="axes" title="show the turn axes: click a segment to turn that layer clockwise, right-click for counterclockwise" aria-pressed="true">axes</button>
     <button class="btn is-active" id="textures" title="patterns on the stickers, to tell similar colors apart (on by default past 12 faces)" aria-pressed="true">textures</button>
     <button class="btn" id="rear" title="show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same (only when the 3D view is the only one on screen)" aria-pressed="false">rear view</button>
-    <button class="btn" id="scramble" title="mix the puzzle up with random turns">scramble</button>
-    <button class="btn" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
     <about-modal label="about">
       <h2 class="title">Cutwist</h2>
       <p class="intro">A twisty puzzle is a solid cut by flat planes. Every 3D puzzle here is made by
@@ -810,10 +770,12 @@
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
 
     const $ = (id) => document.getElementById(id);
-    // The layout (issue #2) is built from the controls in the markup: see "the layout" near the
-    // end. The markup's own panel, control bar and tape stay hidden; their buttons do the work.
-    document.body.classList.add("nx");
-    const nx = {}; // (its elements, once made)
+    // the layout's own elements (issue #2: see "the layout" near the end)
+    const phone = matchMedia("(max-width: 700px)");
+    const nx = {
+      tape: $("nx-tape"), moves: $("tapeMoves"), status: $("tapeStatus"), algs: $("nx-algs"), preview: $("algPreview"),
+      shelf: $("nx-shelf"), shelfBody: $("shelfBody"), search: $("shelfSearch"), pickName: $("pickName"), pop: $("viewPop"),
+    };
     const TAU = Math.PI * 2;
     const mod = (a, n) => ((a % n) + n) % n;
 
@@ -916,6 +878,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function resize() {
       W = document.documentElement.clientWidth;
       H = document.documentElement.clientHeight;
+      document.body.classList.toggle("nx-stack", W - nxDrawer().right < STACK_BELOW);
       renderer.setSize(W, H);
       planeBox = ""; // re-place the flat view's canvas on the next frame
       texturePeriod.value = TEXTURE_PX * renderer.getPixelRatio();
@@ -968,24 +931,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         camera.position.set(0, 0, (1.15 / Math.sin(half)) * zoom);
         camera.setViewOffset(W, H, W / 2 - (region.left + w / 2), H / 2 - (region.top + h / 2), W, H);
       } else {
-        // fit a unit sphere (plus margin) in the narrower direction
-        const half = camera.aspect >= 1 ? vHalf : Math.atan(Math.tan(vHalf) * camera.aspect);
-        camera.position.set(0, 0, (1.3 / Math.sin(half)) * zoom);
         // fit the space the layout leaves the puzzle (beside the customize drawer, above the tape)
-        if (nx.tape) { fitView(camera, nxStage(), 1.3); return; }
-        // center the puzzle in the space above the tape and control bar
-        camera.setViewOffset(W, H, 0, 45, W, H);
+        fitView(camera, nxStage(), 1.3);
+        return;
       }
       camera.updateProjectionMatrix();
     }
     addEventListener("resize", resize);
-    // the button row's and status's heights, for what's stacked above them (both wrap when narrow)
-    const stackObserver = new ResizeObserver(() => {
-      document.documentElement.style.setProperty("--bar-h", document.querySelector(".control-bar").offsetHeight + "px");
-      document.documentElement.style.setProperty("--tape-h", $("tape").offsetHeight + "px");
-    });
-    stackObserver.observe(document.querySelector(".control-bar"));
-    stackObserver.observe($("tape"));
 
     // ---------- puzzle meshes ----------
     let P = null, state = null, pieceObjs = [], bodyMeshes = [];
@@ -1260,14 +1212,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       playAll(moves); renderTape(); renderAlgorithms();
     }
 
+    // the status: the move count, solved, or a hint while there are no moves yet
+    let statusText = "";
     function renderTape() {
       const idle = !anim && !queue.length;
       updateReferenceTarget();
       const solved = idle && (scrambled || history.cursor > 0) && solvedAny(state);
       if (solved && timer.state === "running") { timer.solved(); renderTimer(); }
-      $("tape").classList.toggle("is-solved", solved);
       const done = history.movesDone, n = done === 1 ? "1 move" : `${done} moves`;
-      $("status").textContent = solved ? `solved · ${n}`
+      statusText = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
         : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : "scrambled · drag a sticker to turn")
@@ -1725,6 +1678,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
 
     // resetView: point the camera at the new solid's corner (on switching puzzles, not sizes)
+    let puzzleName = ""; // the full title, numbers and all ("3×3×3 cube"): the test hook reports it
     function load(resetView = true) {
       const spec = currentSpec();
       const next = spec.rule === "planar" ? buildPlanar(spec) : buildPuzzle(spec, size);
@@ -1760,15 +1714,14 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         refG = 0;
         updateReferenceTarget(true);
       }
-      $("name").textContent = puzzleTitle(spec, size);
+      puzzleName = puzzleTitle(spec, size);
       // (the picker: just the puzzle, its numbers are in the steppers under it)
-      if (nx.pickName) nx.pickName.textContent = isCustom() ? "Custom" : spec.name;
+      nx.pickName.textContent = isCustom() ? "Custom" : spec.name;
       $("size").value = size;
       $("sizeDown").disabled = size <= 0;
       $("sizeControl").hidden = !!spec.fixed;
       $("builder").hidden = !isCustom();
-      $("customize").hidden = isCustom() || !!spec.noCustom;
-      document.body.classList.toggle("nx-nocustom", !!spec.noCustom); // (the customize button)
+      $("customize").hidden = !!spec.noCustom; // (the editor can't express a cuboid, a prism or a sliding puzzle)
       if (!isPlanar()) renderTexturesButton();
       if (!isCustom()) setPainting(false);
       if (isCustom()) showStats();
@@ -1780,8 +1733,6 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       writeURL();
     }
 
-    MENU.forEach((p, i) => $("preset").append(new Option(p.name, i)));
-    $("preset").append(new Option("Custom…", "custom"));
     $("builder").style.setProperty("--center", pctIn(CUT_RANGE, 0) + "%");
     $("bUndo").onclick = undoEdit;
     $("bRedo").onclick = redoEdit;
@@ -1799,33 +1750,31 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       setTimeout(() => { $("bShare").textContent = "copy link"; }, 1500);
     };
     // (the puzzle in the URL is applied at startup, below: see applyURL)
-    $("preset").onchange = () => {
-      const v = $("preset").value;
-      presetIdx = v === "custom" ? v : +v;
+    // pick a puzzle: its index in MENU, or "custom" (the shelf and the test hook)
+    function choosePreset(v) {
+      presetIdx = v;
       paramVals = {};
       textureChoice = null;
       size = currentSpec().size;
       renderParams();
       if (isCustom()) { renderBuilder(); computeSnaps(); }
       load();
-    };
+    }
     // open the current preset in the editor: same cuts and blacked-out pieces, now editable.
     // The view stays put, and the design's edit history starts empty (the custom design that
     // was there before is a different puzzle: undoing back to it turned a preset into a cube).
-    $("customize").onclick = () => {
+    function customizePreset() {
       resetEdits();
       custom = toCustom(P);
       custom.cuts = threeSets(custom.cuts);
       presetIdx = "custom";
-      $("preset").value = "custom";
       size = custom.size;
       renderParams();
       sel = { r: 2, i: 0 };
       renderBuilder();
       load(false);
       computeSnaps();
-      $("panel").removeAttribute("collapsed");
-    };
+    }
     // dir: which way to skip sizes a family doesn't have (the tetrahedron has no size 4)
     const setSize = (n, dir) => {
       if (!Number.isFinite(n)) { $("size").value = size; return; }
@@ -1881,35 +1830,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // Recorded and kept by History (session.mjs). Playback turns the same layers of the puzzle,
     // however it's held, quickly, as one undo step.
     const count = (n) => (n === 1 ? "1 move" : `${n} moves`);
-    function renderAlgorithms() {
-      nxRenderChips();
-      const rec = $("mRecord"), on = history.isRecording;
-      rec.classList.toggle("is-recording", on);
-      rec.setAttribute("aria-pressed", String(on));
-      $("mRecordLabel").textContent = on ? `stop · ${count(history.recorded.length)}` : "record";
-      rec.title = on ? "stop recording and save these turns as an algorithm" : "start recording turns into a new algorithm";
-      const list = $("mList");
-      list.replaceChildren();
-      for (const alg of history.algorithms) {
-        const row = document.createElement("div");
-        row.className = "tw-mrow";
-        row.dataset.name = alg.name;
-        row.innerHTML = `<span class="tw-mname"></span><span class="tw-mlen"></span>
-          <button class="btn" data-act="play" title="play it">▶</button><button class="btn" data-act="reverse" title="play it in reverse: the inverse, undoing it">◀</button><button class="btn" data-act="delete" title="delete this algorithm">✕</button>`;
-        row.querySelector(".tw-mname").textContent = alg.name;
-        row.querySelector(".tw-mlen").textContent = count(alg.moves.length);
-        const [fwd, back, del] = row.querySelectorAll("button");
-        fwd.onclick = () => { showAffected(null); playAlgorithm(alg.name, false); };
-        back.onclick = () => { showAffected(null); playAlgorithm(alg.name, true); };
-        // hovering play or reverse lights the pieces it would change
-        for (const [b, reverse] of [[fwd, false], [back, true]]) {
-          b.onpointerenter = () => showAffected(affectedBy(reverse ? history.inverseOf(alg.moves) : alg.moves));
-          b.onpointerleave = () => showAffected(null);
-        }
-        del.onclick = () => { history.deleteAlgorithm(alg.name); renderAlgorithms(); };
-        list.append(row);
-      }
-    }
+    function renderAlgorithms() { nxRenderChips(); } // (the list, bottom left: see the layout)
     // The pieces (or, on a planar puzzle, cells) an algorithm would change if played now: the
     // ones it leaves somewhere else or facing another way. Not every piece it moves on the
     // way, only where it ends up, so a commutator lights just the few pieces it cycles.
@@ -1937,11 +1858,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderTape();
       renderAlgorithms();
     }
-    $("mRecord").onclick = () => {
+    function toggleRecording() {
       if (history.isRecording) history.stopRecording();
       else history.startRecording();
       renderAlgorithms();
-    };
+    }
 
     function renderTexturesButton() {
       showTextures = textureChoice ?? !!P.texturesByDefault;
@@ -2183,16 +2104,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let showLabels = true, reflectLabels = true, planarTextures = false, planarPicture = null, usePicture = false, hoverArrow = null, pdrag = null;
     function safeRect() {
       const pad = 16, r = (sel) => document.querySelector(sel).getBoundingClientRect();
-      const panel = $("panel").getBoundingClientRect();
       const top = Math.max(r(".tw-title").bottom, r("#nx-toggles").bottom) + pad, right = W - pad;
-      // (whatever's stacked along the bottom, and showing)
-      const stack = ["#nx-tape", "#reference", ...(nxNarrow() ? ["#nx-algs"] : [])];
-      let bottom = Math.min(...stack.map(r).filter((b) => b.height).map((b) => b.top)) - pad;
-      // (the customize drawer, on the left, while it's open; on a phone, a sheet below)
-      const custom = document.body.classList.contains("nx-custom");
-      if (custom && nxNarrow()) bottom = Math.min(bottom, panel.top - pad);
-      const left = custom && !nxNarrow() ? panel.right + pad : pad;
-      return { left, top, right, bottom };
+      // (whatever's along the bottom, and showing, and the customize drawer while it's open)
+      const stack = ["#nx-tape", "#reference", ...(nxStacked() ? ["#nx-algs"] : [])], d = nxDrawer();
+      const bottom = Math.min(d.top, ...stack.map(r).filter((b) => b.height).map((b) => b.top)) - pad;
+      return { left: d.right + pad, top, right, bottom };
     }
     // the picture cropped to the grid's shape
     function pictureLook() {
@@ -2696,11 +2612,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           if (!spec.fixed && q.has("size") && Number.isFinite(n)) size = snapSize(spec, n, 1);
         }
       }
-      $("preset").value = presetIdx;
       const off = (k) => q.get(k) === "off", on = (k) => q.get(k) === "on";
       showAxes = !off("axes");
       // (a phone starts with it off whatever the link says: two halves of a narrow screen are too small)
-      rearView = on("rear") && !matchMedia("(max-width: 700px)").matches;
+      rearView = on("rear") && !phone.matches;
       $("axes").classList.toggle("is-active", showAxes);
       $("axes").setAttribute("aria-pressed", String(showAxes));
       if (q.has("textures")) {
@@ -3427,10 +3342,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // playhead sits after the last step done; steps after it are undone (dimmed). Click any
     // step to jump to just after it.
     function nxRenderTape(solved) {
-      if (!nx.tape) return;
       const head = () => Object.assign(document.createElement("span"), { className: "nx-head" });
       nx.moves.replaceChildren();
-      if (!history.entries.length) nx.moves.append(Object.assign(document.createElement("span"), { className: "nx-empty", textContent: $("status").textContent }));
+      if (!history.entries.length) nx.moves.append(Object.assign(document.createElement("span"), { className: "nx-empty", textContent: statusText }));
       history.entries.forEach((moves, e) => {
         if (e === history.cursor) nx.moves.append(head());
         const step = document.createElement("button");
@@ -3455,7 +3369,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const m = nx.moves, at = playhead.getBoundingClientRect().left - m.getBoundingClientRect().left;
         m.scrollLeft = Math.max(0, Math.min(m.scrollWidth - m.clientWidth, m.scrollLeft + at - m.clientWidth / 2));
       }
-      nx.status.textContent = history.entries.length ? $("status").textContent : "";
+      nx.status.textContent = history.entries.length ? statusText : "";
     }
     // undo or redo until the history's cursor is at `cursor`
     function nxJump(cursor) {
@@ -3466,7 +3380,6 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // The algorithms: a list down the left, newest at the bottom by the tape. Hovering play or
     // reverse lights the pieces it would change and shows the turns it would make, as a tape.
     function nxRenderChips() {
-      if (!nx.algs) return;
       nx.algs.replaceChildren(Object.assign(document.createElement("div"), { className: "nx-lbl", textContent: "algorithms" }));
       for (const alg of history.algorithms) {
         const row = document.createElement("div");
@@ -3495,9 +3408,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       rec.className = "nx-rec" + (history.isRecording ? " is-on" : "");
       rec.append(Object.assign(document.createElement("span"), { className: "dot" }), history.isRecording ? `stop · ${count(history.recorded.length)}` : "record new");
       rec.title = history.isRecording ? "stop, and save the turns since as an algorithm" : "record your next turns as an algorithm";
-      rec.onclick = () => $("mRecord").click();
+      rec.onclick = toggleRecording;
       nx.algs.append(rec);
-      if (P && nxNarrow()) { planeBox = ""; placeCamera(); } // (on a phone the list's height is the puzzle's floor)
+      if (P && nxStacked()) { planeBox = ""; placeCamera(); } // (stacked, the list's height is the puzzle's floor)
     }
 
     // the shelf: every puzzle as a picture, by family; clicking one loads it
@@ -3583,7 +3496,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           img.alt = "";
           card.append(img, Object.assign(document.createElement("span"), { textContent: spec.name }));
           card.onclick = () => {
-            $("preset").value = i; $("preset").onchange(); nx.shelf.hidden = true;
+            choosePreset(i); nx.shelf.hidden = true;
             if (document.body.classList.contains("nx-custom")) nxCustomize(false); // (a new puzzle: not customizing)
           };
           grid.append(card);
@@ -3605,94 +3518,65 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // it, undo, everything). Opening it on a preset turns that preset into a custom puzzle
     // you can change; done closes the drawer and keeps what you made.
     function nxCustomize(on) {
-      if (on && !isCustom()) $("customize").click();
+      if (on && !isCustom()) customizePreset();
       document.body.classList.toggle("nx-custom", on);
-      $("panel").removeAttribute("collapsed");
       resize();
     }
-    // the space the puzzle gets: clear of the top row, the drawer, and the tape
-    // (on a phone everything's stacked above and below it, so it's measured: under the name
-    // and its numbers, above the algorithms and solved card, and above the customize sheet)
-    const nxNarrow = () => matchMedia("(max-width: 700px)").matches;
+    // Stacked: too little room beside the drawer (or on a phone) for the algorithms, the tape
+    // and the solved card side by side along the bottom, so the tape spans the width and the
+    // other two sit above it (body.nx-stack; set on every resize).
+    const STACK_BELOW = 840; // px of width the layout has, beside the drawer
+    function nxStacked() { return document.body.classList.contains("nx-stack"); }
+    // where the customize drawer is, while it's open: down the left, or on a phone a sheet
+    // along the bottom (null edges when it's closed)
+    function nxDrawer() {
+      const open = document.body.classList.contains("nx-custom"), r = $("panel").getBoundingClientRect();
+      return { right: open && !phone.matches ? r.right : 0, top: open && phone.matches ? r.top : H };
+    }
+    // the space the puzzle gets: clear of the top row, the drawer, and the tape (stacked, the
+    // whole stack is measured: under the name and its numbers, above the algorithms and solved
+    // card, and above a customize sheet)
     function nxStage() {
-      const custom = document.body.classList.contains("nx-custom"), panel = $("panel").getBoundingClientRect();
-      const tape = nx.tape ? nx.tape.getBoundingClientRect().top : H - 90;
-      if (nxNarrow()) {
+      const d = nxDrawer();
+      if (nxStacked()) {
         const top = document.querySelector(".tw-title").getBoundingClientRect().bottom + 12;
         const above = [nx.tape, nx.algs, $("reference")].map((el) => el.getBoundingClientRect()).filter((b) => b.height).map((b) => b.top);
-        return { left: 12, top, right: W - 12, bottom: Math.min(...above, custom ? panel.top : H) - 12 };
+        return { left: d.right + 12, top, right: W - 12, bottom: Math.min(...above, d.top) - 12 };
       }
-      return { left: (custom ? panel.right : 0) + 16, top: 70, right: W - 16, bottom: tape - 12 };
+      return { left: d.right + 16, top: 70, right: W - 16, bottom: nx.tape.getBoundingClientRect().top - 12 };
     }
 
-    // build the layout
-    {
-      const make =(tag, props = {}, ...kids) => { const el = Object.assign(document.createElement(tag), props); el.append(...kids); return el; };
-      // top left: the puzzle's name opens the shelf; its size (or a family's numbers) under it
-      const pick = make("button", { className: "nx-pick", title: "choose a puzzle" });
-      nx.pickName = make("span", { className: "nx-pickname", textContent: isCustom() ? "Custom" : currentSpec().name });
-      $("name").hidden = true; // (the full title, numbers and all, is for the current layout)
-      pick.append(nx.pickName, make("span", { className: "nx-caret", textContent: "▾" }));
-      pick.onclick = nxOpenShelf;
-      const sizes = make("div", { className: "nx-sizes" }, $("paramControls"), $("sizeControl"));
-      document.querySelector(".tw-title").append(make("div", { className: "nx-pickrow" }, pick), sizes);
-      // top right: how you see it (and, on planar puzzles, a popover with their view options)
-      const view = make("button", { className: "btn nx-viewbtn", textContent: "view ▾", title: "flat and 3D views, the surface's shape, and how cells look" });
-      // (on a phone, the toggles go in it too, so the name fits on the top row beside two buttons)
-      const popToggles = make("div", { className: "nx-poptoggles" });
-      const pop = make("div", { className: "nx-pop", hidden: true }, popToggles, $("planarViews"), $("planarControls"));
-      // (it drops down from the button, kept on screen)
-      view.onclick = () => {
-        pop.hidden = !pop.hidden;
-        const r = view.getBoundingClientRect();
-        Object.assign(pop.style, { left: Math.max(16, Math.min(r.left, innerWidth - 16 - pop.offsetWidth)) + "px", top: r.bottom + 6 + "px" });
-      };
-      // (the about modal stays where it is: moving it re-runs its setup, which then saves its
-      // own button as the content, and the modal opens empty. This opens it.)
-      const about = make("button", { className: "btn", textContent: "about", title: "how Cutwist works", onclick: () => document.querySelector(".control-bar about-modal button").click() });
-      document.body.append(make("div", { id: "nx-toggles" }, view, $("axes"), $("textures"), $("rear"), about), pop);
-      nx.viewBtn = view;
-      const phone = matchMedia("(max-width: 700px)");
-      const placeToggles = () => {
-        const toggles = [$("axes"), $("textures"), $("rear")];
-        if (phone.matches) popToggles.append(...toggles);
-        else about.before(...toggles);
-      };
-      phone.addEventListener("change", placeToggles);
-      placeToggles();
-      // customize: next to the puzzle's name (3D puzzles; the sliding ones can't be edited)
-      const custom = make("button", { className: "nx-custombtn", textContent: "customize", title: "change this puzzle's solid and cuts, beside it", onclick: () => nxCustomize(true) });
-      document.querySelector(".nx-pickrow").append(custom);
-      // bottom: the algorithms down the left, the tape, and the quiet actions under it
-      nx.algs = make("div", { id: "nx-algs" });
-      nx.preview = make("div", { className: "nx-preview", hidden: true });
-      nx.moves = make("div", { className: "nx-moves" });
-      nx.status = make("span", { className: "nx-status" });
-      nx.tape = make("div", { id: "nx-tape" }, nx.moves, make("div", { className: "nx-side" }, nx.status, $("clock")));
-      $("undo").textContent = "↶ undo"; $("redo").textContent = "redo ↷";
-      for (const id of ["undo", "redo", "scramble", "reset"]) $(id).className = "nx-act";
-      document.body.append(nx.algs, nx.preview, nx.tape, make("div", { id: "nx-actions" }, $("undo"), $("redo"), $("scramble"), $("reset")));
-      // (a phone stacks the algorithms and solved card on the tape, whose hint can wrap)
-      new ResizeObserver(() => {
-        document.body.style.setProperty("--nx-tape-h", nx.tape.offsetHeight + "px");
-        if (P && nxNarrow()) { planeBox = ""; placeCamera(); }
-      }).observe(nx.tape);
-      // the shelf
-      nx.search = make("input", { className: "nx-search", type: "search", placeholder: "Search puzzles", oninput: () => nxFillShelf(nx.search.value) });
-      nx.shelfBody = make("div", { className: "nx-shelfbody" });
-      nx.shelf = make("div", { id: "nx-shelf", hidden: true }, make("div", { className: "nx-shelfhead" }, nx.search), nx.shelfBody);
-      document.body.append(nx.shelf);
-      addEventListener("keydown", (e) => { if (e.key === "Escape") { nx.shelf.hidden = true; pop.hidden = true; } });
-      // a click anywhere else closes the gallery and the view options
-      addEventListener("pointerdown", (e) => {
-        if (!nx.shelf.hidden && !nx.shelf.contains(e.target) && !e.target.closest(".nx-pick")) nx.shelf.hidden = true;
-        if (!pop.hidden && !pop.contains(e.target) && e.target !== view) pop.hidden = true;
-      }, true);
-      // the customize drawer's own header: what it is, and done
-      $("builder").prepend(make("div", { className: "nx-drawerhead" },
-        make("span", { className: "nx-drawertitle", textContent: "Customize" }),
-        make("button", { className: "nx-done", textContent: "done", title: "close the editor; the puzzle stays as you made it", onclick: () => nxCustomize(false) })));
+    // the layout's controls
+    $("pick").onclick = nxOpenShelf;
+    nx.search.oninput = () => nxFillShelf(nx.search.value);
+    $("customize").onclick = () => nxCustomize(true);
+    $("customizeDone").onclick = () => nxCustomize(false);
+    // the view dropdown drops from its button, kept on screen
+    $("view").onclick = () => {
+      const pop = nx.pop, r = $("view").getBoundingClientRect();
+      pop.hidden = !pop.hidden;
+      Object.assign(pop.style, { left: Math.max(16, Math.min(r.left, innerWidth - 16 - pop.offsetWidth)) + "px", top: r.bottom + 6 + "px" });
+    };
+    // on a phone the toggles go in the view dropdown, so the name fits on the top row beside
+    // two buttons (view and about)
+    function placeToggles() {
+      const toggles = [$("axes"), $("textures"), $("rear")];
+      if (phone.matches) $("popToggles").append(...toggles);
+      else document.querySelector("#nx-toggles about-modal").before(...toggles);
     }
+    phone.addEventListener("change", placeToggles);
+    placeToggles();
+    // (a phone stacks the algorithms and solved card on the tape, whose hint can wrap)
+    new ResizeObserver(() => {
+      document.body.style.setProperty("--nx-tape-h", nx.tape.offsetHeight + "px");
+      if (P && nxStacked()) { planeBox = ""; placeCamera(); }
+    }).observe(nx.tape);
+    addEventListener("keydown", (e) => { if (e.key === "Escape") { nx.shelf.hidden = true; nx.pop.hidden = true; } });
+    // a click anywhere else closes the gallery and the view options
+    addEventListener("pointerdown", (e) => {
+      if (!nx.shelf.hidden && !nx.shelf.contains(e.target) && !e.target.closest(".nx-pick")) nx.shelf.hidden = true;
+      if (!nx.pop.hidden && !nx.pop.contains(e.target) && e.target !== $("view")) nx.pop.hidden = true;
+    }, true);
 
     // ---------- test hook ----------
     // For the browser tests (e2e/) and poking at things from the console: drive the page
@@ -3707,8 +3591,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       load(id, { size: n, params } = {}) {
         const i = MENU.findIndex((p) => p.id === id);
         if (i < 0) throw new Error(`no preset ${id}`);
-        $("preset").value = i;
-        $("preset").onchange();
+        choosePreset(i);
         if (params) { Object.assign(paramVals, params); renderParams(); load(); }
         if (n !== undefined) setSize(n, 1);
         return this.info();
@@ -3732,14 +3615,14 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       get state() { return Array.from(state); },
       info() {
         return {
-          id: isCustom() ? "custom" : MENU[presetIdx].id, title: $("name").textContent, size, rear: rearOn(),
+          id: isCustom() ? "custom" : MENU[presetIdx].id, title: puzzleName, size, rear: rearOn(),
           ...(isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
-          status: $("status").textContent,
+          status: statusText,
           timer: { state: timer.state, ms: timer.ms, text: $("clock").hidden ? null : $("timer").textContent },
           recording: history.isRecording, recorded: history.recorded.length,
           algorithms: history.algorithms.map((a) => ({ name: a.name, moves: a.moves.length })),
