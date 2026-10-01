@@ -1202,7 +1202,12 @@ export function scrambleLayers(P) {
   // and the layers left have to reach every axis (an odd prism's side axes each run
   // through a piece on the far edge, which would leave only the caps to turn)
   const reach = new Set(offAxis.map((l) => l.axis)), all = new Set(layers.map((l) => l.axis));
-  if (pinning.size >= 2 && reach.size === all.size) return (P.scrambleLayers = offAxis);
+  // and they can leave out at most one layer per axis: turning the one left out is the same as
+  // turning the rest the other way and the whole puzzle, but with two left out (a 4×4×4
+  // octahedron's centers sit in both inner layers) turning just one of them is never reached,
+  // and the scramble leaves a quarter of the pieces home
+  const oneOut = [...all].every((a) => layers.filter((l) => l.axis === a).length - offAxis.filter((l) => l.axis === a).length <= 1);
+  if (pinning.size >= 2 && reach.size === all.size && oneOut) return (P.scrambleLayers = offAxis);
   // Otherwise (no pieces on an axis, like even cubes, or no layer free of them): the piece
   // with the most stickers (a corner), held still. It also defines the orientation for
   // closestOrientation.

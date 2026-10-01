@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PRESETS, buildPuzzle, solvedState, applyMove, inverseMove, isSolved, randomMoves, moveLabel,
-  piecesInLayer, closestOrientation, puzzleTitle, snapSize, scrambleMoves, puzzleStats, snapDepths, toCustom, pieceFinder, faceTextures, colorDistance, dot, sub, cross, len, rotMat,
+  piecesInLayer, closestOrientation, puzzleTitle, snapSize, scrambleMoves, scrambleLayers, puzzleStats, snapDepths, toCustom, pieceFinder, faceTextures, colorDistance, dot, sub, cross, len, rotMat,
 } from "./puzzle.mjs";
 
 const family = (id) => PRESETS.find((p) => p.id === id);
@@ -405,6 +405,23 @@ test("scrambles don't reorient the puzzle without a reason", () => {
   const cube = preset("cube", 3), s = solvedState(cube);
   for (const m of scrambleMoves(cube, 100, seeded(5))) applyMove(cube, s, m);
   cube.pieces.forEach((p, i) => { if (p.onAxis) assert.equal(cube.group.facePerm[s[i]][p.stickers[0].color], p.stickers[0].color); });
+});
+
+// A scramble may leave out one layer per axis (turning it is the same as turning the others
+// back and the whole puzzle), never two: with both inner layers of a 4×4×4 octahedron left
+// out, turning one alone was never reached and a quarter of the pieces stayed home.
+test("scrambles turn every layer but at most one per axis", () => {
+  for (const spec of PRESETS) {
+    for (const n of spec.fixed ? [spec.size] : [...new Set([2, 3, 4, 5].map((k) => snapSize(spec, k)))]) {
+      const P = buildPuzzle(spec, n);
+      if (P.pieces.length > 400) continue;
+      const slots = scrambleLayers(P);
+      P.axes.forEach((ax, a) => {
+        const turnable = ax.layers - ax.empty.filter(Boolean).length, used = slots.filter((s) => s.axis === a).length;
+        assert.ok(turnable - used <= 1, `${spec.id} ${n}, axis ${a}: ${used} of ${turnable} layers turn`);
+      });
+    }
+  }
 });
 
 // every piece turned by rotation h, as if the whole puzzle were picked up and turned
