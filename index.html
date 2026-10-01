@@ -75,8 +75,8 @@
 
     /* ---- the next UI (?ui=next): a prototype of the redesign, issue #2 ---- */
     body.nx control-panel#panel, body.nx .control-bar, body.nx #tape { display: none; }
-    /* (the solved card sits above the bottom stack, clear of the tape) */
-    body.nx .tw-reference { bottom: 176px; }
+    /* every corner the same 16 px in: the solved card bottom right (the tape stays clear of it) */
+    body.nx .tw-reference { bottom: 16px; right: 16px; }
     body.nx .tw-title { pointer-events: none; }
     .nx-pickrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; pointer-events: auto; }
     .nx-pick {
@@ -87,10 +87,21 @@
     .nx-pick:hover { border-color: var(--faint); }
     .nx-pick .tw-name { margin: 0; color: var(--text); font-size: .95rem; }
     .nx-caret { color: var(--muted); font-size: .7rem; }
-    .nx-sizes { display: flex; gap: 6px; }
-    .nx-sizes .control { margin: 0; padding: 0; border: 0; }
-    .nx-sizes .control-head { display: none; }
-    .nx-sizes .tw-size input { width: 3.2em; }
+    /* the puzzle's numbers (size, or a family's width, height, sides…): small labeled
+       steppers in one row beside the name */
+    .nx-sizes, .nx-sizes #paramControls { display: flex; flex-direction: row; align-items: center; gap: 10px; }
+    .nx-sizes .control { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; padding: 0; border: 0; }
+    .nx-sizes .control-head { margin: 0; }
+    .nx-sizes .control-head .name { font: .7rem var(--font-mono); color: var(--faint); text-transform: lowercase; letter-spacing: .02em; }
+    .nx-sizes .tw-size { display: flex; align-items: center; gap: 0; height: 28px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+    .nx-sizes .tw-size .btn { height: 100%; padding: 0 8px; border: 0; border-radius: 0; background: none; color: var(--muted); font: .9rem var(--font-mono); }
+    .nx-sizes .tw-size .btn:hover { color: var(--text); background: var(--panel-2); }
+    .nx-sizes .tw-size input {
+      width: 2.3em; height: 100%; padding: 0; border: 0; background: none; text-align: center;
+      color: var(--text); font: .85rem var(--font-mono); -moz-appearance: textfield;
+    }
+    .nx-sizes .tw-size input::-webkit-inner-spin-button, .nx-sizes .tw-size input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .nx-sizes .tw-select { height: 28px; font-size: .8rem; }
     #nx-toggles { position: fixed; top: 16px; right: 16px; z-index: 5; display: flex; gap: 6px; align-items: center; font-family: var(--font-mono); }
     #nx-toggles .btn { padding: 6px 10px; }
     body:not(.nx-planar) .nx-viewbtn { display: none; }
@@ -102,7 +113,7 @@
     .nx-pop[hidden] { display: none; }
     /* the algorithms: a list down the left, its newest row by the tape */
     #nx-algs {
-      position: fixed; left: calc(var(--nx-left, 0px) + 16px); bottom: 132px; z-index: 5; width: 196px;
+      position: fixed; left: calc(var(--nx-left, 0px) + 16px); bottom: 16px; z-index: 5; width: 196px;
       display: flex; flex-direction: column; gap: 4px; font: .78rem var(--font-mono);
     }
     .nx-lbl { color: var(--faint); text-transform: uppercase; letter-spacing: .08em; font-size: .66rem; margin-bottom: 2px; }
@@ -128,7 +139,8 @@
     .nx-preview b { color: var(--accent); }
     #nx-tape {
       position: fixed; left: calc(50% + var(--nx-left, 0px) / 2); transform: translateX(-50%); bottom: 72px; z-index: 5;
-      width: min(760px, calc(100vw - var(--nx-left, 0px) - 32px)); display: flex; align-items: stretch;
+      /* (clear of the algorithms, bottom left, and the solved card, bottom right) */
+      width: min(760px, calc(100vw - var(--nx-left, 0px) - 2 * 236px)); display: flex; align-items: stretch;
       background: var(--panel); border: 1px solid var(--border); border-radius: 12px; transition: border-color .3s;
     }
     #nx-tape.is-solved { border-color: var(--accent); }
@@ -161,21 +173,32 @@
     #nx-actions { position: fixed; left: calc(50% + var(--nx-left, 0px) / 2); transform: translateX(-50%); bottom: 36px; z-index: 5; display: flex; gap: 4px; font-family: var(--font-mono); }
     .nx-act { white-space: nowrap; font: .85rem var(--font-mono); color: var(--muted); background: none; border: 0; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
     .nx-act:hover { color: var(--text); background: var(--panel); }
-    #nx-shelf { position: fixed; inset: 0; z-index: 60; background: var(--bg); overflow-y: auto; padding: 18px 24px 40px; }
-    #nx-shelf[hidden] { display: none; }
-    .nx-shelfhead { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
-    .nx-wm { font-family: var(--font-display); font-size: 1.1rem; letter-spacing: .04em; }
-    .nx-search { flex: 0 1 340px; margin: 0 auto; font: .9rem var(--font-ui); color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; }
-    .nx-close { font: 1rem var(--font-mono); color: var(--muted); background: none; border: 0; cursor: pointer; }
-    .nx-fam { font: .68rem var(--font-mono); color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 18px 0 8px; }
-    .nx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
-    .nx-card {
-      display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px 12px; cursor: pointer;
-      background: var(--panel); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font: .82rem var(--font-ui); text-align: center;
+    /* the puzzle picker: a gallery that drops down from the name, like the dropdown it looks
+       like; a click outside or Escape closes it */
+    #nx-shelf {
+      position: fixed; z-index: 60; width: min(820px, calc(100vw - 32px)); max-height: min(72vh, 680px); overflow-y: auto;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px 16px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
     }
-    .nx-card:hover { border-color: var(--faint); }
+    #nx-shelf[hidden] { display: none; }
+    .nx-shelfhead { position: sticky; top: -12px; z-index: 1; margin: -12px -14px 4px; padding: 12px 14px 8px; background: var(--panel); }
+    .nx-search {
+      width: 100%; height: 34px; padding: 0 12px 0 32px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='5' fill='none' stroke='%238e909b' stroke-width='1.6'/%3E%3Cpath d='M11 11l3.5 3.5' stroke='%238e909b' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 11px 50%;
+      color: var(--text); font: .88rem var(--font-ui); outline: none;
+    }
+    .nx-search::placeholder { color: var(--faint); }
+    .nx-search:focus { border-color: var(--faint); }
+    .nx-search::-webkit-search-cancel-button { -webkit-appearance: none; }
+    .nx-fam { font: .66rem var(--font-mono); color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 14px 0 6px; }
+    .nx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+    .nx-card {
+      display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 6px 10px; cursor: pointer;
+      background: none; border: 1px solid transparent; border-radius: 9px; color: var(--text); font: .8rem var(--font-ui); text-align: center;
+    }
+    .nx-card:hover { background: var(--panel-2); }
     .nx-card.is-cur { border-color: var(--accent); }
-    .nx-card img { width: 96px; height: 96px; }
+    .nx-card img { width: 80px; height: 80px; }
     /* customize: a button by the name; the editor opens as a drawer on the left and
        everything else (name, tape, algorithms) moves over beside it, still working */
     .nx-custombtn {
@@ -186,8 +209,11 @@
     body.nx-planar .nx-custombtn, body.nx-custom .nx-custombtn { display: none; }
     body.nx-custom { --nx-left: 360px; }
     body.nx-custom .tw-title { left: calc(var(--nx-left) + 22px); }
+    /* (the footer centers in the space beside the drawer, clear of the algorithms) */
+    body.nx-custom mike-footer { padding-left: var(--nx-left) !important; }
     body.nx-custom control-panel#panel {
-      display: block; position: fixed; left: 0; top: 0; bottom: 0; right: auto; width: var(--nx-left); max-height: none;
+      display: block; position: fixed; left: 0; top: 0; bottom: 0; right: auto;
+      width: var(--nx-left) !important; max-width: none !important; max-height: none; /* (the component sets its own width) */
       border-radius: 0; border-width: 0 1px 0 0; z-index: 6; overflow-y: auto;
     }
     body.nx-custom #panel .panel-header, body.nx-custom #panel .control:has(#preset), body.nx-custom #panel .tw-algorithms, body.nx-custom #customize { display: none; }
@@ -1213,13 +1239,14 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     // Look at the corner where face 0 meets its two nearest neighbors, with the first
     // neighbor on top, so three faces show (for the cube: F, R and U, white up).
-    function startView() {
-      const ns = P.normals, n0 = ns[0];
+    // (Q: the puzzle to look at, the current one by default)
+    function startView(Q = P) {
+      const ns = Q.normals, n0 = ns[0];
       const byAngle = (ref, list) => [...list].sort((a, b) => dot(b, ref) - dot(a, ref));
       let [a, ...rest] = byAngle(n0, ns.slice(1));
       let b = byAngle(add(n0, a), rest)[0];
       // a prism's nearest faces to a side are more sides: look at a top corner instead
-      if (P.spec.rule === "prism") [a, b] = [ns[P.spec.sides], ns[1]];
+      if (Q.spec.rule === "prism") [a, b] = [ns[Q.spec.sides], ns[1]];
       const z = normalize(add(add(n0, a), b));
       const y = normalize(sub(a, scale(z, dot(a, z))));
       const x = cross(y, z);
@@ -1696,6 +1723,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         updateReferenceTarget(true);
       }
       $("name").textContent = puzzleTitle(spec, size);
+      // (the next UI's picker: just the puzzle, its numbers are in the steppers beside it)
+      if (NEXT && nx.pickName) nx.pickName.textContent = isCustom() ? "Custom" : spec.name;
       $("size").value = size;
       $("sizeDown").disabled = size <= 0;
       $("sizeControl").hidden = !!spec.fixed;
@@ -3434,7 +3463,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // a picture of a puzzle, solved, from the start view's sort of angle (rendered once)
     function nxThumb(spec) {
       if (nxThumbs[spec.id]) return nxThumbs[spec.id];
-      const S = 160, cv = document.createElement("canvas");
+      const S = 256, cv = document.createElement("canvas"); // (shown at 96 px: sharp at 2× and up)
       cv.width = cv.height = S;
       nxThumbRenderer ??= new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
       nxThumbRenderer.setSize(S, S, false);
@@ -3443,7 +3472,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       sc.root.add(group);
       if (spec.rule === "planar") {
         // the surface, with the solved grid wrapped on it (as the 3D view draws it)
-        const Q = buildPlanar(spec), tex = document.createElement("canvas"), C = 48;
+        const Q = buildPlanar(spec), tex = document.createElement("canvas"), C = 128;
         tex.width = Q.W * C; tex.height = Q.H * C;
         new PlanarView(tex).drawBare(Q, solvedPlanarState(Q), null, { labels: false, textures: false });
         const N = 90, pos = [], uv = [], idx = [];
@@ -3456,7 +3485,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
         geo.setIndex(idx); geo.computeVertexNormals();
         const map = new THREE.CanvasTexture(tex); map.colorSpace = THREE.SRGBColorSpace;
-        group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map, side: THREE.DoubleSide, roughness: 0.5 })));
+        map.anisotropy = nxThumbRenderer.capabilities.getMaxAnisotropy();
+        // (some of the color glows on its own, so the surface's far side isn't murky at this size)
+        group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map, side: THREE.DoubleSide, roughness: 0.5, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.35 })));
         trash.push(geo, map);
         const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[spec.topology];
         sc.root.quaternion.setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
@@ -3464,7 +3495,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const Q = buildPuzzle(spec, spec.size);
         group.scale.setScalar(1 / Q.R);
         for (const p of Q.pieces) { const o = pieceObject(p, Q.colors, null, 0.028 * Q.R, 0.004 * Q.R); vizPlace(o, Q.group.mats[0]); group.add(o); }
-        sc.root.quaternion.setFromEuler(new THREE.Euler(0.5, -0.65, 0));
+        sc.root.quaternion.copy(startView(Q)); // (as it opens: three faces showing, not one face-on)
       }
       sc.cam.aspect = 1; sc.cam.position.set(0, 0, 4.6); sc.cam.updateProjectionMatrix();
       nxThumbRenderer.render(sc.scene, sc.cam);
@@ -3473,7 +3504,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       for (const t of trash) t.dispose();
       return (nxThumbs[spec.id] = cv.toDataURL());
     }
+    // open the gallery under the name it drops from (clicking the name again closes it)
     function nxOpenShelf() {
+      if (!nx.shelf.hidden) { nx.shelf.hidden = true; return; }
+      const r = document.querySelector(".nx-pick").getBoundingClientRect();
+      Object.assign(nx.shelf.style, { left: r.left + "px", top: r.bottom + 6 + "px" });
       nx.shelf.hidden = false;
       nx.search.value = "";
       nxFillShelf("");
@@ -3537,7 +3572,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const make = (tag, props = {}, ...kids) => { const el = Object.assign(document.createElement(tag), props); el.append(...kids); return el; };
       // top left: the puzzle's name opens the shelf; its size (or a family's numbers) beside it
       const pick = make("button", { className: "nx-pick", title: "choose a puzzle" });
-      pick.append($("name"), make("span", { className: "nx-caret", textContent: "▾" }));
+      nx.pickName = make("span", { className: "nx-pickname", textContent: isCustom() ? "Custom" : currentSpec().name });
+      $("name").hidden = true; // (the full title, numbers and all, is for the current layout)
+      pick.append(nx.pickName, make("span", { className: "nx-caret", textContent: "▾" }));
       pick.onclick = nxOpenShelf;
       const sizes = make("div", { className: "nx-sizes" }, $("paramControls"), $("sizeControl"));
       document.querySelector(".tw-title").append(make("div", { className: "nx-pickrow" }, pick, sizes));
@@ -3545,7 +3582,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const view = make("button", { className: "btn nx-viewbtn", textContent: "view ▾", title: "flat and 3D views, the surface's shape, and how cells look" });
       const pop = make("div", { className: "nx-pop", hidden: true }, $("planarViews"), $("planarControls"));
       view.onclick = () => { pop.hidden = !pop.hidden; };
-      const about = document.querySelector(".control-bar about-modal");
+      // (the about modal stays where it is: moving it re-runs its setup, which then saves its
+      // own button as the content, and the modal opens empty. This opens it.)
+      const about = make("button", { className: "btn", textContent: "about", title: "how Cutwist works", onclick: () => document.querySelector(".control-bar about-modal button").click() });
       document.body.append(make("div", { id: "nx-toggles" }, view, $("axes"), $("textures"), $("rear"), about), pop);
       nx.viewBtn = view;
       // customize: next to the puzzle's name (3D puzzles; the sliding ones can't be edited)
@@ -3562,12 +3601,16 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       for (const id of ["scramble", "reset"]) $(id).className = "nx-act";
       document.body.append(nx.algs, nx.preview, nx.tape, make("div", { id: "nx-actions" }, undoB, redoB, $("scramble"), $("reset")));
       // the shelf
-      nx.search = make("input", { className: "nx-search", type: "search", placeholder: "search puzzles", oninput: () => nxFillShelf(nx.search.value) });
-      const close = make("button", { className: "nx-close", textContent: "✕", title: "close", onclick: () => { nx.shelf.hidden = true; } });
+      nx.search = make("input", { className: "nx-search", type: "search", placeholder: "Search puzzles", oninput: () => nxFillShelf(nx.search.value) });
       nx.shelfBody = make("div", { className: "nx-shelfbody" });
-      nx.shelf = make("div", { id: "nx-shelf", hidden: true }, make("div", { className: "nx-shelfhead" }, make("span", { className: "nx-wm", textContent: "CUTWIST" }), nx.search, close), nx.shelfBody);
+      nx.shelf = make("div", { id: "nx-shelf", hidden: true }, make("div", { className: "nx-shelfhead" }, nx.search), nx.shelfBody);
       document.body.append(nx.shelf);
       addEventListener("keydown", (e) => { if (e.key === "Escape") { nx.shelf.hidden = true; pop.hidden = true; } });
+      // a click anywhere else closes the gallery and the view options
+      addEventListener("pointerdown", (e) => {
+        if (!nx.shelf.hidden && !nx.shelf.contains(e.target) && !e.target.closest(".nx-pick")) nx.shelf.hidden = true;
+        if (!pop.hidden && !pop.contains(e.target) && e.target !== view) pop.hidden = true;
+      }, true);
       // the customize drawer's own header: what it is, and done
       $("builder").prepend(make("div", { className: "nx-drawerhead" },
         make("span", { className: "nx-drawertitle", textContent: "Customize" }),
