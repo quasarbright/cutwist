@@ -1,4 +1,4 @@
-// The view toggles: textures and axes.
+// The view toggles: textures, axes and rear view.
 import { test, expect } from "@playwright/test";
 import { open, info, openView } from "./helpers.mjs";
 
@@ -43,12 +43,18 @@ test("buttons don't double-tap zoom on phones; the puzzle keeps all touches for 
   expect(await touch("#c")).toBe("none");
 });
 
-test("rear view: the button splits the view, goes in the URL, and is off while a flat grid shows", async ({ page }) => {
-  await expect(page.locator("#rear")).toHaveAttribute("aria-pressed", "false");
+test("rear view: on by default on a wide screen; the button toggles it, goes in the URL, and is off while a flat grid shows", async ({ page }) => {
+  const rearParam = () => new URL(page.url()).searchParams.get("rear");
+  await expect(page.locator("#rear")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#rearSplit")).toBeVisible();
+  expect(rearParam()).toBeNull(); // (the default isn't written)
+  await page.click("#rear");
+  expect((await info(page)).rear).toBe(false);
+  await expect(page.locator("#rearSplit")).toBeHidden();
+  expect(rearParam()).toBe("off");
   await page.click("#rear");
   expect((await info(page)).rear).toBe(true);
-  await expect(page.locator("#rearSplit")).toBeVisible();
-  expect(new URL(page.url()).searchParams.get("rear")).toBe("on");
+  expect(rearParam()).toBeNull();
   // a planar puzzle with its flat grid on screen: no rear view
   await page.evaluate(() => window.cutwist.load("sliding-klein"));
   await expect(page.locator("#rear")).toBeDisabled();
@@ -61,4 +67,11 @@ test("rear view: the button splits the view, goes in the URL, and is off while a
   expect((await info(page)).rear).toBe(true);
   await page.click("#rear");
   expect((await info(page)).rear).toBe(false);
+});
+
+test("rear view: off on a phone, even from a link that turns it on", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await open(page, "?puzzle=cube&rear=on");
+  expect((await info(page)).rear).toBe(false);
+  await expect(page.locator("#rearSplit")).toBeHidden();
 });

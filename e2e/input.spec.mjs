@@ -21,7 +21,8 @@ async function stateAfter(page, axis, layer, q) {
 }
 
 let errors;
-test.beforeEach(async ({ page }) => { errors = await open(page); });
+// (one view: the rear view, on by default on a wide screen, is turned on by its own tests)
+test.beforeEach(async ({ page }) => { errors = await open(page, "?rear=off"); });
 test.afterEach(async () => { await noErrors(errors); });
 
 test("left-clicking an axis stub turns that layer clockwise as seen from that end", async ({ page }) => {
