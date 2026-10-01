@@ -926,7 +926,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       hoverSeg = seg;
       if (seg) seg.material = axisHiMat;
       // light up the pieces of that layer too
-      const lit = seg ? new Set(piecesInLayer(P, state, seg.userData.axis, seg.userData.layer)) : null;
+      lightPieces(seg ? new Set(piecesInLayer(P, state, seg.userData.axis, seg.userData.layer)) : null);
+    }
+    // lighten some pieces (a Set of piece indices), or none: hovering a turn's axis segment,
+    // a kind of piece while blacking out, or an algorithm's play button
+    function lightPieces(lit) {
       pieceObjs.forEach((obj, i) => {
         const on = !!lit && lit.has(i);
         obj.children[0].material = on ? bodyHiMat : bodyMat;
@@ -1136,11 +1140,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let hoverType = null;
     function setHover(type) {
       hoverType = type;
-      pieceObjs.forEach((obj, i) => {
-        const on = type !== null && P.types[i] === type;
-        obj.children[0].material = on ? bodyHiMat : bodyMat;
-        if (obj.children[1]) obj.children[1].material = on ? stickerHiMat : stickerMat;
-      });
+      lightPieces(type === null ? null : new Set(P.types.flatMap((t, i) => (t === type ? [i] : []))));
     }
     function restoreAll() {
       if (!custom.blackout.length) return;
@@ -1545,6 +1545,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (isCustom()) showStats();
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
       if (hoverType !== null && !isPlanar()) setHover(hoverType); // meshes were rebuilt
+      algLit = null; // (an algorithm's hover highlight belonged to the old puzzle)
       renderRearButton();
       renderTape();
       writeURL();
@@ -1667,11 +1668,32 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         row.querySelector(".tw-mname").textContent = alg.name;
         row.querySelector(".tw-mlen").textContent = count(alg.moves.length);
         const [fwd, back, del] = row.querySelectorAll("button");
-        fwd.onclick = () => playAlgorithm(alg.name, false);
-        back.onclick = () => playAlgorithm(alg.name, true);
+        fwd.onclick = () => { showAffected(null); playAlgorithm(alg.name, false); };
+        back.onclick = () => { showAffected(null); playAlgorithm(alg.name, true); };
+        // hovering play or reverse lights the pieces it would change
+        for (const [b, reverse] of [[fwd, false], [back, true]]) {
+          b.onpointerenter = () => showAffected(affectedBy(reverse ? history.inverseOf(alg.moves) : alg.moves));
+          b.onpointerleave = () => showAffected(null);
+        }
         del.onclick = () => { history.deleteAlgorithm(alg.name); renderAlgorithms(); };
         list.append(row);
       }
+    }
+    // The pieces (or, on a planar puzzle, cells) an algorithm would change if played now: the
+    // ones it leaves somewhere else or facing another way. Not every piece it moves on the
+    // way, only where it ends up, so a commutator lights just the few pieces it cycles.
+    function affectedBy(moves) {
+      const after = state.slice();
+      for (const m of moves) applyAny(after, m);
+      const lit = new Set();
+      for (let i = 0; i < after.length; i++) if (after[i] !== state[i]) lit.add(i);
+      return lit;
+    }
+    // shown while an algorithm's play or reverse button is hovered (null: none)
+    let algLit = null;
+    function showAffected(lit) {
+      algLit = lit;
+      if (!isPlanar()) lightPieces(lit); // (a planar puzzle draws it each frame: see drawPlanar)
     }
     function playAlgorithm(name, reverse) {
       if (anim && anim.live) return;
@@ -2099,6 +2121,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function renderSurface(region, slide, look) {
       const hints = slide ? null : edgeHints; // (none while a line moves)
       const key = state.join(",") + "|" + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
+        + "|" + (look.lit ? [...look.lit].join(".") : "")
         + "|" + (hints ? `${hints.x},${hints.y},${hints.edge}` : "");
       if (key !== texKey) { texKey = key; texView.drawBare(P, state, null, { ...look, edgeHints: hints }); surfaceTexture.needsUpdate = true; }
       // the moving line, and the one its loop continues in across a mirrored seam
@@ -2214,7 +2237,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       plane.hidden = !reg.flat;
       canvas.hidden = !reg.surface;
       const slide = anim ? { axis: anim.axis, layer: anim.layer, p: anim.theta } : null;
-      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: showAxes, hover: hoverArrow };
+      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: showAxes, hover: hoverArrow, lit: algLit };
       if (reg.flat) {
         placePlane(reg.flat);
         planeView.layout(P, reg.flat);
@@ -3127,6 +3150,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // For the browser tests (e2e/) and poking at things from the console: drive the page
     // without pointer input. A turn here goes through the same path as a turn by hand.
     window.cutwist = {
+      // the pieces (planar: cells) lit by hovering an algorithm's play or reverse button, or null
+      lit() { return algLit ? [...algLit].sort((a, b) => a - b) : null; },
       // what the main renderer holds on the GPU (for catching leaks)
       gpu() { return { ...renderer.info.memory, programs: renderer.info.programs.length }; },
       // pick a puzzle by preset id, like the menu, then optionally its size and a family's

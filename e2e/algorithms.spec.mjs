@@ -82,3 +82,41 @@ test("algorithms are cleared on switching puzzles, recording too", async ({ page
   expect(s.algorithms).toEqual([]);
   expect(s.recording).toBe(false);
 });
+
+// ---- hovering play or reverse lights what it would change ----
+const lit = (page) => page.evaluate(() => window.cutwist.lit());
+const changed = (a, b) => a.flatMap((v, i) => (v !== b[i] ? [i] : []));
+
+test("hovering play lights exactly the pieces it changes; leaving clears it", async ({ page }) => {
+  // a commutator (R U R' U'): it moves many pieces on the way but changes only a few
+  await record(page, [0, 2, 1], [1, 2, 1], [0, 2, 3], [1, 2, 3]);
+  const before = await page.evaluate(() => window.cutwist.state);
+  await row(page, "A").locator('[data-act="play"]').hover();
+  const shown = await lit(page);
+  expect(shown.length).toBeGreaterThan(0);
+  expect(shown.length).toBeLessThan(9); // fewer than one face turn moves
+  await page.mouse.move(5, 5);
+  expect(await lit(page)).toBeNull();
+  await row(page, "A").locator('[data-act="play"]').click(); await finish(page);
+  expect(changed(before, await page.evaluate(() => window.cutwist.state))).toEqual(shown);
+});
+
+test("hovering reverse lights what reversing changes", async ({ page }) => {
+  await record(page, [0, 2, 1], [1, 0, 1]);
+  const before = await page.evaluate(() => window.cutwist.state);
+  await row(page, "A").locator('[data-act="reverse"]').hover();
+  const shown = await lit(page);
+  await row(page, "A").locator('[data-act="reverse"]').click(); await finish(page);
+  expect(changed(before, await page.evaluate(() => window.cutwist.state))).toEqual(shown);
+});
+
+test("planar: hovering play lights the cells it changes", async ({ page }) => {
+  await page.evaluate(() => window.cutwist.load("sliding-torus"));
+  await record(page, [0, 1, 1], [1, 2, 1], [0, 1, -1], [1, 2, -1]);
+  const before = await page.evaluate(() => window.cutwist.state);
+  await row(page, "A").locator('[data-act="play"]').hover();
+  const shown = await lit(page);
+  expect(shown.length).toBeGreaterThan(0);
+  await row(page, "A").locator('[data-act="play"]').click(); await finish(page);
+  expect(changed(before, await page.evaluate(() => window.cutwist.state))).toEqual(shown);
+});

@@ -65,7 +65,8 @@ export class PlanarView {
 
   // ---- drawing ----
   // state: the planar state. slide: the line moving right now, { axis, layer, p } with p its
-  // offset in cells, or null. look: { labels, picture, arrows, hover (an arrow) }.
+  // offset in cells, or null. look: { labels, picture, arrows, hover (an arrow), lit (a Set
+  // of cells to lighten, or null) }.
   draw(state, slide, look) {
     const { ctx, canvas, P } = this, o = this.origin;
     const dpr = canvas.width / canvas.clientWidth || 1;
@@ -95,6 +96,7 @@ export class PlanarView {
       const at = { x: i % P.W, y: Math.floor(i / P.W) };
       this.drawSlot(slots[i], this.ox + at.x * c, this.oy + at.y * c, c, 0, look, at);
     }
+    if (look.lit) this.drawLit(look.lit, this.ox, this.oy, c);
     this.drawCoordinates();
     if (look.arrows) this.drawArrows(look.hover);
   }
@@ -113,7 +115,21 @@ export class PlanarView {
       const at = { x: i % P.W, y: Math.floor(i / P.W) };
       this.drawSlot(slots[i], at.x * c, at.y * c, c, 0, look, at);
     }
+    if (look.lit) this.drawLit(look.lit, 0, 0, c);
     if (look.edgeHints) this.drawEdgeHints(look.edgeHints, c);
+  }
+
+  // Lighten some cells (a Set of cell indices), the grid's top-left at (x0, y0), cells c
+  // wide: the cells an algorithm would change, while its play button is hovered
+  drawLit(lit, x0, y0, c) {
+    const { ctx, P } = this, inset = 0.03;
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
+    for (const i of lit) {
+      roundRect(ctx, x0 + ((i % P.W) + inset) * c, y0 + (Math.floor(i / P.W) + inset) * c, (1 - 2 * inset) * c, (1 - 2 * inset) * c, 0.1 * c);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // Just the cells, stretched to fill the whole canvas (a little off square when the grid's
