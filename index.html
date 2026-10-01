@@ -3448,7 +3448,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       });
       if (history.entries.length && history.cursor === history.entries.length) nx.moves.append(head());
       nx.tape.classList.toggle("is-solved", !!solved);
-      nx.moves.querySelector(".nx-head")?.scrollIntoView({ block: "nearest", inline: "center" });
+      // the playhead in the middle of the tape, or the tape scrolled to its end (set directly:
+      // scrollIntoView's centering isn't reliable in a horizontal scroller on every browser)
+      const playhead = nx.moves.querySelector(".nx-head");
+      if (playhead) {
+        const m = nx.moves, at = playhead.getBoundingClientRect().left - m.getBoundingClientRect().left;
+        m.scrollLeft = Math.max(0, Math.min(m.scrollWidth - m.clientWidth, m.scrollLeft + at - m.clientWidth / 2));
+      }
       nx.status.textContent = history.entries.length ? $("status").textContent : "";
     }
     // undo or redo until the history's cursor is at `cursor`

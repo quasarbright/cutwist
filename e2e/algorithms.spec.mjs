@@ -65,6 +65,18 @@ test("a commutator built from two algorithms", async ({ page }) => {
   expect((await info(page)).solved).toBe(true);
 });
 
+test("playing algorithms keeps the tape scrolled to its end, like turns do", async ({ page }) => {
+  await record(page, [0, 0, 1], [1, 1, 1], [2, 0, 1], [0, 1, 1], [1, 0, 1], [2, 2, 1], [0, 0, 1], [1, 1, 1]);
+  for (let i = 0; i < 4; i++) { await row(page, "A").locator('[data-act="play"]').click(); await finish(page); }
+  const { at, width, overflow } = await page.evaluate(() => {
+    const m = document.querySelector(".nx-moves"), h = m.querySelector(".nx-head");
+    return { at: h.getBoundingClientRect().left - m.getBoundingClientRect().left, width: m.clientWidth, overflow: m.scrollWidth > m.clientWidth };
+  });
+  expect(overflow, "enough on the tape to scroll").toBe(true);
+  expect(at).toBeGreaterThan(0);
+  expect(at).toBeLessThan(width); // the playhead (after the last block) is in view
+});
+
 test("delete removes an algorithm; a new one takes the free letter", async ({ page }) => {
   await record(page, [0, 2, 1]);
   await record(page, [1, 2, 1]);
