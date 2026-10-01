@@ -187,6 +187,9 @@
     .tw-builder .tw-hist { padding: 1px 7px; font-family: var(--font-mono); font-size: .8rem; line-height: 1.4; }
     .tw-builder .tw-hist:disabled { opacity: .35; cursor: default; }
     .tw-builder .tw-hist:disabled:hover { background: var(--panel-2); }
+    /* how many steps there are to undo or redo */
+    .tw-builder .tw-n { margin-left: 5px; color: var(--muted); font-size: .7rem; }
+    .tw-builder .tw-n:empty { display: none; }
     .tw-icon {
       width: 24px; height: 22px; display: grid; place-items: center; padding: 0;
       color: var(--faint); background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: .9rem;
@@ -391,6 +394,18 @@
 
     <!-- puzzle builder: shown for "Custom…" -->
     <div class="tw-builder" id="builder" hidden>
+      <!-- undo and redo for the whole design (solid, truncation, cuts, blacked-out pieces); the
+           puzzle's own undo, for turns, is at the bottom -->
+      <section>
+        <div class="tw-label">
+          <span title="changes to this design: the solid, truncation, cuts and blacked-out pieces">design edits</span>
+          <span class="tw-icons">
+            <button class="btn tw-hist" id="bUndo" disabled>↶ undo<span class="tw-n" id="bUndoN"></span></button>
+            <button class="btn tw-hist" id="bRedo" disabled>redo ↷<span class="tw-n" id="bRedoN"></span></button>
+          </span>
+        </div>
+      </section>
+
       <section>
         <div class="tw-label" title="the shape before it's cut">solid</div>
         <div class="tw-chips" id="bSolid" role="radiogroup" aria-label="solid"></div>
@@ -408,8 +423,6 @@
         <div class="tw-label">
           <span title="the turning cuts: each set goes around faces, corners or edges, at one or more depths">cuts</span>
           <span class="tw-icons">
-            <button class="btn tw-hist" id="bUndo" title="undo the last change to this design" aria-label="undo edit" disabled>↶</button>
-            <button class="btn tw-hist" id="bRedo" title="redo a change you undid" aria-label="redo edit" disabled>↷</button>
             <button class="tw-icon is-on" id="bSnap" title="snap cuts to depths where they line up exactly and leave no slivers (the marks on each ruler)" aria-label="snap" aria-pressed="true">
               <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2h3v6a2 2 0 0 0 4 0V2h3v6a5 5 0 0 1-10 0z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 5h3M10 5h3" stroke="currentColor" stroke-width="1.6"/></svg>
             </button>
@@ -1155,14 +1168,27 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       load(false);
     }
 
-    // Undo/redo for the builder: snapshots of the design, taken just before each edit. A new
-    // edit clears the redo stack.
+    // Undo/redo for the builder: snapshots of the whole design (solid, truncation, cuts,
+    // blacked-out pieces), taken just before each edit. A new edit clears the redo stack. A
+    // design brought in whole (a preset opened in the editor, a shared link) starts a fresh
+    // history: there's no earlier design of its own to go back to.
     let undoStack = [], redoStack = [];
     const snapshot = () => JSON.stringify(design());
+    const steps = (n) => (n === 1 ? "1 edit" : `${n} edits`);
     function showHistory() {
-      $("bUndo").disabled = !undoStack.length;
-      $("bRedo").disabled = !redoStack.length;
+      const u = undoStack.length, r = redoStack.length;
+      $("bUndo").disabled = !u;
+      $("bRedo").disabled = !r;
+      $("bUndoN").textContent = u || "";
+      $("bRedoN").textContent = r || "";
+      $("bUndo").title = u ? `undo the last change to this design (${steps(u)} to go back through)` : "nothing to undo yet: changes to this design show up here";
+      $("bRedo").title = r ? `redo a change you undid (${steps(r)})` : "nothing to redo";
     }
+    function resetEdits() {
+      undoStack = []; redoStack = [];
+      showHistory();
+    }
+    showHistory();
     function pushUndo() {
       undoStack.push(snapshot());
       if (undoStack.length > 100) undoStack.shift();
@@ -1581,9 +1607,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       load();
     };
     // open the current preset in the editor: same cuts and blacked-out pieces, now editable.
-    // The view stays put, and undo edit can go back to the design that was there before.
+    // The view stays put, and the design's edit history starts empty (the custom design that
+    // was there before is a different puzzle: undoing back to it turned a preset into a cube).
     $("customize").onclick = () => {
-      pushUndo();
+      resetEdits();
       custom = toCustom(P);
       custom.cuts = threeSets(custom.cuts);
       presetIdx = "custom";
@@ -2442,7 +2469,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function applyURL() {
       const q = new URLSearchParams(location.search), id = q.get("puzzle");
       const shared = !id || id === "custom" ? readShared() : null;
-      if (shared) { custom = shared; presetIdx = "custom"; size = custom.size; renderBuilder(); computeSnaps(); }
+      if (shared) { custom = shared; presetIdx = "custom"; size = custom.size; resetEdits(); renderBuilder(); computeSnaps(); }
       else {
         const i = MENU.findIndex((p) => p.id === id);
         if (i >= 0) {

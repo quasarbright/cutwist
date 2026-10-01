@@ -40,3 +40,29 @@ test("a broken share link falls back to the default puzzle", async ({ page }) =>
   expect((await info(page)).title).toBe("3×3×3 cube");
   await noErrors(errors);
 });
+
+test("customizing a preset starts with nothing to undo: undo can't turn it into a cube", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => window.cutwist.load("megaminx"));
+  await page.click("#customize");
+  await expect(page.locator("#bUndo")).toBeDisabled();
+  await page.locator("#bUndo").click({ force: true }); // (even a stray click does nothing)
+  expect((await info(page)).faces).toBe(12);
+});
+
+test("undo covers every kind of edit, not just cuts, and counts its steps", async ({ page }) => {
+  await open(page);
+  await page.click("#customize");
+  const faces0 = (await info(page)).faces;
+  await page.locator("#bTrim").getByRole("button", { name: "+ truncate" }).first().click(); // a truncation: new faces
+  const faces1 = (await info(page)).faces;
+  expect(faces1).toBeGreaterThan(faces0);
+  await page.locator("#bSolid").getByRole("radio", { name: "dodeca" }).click();
+  await expect(page.locator("#bUndoN")).toHaveText("2");
+  await page.click("#bUndo");
+  expect((await info(page)).faces).toBe(faces1);
+  await page.click("#bUndo");
+  expect((await info(page)).faces).toBe(faces0); // the truncation, undone
+  await expect(page.locator("#bUndo")).toBeDisabled();
+  await expect(page.locator("#bRedoN")).toHaveText("2");
+});
