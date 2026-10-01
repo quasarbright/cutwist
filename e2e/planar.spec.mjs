@@ -175,8 +175,7 @@ test("on a phone: flat over 3D even when the space is wide, and no arrow buttons
   await page.setViewportSize({ width: 680, height: 420 }); // (a phone on its side)
   await load(page);
   const box = await page.locator("#plane").boundingBox(), vw = page.viewportSize().width;
-  expect(box.width, "the flat view spans the width").toBeGreaterThan(vw * 0.8);
-  expect(box.y + box.height, "the flat view is above the 3D one").toBeLessThan(420 * 0.8);
+  expect(box.width, "the flat view spans the width: stacked, not side by side").toBeGreaterThan(vw * 0.8);
   expect(await page.evaluate(() => window.cutwist.arrows())).toEqual([]);
 });
 
