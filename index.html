@@ -72,6 +72,11 @@
     }
     .tw-split span:first-child { right: 10px; }
     .tw-split span:last-child { left: 10px; }
+    /* the back under the front: a flat line, named at its left end above and below it */
+    .tw-split.is-row { height: 1px; }
+    .tw-split.is-row span { left: 0; right: auto; }
+    .tw-split.is-row span:first-child { bottom: 8px; }
+    .tw-split.is-row span:last-child { bottom: auto; top: 8px; }
 
     /* ---- the layout (issue #2) ---- */
     .nx-pickrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; pointer-events: auto; }
@@ -906,12 +911,24 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // like the planar views; alone it keeps the whole screen)
       const r = P && P.kind === "planar" ? viewRegions().surface : rearOn() ? safeRect() : { left: 0, top: 0, right: W, bottom: H - 90 };
       if (!r) return [];
-      if (!rearOn()) return [{ cam: camera, region: r }];
+      if (!rearOn()) return [{ cam: camera, region: r, clip: { left: 0, top: 0, right: W, bottom: H } }];
+      // Front and back side by side, or in a space taller than it's wide (a phone's) the back
+      // under the front. Each view draws in its strip of the screen, the full height (or width)
+      // so axis stubs aren't cut off.
+      if (r.bottom - r.top > r.right - r.left) {
+        const m = (r.top + r.bottom) / 2;
+        return [{ cam: camera, region: { ...r, bottom: m }, clip: { left: 0, top: 0, right: W, bottom: m } },
+          { cam: rearCamera, region: { ...r, top: m }, clip: { left: 0, top: m, right: W, bottom: H } }];
+      }
       const m = (r.left + r.right) / 2;
-      return [{ cam: camera, region: { ...r, right: m } }, { cam: rearCamera, region: { ...r, left: m } }];
+      return [{ cam: camera, region: { ...r, right: m }, clip: { left: 0, top: 0, right: m, bottom: H } },
+        { cam: rearCamera, region: { ...r, left: m }, clip: { left: m, top: 0, right: W, bottom: H } }];
     }
     // the camera of the view a point is in
-    const camAt = (x) => { const vs = views(); return (vs.find((v) => x < v.region.right) || vs[vs.length - 1] || { cam: camera }).cam; };
+    const camAt = (x, y) => {
+      const vs = views(), inside = (c) => x >= c.left && x < c.right && y >= c.top && y < c.bottom;
+      return (vs.find((v) => inside(v.clip)) || vs[vs.length - 1] || { cam: camera }).cam;
+    };
     // fit a unit sphere (plus margin) into one view's region, centered there
     function fitView(cam, region, margin) {
       const vHalf = (cam.fov * Math.PI) / 360, tv = Math.tan(vHalf);
@@ -1819,12 +1836,15 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // closing, so this runs every frame; it only touches the page when something moved)
     let splitKey = "";
     function placeSplit() {
-      const split = $("rearSplit"), on = rearOn(), a = on ? views()[0].region : null;
-      const key = on ? [a.right, a.top, a.bottom].map(Math.round).join() : "";
+      const split = $("rearSplit"), on = rearOn(), a = on ? views()[0].region : null, b = on ? views()[1].region : null;
+      const row = on && b.top >= a.bottom; // (the back under the front: the line lies flat between them)
+      const key = on ? [row, a.left, a.right, a.top, a.bottom].map(Number).map(Math.round).join() : "";
       if (key === splitKey) return;
       splitKey = key;
       split.hidden = !on;
-      if (on) Object.assign(split.style, { left: a.right + "px", top: a.top + "px", height: a.bottom - a.top + "px" });
+      split.classList.toggle("is-row", row);
+      if (row) Object.assign(split.style, { left: a.left + "px", top: a.bottom + "px", width: a.right - a.left + "px", height: "" });
+      else if (on) Object.assign(split.style, { left: a.right + "px", top: a.top + "px", height: a.bottom - a.top + "px", width: "" });
     }
     $("rear").onclick = () => {
       rearView = !rearView;
@@ -1925,7 +1945,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // The camera pointer input goes through: the one for the view the pointer is over (see
     // views), chosen when a press starts or the pointer hovers, and kept for a whole drag.
     let inputCam = camera;
-    const aimAt = (x) => { inputCam = camAt(x); };
+    const aimAt = (x, y) => { inputCam = camAt(x, y); };
     function pick(x, y) {
       ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
       raycaster.setFromCamera(ndc, inputCam);
@@ -1983,7 +2003,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         return;
       }
       if (pointers.size > 2) return;
-      aimAt(e.clientX); // (this press, and the drag it starts, go through this view's camera)
+      aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
       if (isPlanar()) {
         // the 3D surface: press a cell to slide its line (or click near an edge); anywhere else turns the view
         const hit = e.button === 0 && !e.shiftKey ? surfaceHit(e.clientX, e.clientY) : null;
@@ -2013,7 +2033,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     canvas.addEventListener("pointermove", (e) => {
       if (!pointers.has(e.pointerId)) {
-        if (!pointers.size) aimAt(e.clientX); // (hovering; never mid-drag)
+        if (!pointers.size) aimAt(e.clientX, e.clientY); // (hovering; never mid-drag)
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
@@ -2503,11 +2523,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (rearOn()) {
         placeCamera(); // (the views' space follows the layout around them)
         placeSplit();
-        // each view clipped to its half (full height, so axis stubs aren't cut off)
+        // each view clipped to its strip of the screen (WebGL counts y up from the bottom)
         renderer.clear();
         renderer.setScissorTest(true);
-        for (const { cam, region } of views()) {
-          renderer.setScissor(region.left, 0, region.right - region.left, H);
+        for (const { cam, clip } of views()) {
+          renderer.setScissor(clip.left, H - clip.bottom, clip.right - clip.left, clip.bottom - clip.top);
           lightFor(cam);
           renderer.render(scene, cam);
         }

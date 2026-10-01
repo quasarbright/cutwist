@@ -287,6 +287,29 @@ test("rear view: dragging a sticker in the back view turns its layer", async ({ 
   expect(await page.evaluate(() => window.cutwist.view()), "the view didn't turn").toEqual(v0);
 });
 
+test("rear view on a phone: the back under the front, and dragging a sticker there turns its layer", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  errors = await open(page, "?puzzle=cube");
+  await page.click("#view"); // (on a phone the toggles are in the view dropdown)
+  await page.click("#rear");
+  await page.keyboard.press("Escape");
+  const split = await page.locator("#rearSplit").boundingBox();
+  expect(split.width).toBeGreaterThan(split.height); // a flat line between them
+  const all = (await rearStickers(page)).filter((s) => s.y > split.y + 10);
+  expect(all.length).toBeGreaterThan(5);
+  const v0 = await page.evaluate(() => window.cutwist.view());
+  const s0 = await state(page);
+  const st = all[Math.floor(all.length / 2)];
+  await page.mouse.move(st.x, st.y);
+  await page.mouse.down();
+  await page.mouse.move(st.x + 100, st.y + 10, { steps: 12 });
+  await page.mouse.up();
+  await finish(page);
+  expect((await info(page)).moves).toBe(1);
+  expect((await state(page))[st.piece], "the dragged piece moved").not.toBe(s0[st.piece]);
+  expect(await page.evaluate(() => window.cutwist.view()), "the view didn't turn").toEqual(v0);
+});
+
 test("rear view: dragging empty space in the back view turns the view the way the drag goes", async ({ page }) => {
   await page.click("#rear");
   const split = await page.locator("#rearSplit").boundingBox();
