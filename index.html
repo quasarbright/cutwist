@@ -3505,7 +3505,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       nx.shelf.hidden = false;
       nx.search.value = "";
       nxFillShelf("");
-      nx.search.focus();
+      // (the search box isn't focused: on a phone that would pop the keyboard up over the gallery)
     }
     function nxFillShelf(q) {
       const groups = new Map();

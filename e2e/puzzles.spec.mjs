@@ -103,3 +103,11 @@ test("customize opens the editor on presets it can express, and is hidden on the
   await page.evaluate(() => window.cutwist.load("cuboid"));
   await expect(page.locator(".nx-custombtn")).toBeHidden(); // (the editor can't express a cuboid)
 });
+
+test("opening the gallery doesn't focus its search box (no keyboard popping up on a phone)", async ({ page }) => {
+  const errors = await open(page);
+  await page.click(".nx-pick");
+  await expect(page.locator("#nx-shelf")).toBeVisible();
+  await expect(page.locator("#shelfSearch")).not.toBeFocused();
+  await noErrors(errors);
+});
