@@ -3446,6 +3446,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
+      if (spec.truncate) return "other solids"; // (a truncated solid isn't its base's shape: the soccer ball)
       return { cube: "cubes", tetrahedron: "tetrahedra", octahedron: "octahedra", dodecahedron: "dodecahedra", icosahedron: "icosahedra" }[spec.solid] || "other solids";
     }
     const nxThumbs = {};
