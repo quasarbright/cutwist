@@ -1,14 +1,16 @@
-// Every puzzle in the menu loads, and the panel's controls (size, a family's own numbers,
-// customize) do what they say.
+// Every puzzle on the shelf loads, and the controls by its name (size, a family's own
+// numbers, customize) do what they say.
 import { test, expect } from "@playwright/test";
-import { open, info, noErrors } from "./helpers.mjs";
+import { open, info, noErrors, pick } from "./helpers.mjs";
 
-test("every preset in the menu loads solved, with no errors", async ({ page }) => {
+test("every puzzle on the shelf loads solved, with no errors", async ({ page }) => {
   const errors = await open(page);
-  const options = await page.$$eval("#preset option", (os) => os.map((o) => ({ value: o.value, text: o.textContent })));
-  expect(options.length).toBeGreaterThan(20);
-  for (const { value, text } of options) {
-    await page.selectOption("#preset", value);
+  await page.click(".nx-pick");
+  const ids = await page.$$eval(".nx-card", (cs) => cs.map((c) => c.dataset.id));
+  await page.keyboard.press("Escape");
+  expect(ids.length).toBeGreaterThan(20);
+  for (const text of ids) {
+    await pick(page, text);
     const s = await info(page);
     expect(s.pieces, text).toBeGreaterThan(0);
     expect(s.solved, text).toBe(true);
@@ -91,12 +93,13 @@ test("prisms: sides, size (cuts per side) and height", async ({ page }) => {
 
 test("customize opens the editor on presets it can express, and is hidden on the rest", async ({ page }) => {
   await open(page);
-  await expect(page.locator("#customize")).toBeVisible();
+  await expect(page.locator(".nx-custombtn")).toBeVisible();
   await expect(page.locator("#builder")).toBeHidden();
-  await page.click("#customize");
+  await page.click(".nx-custombtn");
   await expect(page.locator("#builder")).toBeVisible();
   expect(await page.inputValue("#preset")).toBe("custom");
   expect((await info(page)).pieces).toBe(27); // the same puzzle, now editable
+  await page.click(".nx-done");
   await page.evaluate(() => window.cutwist.load("cuboid"));
-  await expect(page.locator("#customize")).toBeHidden();
+  await expect(page.locator(".nx-custombtn")).toBeHidden(); // (the editor can't express a cuboid)
 });

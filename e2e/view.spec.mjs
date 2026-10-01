@@ -1,6 +1,6 @@
 // The view toggles: textures and axes.
 import { test, expect } from "@playwright/test";
-import { open, info } from "./helpers.mjs";
+import { open, info, openView } from "./helpers.mjs";
 
 test.beforeEach(async ({ page }) => { await open(page); });
 
@@ -39,7 +39,7 @@ test("the solved reference view is shown", async ({ page }) => {
 
 test("buttons don't double-tap zoom on phones; the puzzle keeps all touches for itself", async ({ page }) => {
   const touch = (sel) => page.$eval(sel, (el) => getComputedStyle(el).touchAction);
-  for (const sel of ["#undo", "#redo", "#scramble", "#pause", "#sizeUp", "#mRecord", "body"]) expect(await touch(sel), sel).toBe("manipulation");
+  for (const sel of ["#undo", "#redo", "#scramble", "#pause", "#sizeUp", ".nx-rec", ".nx-pick", "body"]) expect(await touch(sel), sel).toBe("manipulation");
   expect(await touch("#c")).toBe("none");
 });
 
@@ -55,6 +55,7 @@ test("rear view: the button splits the view, goes in the URL, and is off while a
   expect((await info(page)).rear).toBe(false);
   await expect(page.locator("#rearSplit")).toBeHidden();
   // only the 3D surface: back on
+  await openView(page);
   await page.uncheck("#viewFlat");
   await expect(page.locator("#rear")).toBeEnabled();
   expect((await info(page)).rear).toBe(true);

@@ -21,10 +21,7 @@ async function stateAfter(page, axis, layer, q) {
 }
 
 let errors;
-test.beforeEach(async ({ page }) => {
-  errors = await open(page);
-  await page.click("#panel .panel-title").catch(() => {}); // collapse the panel if it opened
-});
+test.beforeEach(async ({ page }) => { errors = await open(page); });
 test.afterEach(async () => { await noErrors(errors); });
 
 test("left-clicking an axis stub turns that layer clockwise as seen from that end", async ({ page }) => {
@@ -171,13 +168,14 @@ test("planar: a short drag snaps back without a move", async ({ page }) => {
   expect(s.solved).toBe(true);
 });
 
-test("planar: with the axes button off, the arrows are gone", async ({ page }) => {
-  await loadGrid(page, { topology: "torus" });
-  const [arrow] = await onPlane(page, await page.evaluate(() => window.cutwist.arrows()));
-  await page.click("#axes");
-  await page.mouse.click(arrow.x, arrow.y);
+test("planar: the arrows are always on, even from a link with axes=off (no axes button)", async ({ page }) => {
+  await open(page, "?puzzle=sliding-torus&axes=off");
+  await expect(page.locator("#axes")).toBeHidden();
+  const arrows = await onPlane(page, await page.evaluate(() => window.cutwist.arrows()));
+  const right = arrows.find((a) => a.axis === 0 && a.layer === 1 && a.q === 1);
+  await page.mouse.click(right.x, right.y);
   await finish(page);
-  expect((await info(page)).moves).toBe(0);
+  expect((await info(page)).moves).toBe(1);
 });
 
 // ---- planar puzzles: the 3D surface ----

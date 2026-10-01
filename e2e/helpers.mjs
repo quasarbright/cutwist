@@ -35,6 +35,17 @@ export async function open(page, query = "") {
   return errors;
 }
 
+// pick a puzzle by preset id from the shelf (the gallery under the puzzle's name)
+export async function pick(page, id) {
+  await page.click(".nx-pick");
+  await page.click(`.nx-card[data-id="${id}"]`);
+}
+
+// open the view dropdown (a sliding puzzle's views and look; on a phone, the toggles too)
+export async function openView(page) {
+  if (await page.locator(".nx-pop").isHidden()) await page.click(".nx-viewbtn");
+}
+
 // the page's state (see cutwist.info in index.html)
 export const info = (page) => page.evaluate(() => window.cutwist.info());
 

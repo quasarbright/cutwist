@@ -23,6 +23,12 @@ export class PlanarView {
     this.origin = { x: 0, y: 0 }; // where the canvas's top-left is on the page (it may cover part of it)
   }
 
+  // the height the grid, its wrapped copies and arrows take up at width w (when width is what limits it)
+  heightFor(P, w) {
+    const band = GHOST + COORD + ARROW;
+    return (w * (P.H + 2 * band)) / (P.W + 2 * band);
+  }
+
   // fit the grid, its wrapped copies and arrows inside `safe` ({ left, top, right, bottom })
   layout(P, safe) {
     this.P = P;

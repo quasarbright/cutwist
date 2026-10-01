@@ -1,7 +1,7 @@
 // The puzzle in the URL: ?puzzle=<id> first, its numbers, a custom design, and settings changed
 // from their defaults. Reloading gives the same puzzle, started fresh.
 import { test, expect } from "@playwright/test";
-import { open, info, turn, noErrors } from "./helpers.mjs";
+import { open, info, turn, noErrors, pick } from "./helpers.mjs";
 
 const query = (page) => page.evaluate(() => location.search);
 const params = async (page) => Object.fromEntries(new URLSearchParams(await query(page)));
@@ -16,7 +16,7 @@ test("changing puzzle, size or a family's numbers updates the URL", async ({ pag
   await open(page);
   await page.click("#sizeUp");
   expect(await params(page)).toEqual({ puzzle: "cube", size: "4" });
-  await page.selectOption("#preset", { label: "Prism" });
+  await pick(page, "prism");
   expect(await params(page)).toEqual({ puzzle: "prism", sides: "6", cuts: "1", rows: "3" });
   await page.evaluate(() => window.cutwist.load("cuboid", { params: { a: 3, b: 3, c: 5 } }));
   expect(await params(page)).toEqual({ puzzle: "cuboid", a: "3", b: "3", c: "5" });
@@ -55,7 +55,7 @@ test("reloading mid-solve gives the same puzzle, started fresh", async ({ page }
 
 test("a custom design goes in the URL; an old ?p= link still opens", async ({ page }) => {
   await open(page);
-  await page.click("#customize");
+  await page.click(".nx-custombtn");
   const p = await params(page);
   expect(p.puzzle).toBe("custom");
   expect(p.design).toBeTruthy();

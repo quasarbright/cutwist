@@ -1,7 +1,7 @@
 // The planar puzzles (sliding grids on a torus, Klein bottle, projective plane), driven
-// through the test hook and the panel. Real drags and arrow clicks are in input.spec.
+// through the test hook and the view dropdown. Real drags and arrow clicks are in input.spec.
 import { test, expect } from "@playwright/test";
-import { open, info, turn, finish, noErrors } from "./helpers.mjs";
+import { open, info, turn, finish, noErrors, pick, openView } from "./helpers.mjs";
 
 // open a sliding grid: { topology (the puzzle: torus, klein, rp2), width, height }
 const load = (page, { topology = "torus", ...params } = {}) =>
@@ -15,19 +15,20 @@ test.beforeEach(async ({ page }) => { errors = await open(page); });
 test.afterEach(async () => { await noErrors(errors); });
 
 test("the sliding torus opens as a 5×5 torus, flat and in 3D", async ({ page }) => {
-  await page.selectOption("#preset", { label: "Sliding Torus" });
+  await pick(page, "sliding-torus");
   const s = await info(page);
   expect(s).toMatchObject({ planar: true, title: "5×5 torus", pieces: 25, solved: true });
   await expect(page.locator("#plane")).toBeVisible();
   await expect(page.locator("#c")).toBeVisible(); // the 3D surface
+  await openView(page);
   await expect(page.locator("#planarControls")).toBeVisible();
   await expect(page.locator("#textures")).toBeHidden();
   await expect(page.locator("#status")).toHaveText("drag a row or column to slide it");
 });
 
 test("one puzzle per surface in the menu, each with width and height (no surface picker)", async ({ page }) => {
-  for (const [label, title] of [["Sliding Torus", "5×5 torus"], ["Sliding Klein Bottle", "5×5 Klein bottle"], ["Sliding Projective Plane", "5×5 projective plane"]]) {
-    await page.selectOption("#preset", { label });
+  for (const [id, title] of [["sliding-torus", "5×5 torus"], ["sliding-klein", "5×5 Klein bottle"], ["sliding-rp2", "5×5 projective plane"]]) {
+    await pick(page, id);
     expect((await info(page)).title).toBe(title);
   }
   await expect(page.getByRole("combobox", { name: "surface" })).toHaveCount(0);
@@ -70,10 +71,10 @@ test("scramble, then undoing it by hand, solves it and stops the timer", async (
 
 test("undo and algorithms work on slides", async ({ page }) => {
   await load(page, { topology: "klein" });
-  await page.click("#mRecord");
+  await page.click(".nx-rec");
   await turn(page, [0, 1, 2], [1, 0, -1]);
-  await page.click("#mRecord");
-  await page.locator('.tw-mrow[data-name="A"] [data-act="reverse"]').click();
+  await page.click(".nx-rec");
+  await page.locator('.nx-alg[data-name="A"] [data-act="reverse"]').click();
   await finish(page);
   expect((await info(page)).solved).toBe(true);
   await page.click("#undo"); await finish(page);
@@ -82,6 +83,7 @@ test("undo and algorithms work on slides", async ({ page }) => {
 
 test("labels are on by default and toggle; the reflected-labels option grays out without them", async ({ page }) => {
   await load(page, { topology: "klein" });
+  await openView(page);
   await expect(page.locator("#labels")).toBeChecked();
   expect((await info(page)).labels).toBe(true);
   await page.locator("#labels").uncheck();
@@ -93,6 +95,7 @@ test("labels are on by default and toggle; the reflected-labels option grays out
 
 test("fill: colors by default; picture asks for one, then switches back and forth without asking again", async ({ page }) => {
   await load(page);
+  await openView(page);
   await expect(page.locator("#fillColors")).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("#pictureChange")).toBeHidden();
   // the first click on picture opens the file chooser
@@ -124,6 +127,7 @@ test("back to a 3D puzzle: the 3D canvas returns", async ({ page }) => {
 
 test("'labels get reflected' is on by default, hidden on a torus; unchecking keeps every label upright", async ({ page }) => {
   await load(page, { topology: "torus" });
+  await openView(page);
   await expect(page.locator("#reflectRow")).toBeHidden(); // nothing on a torus ever flips
   await load(page, { topology: "klein" });
   await expect(page.locator("#reflectRow")).toBeVisible();
@@ -139,6 +143,7 @@ test("'labels get reflected' is on by default, hidden on a torus; unchecking kee
 
 test("colors only by default; the textures checkbox adds the column patterns", async ({ page }) => {
   await load(page);
+  await openView(page);
   await expect(page.locator("#planarTextures")).not.toBeChecked();
   expect((await info(page)).planarTextures).toBe(false);
   await page.locator("#planarTextures").check();
@@ -153,6 +158,7 @@ test("views: flat and 3D both on, side by side on a wide screen; the last one on
   // the flat view's canvas takes the left part of the screen
   const box = await page.locator("#plane").boundingBox(), vw = page.viewportSize().width;
   expect(box.x + box.width).toBeLessThan(vw * 0.6);
+  await openView(page);
   await page.locator("#viewFlat").uncheck();
   expect((await info(page)).views).toEqual({ flat: false, surface: true });
   await expect(page.locator("#plane")).toBeHidden();
@@ -181,6 +187,7 @@ test("every surface shows up in 3D, with cells in view", async ({ page }) => {
 test("the corner card: the solved surface in 3D with the 3D view on, the flat grid with only the flat view", async ({ page }) => {
   await load(page);
   await expect(page.locator("#refPlane")).toBeHidden(); // 3D on: the card is drawn by the 3D view
+  await openView(page);
   await page.locator("#view3D").uncheck();
   await expect(page.locator("#refPlane")).toBeVisible();
   await page.locator("#view3D").check();
@@ -191,6 +198,7 @@ test("the corner card: the solved surface in 3D with the 3D view on, the flat gr
 test("the Klein bottle and projective plane can be drawn as another shape; the URL keeps it", async ({ page }) => {
   const errors = await open(page);
   await load(page);
+  await openView(page);
   await expect(page.locator("#surfaceShape")).toBeHidden(); // a torus has one shape
   await load(page, { topology: "klein" });
   expect((await info(page)).shape).toBe("klein");

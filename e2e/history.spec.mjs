@@ -14,7 +14,7 @@ test("a turn unsolves the puzzle and counts as a move; its inverse solves it aga
   s = await info(page);
   expect(s.solved).toBe(true);
   expect(s.status).toBe("solved · 2 moves");
-  await expect(page.locator("#tape")).toHaveClass(/is-solved/);
+  await expect(page.locator("#nx-tape")).toHaveClass(/is-solved/);
 });
 
 test("four quarter turns of one face are the identity", async ({ page }) => {

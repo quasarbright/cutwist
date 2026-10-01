@@ -1,32 +1,32 @@
-// Recording algorithms and playing them back, through the panel's buttons.
+// Recording algorithms and playing them back, through the algorithm list's buttons.
 import { test, expect } from "@playwright/test";
 import { open, info, turn, finish } from "./helpers.mjs";
 
-const row = (page, name) => page.locator(`.tw-mrow[data-name="${name}"]`);
+const row = (page, name) => page.locator(`.nx-alg[data-name="${name}"]`);
 async function record(page, ...moves) {
-  await page.click("#mRecord");
+  await page.click(".nx-rec");
   await turn(page, ...moves);
-  await page.click("#mRecord");
+  await page.click(".nx-rec");
 }
 
 test.beforeEach(async ({ page }) => { await open(page); });
 
 test("record shows a running count, and stopping saves an algorithm", async ({ page }) => {
-  await expect(page.locator("#mList")).toBeEmpty();
-  await page.click("#mRecord");
-  await expect(page.locator("#mRecord")).toHaveClass(/is-recording/);
+  await expect(page.locator(".nx-alg")).toHaveCount(0);
+  await page.click(".nx-rec");
+  await expect(page.locator(".nx-rec")).toHaveClass(/is-on/);
   await turn(page, [0, 2, 1], [1, 2, 1]);
-  await expect(page.locator("#mRecordLabel")).toHaveText("stop · 2 moves");
-  await page.click("#mRecord");
-  await expect(page.locator("#mRecord")).not.toHaveClass(/is-recording/);
-  await expect(row(page, "A").locator(".tw-mlen")).toHaveText("2 moves");
+  await expect(page.locator(".nx-rec")).toHaveText("stop · 2 moves");
+  await page.click(".nx-rec");
+  await expect(page.locator(".nx-rec")).not.toHaveClass(/is-on/);
+  await expect(row(page, "A").locator(".nx-len")).toHaveText("2 moves");
   expect((await info(page)).algorithms).toEqual([{ name: "A", moves: 2 }]);
 });
 
 test("stopping with nothing recorded saves nothing", async ({ page }) => {
-  await page.click("#mRecord");
-  await page.click("#mRecord");
-  await expect(page.locator("#mList .tw-mrow")).toHaveCount(0);
+  await page.click(".nx-rec");
+  await page.click(".nx-rec");
+  await expect(page.locator(".nx-alg")).toHaveCount(0);
 });
 
 test("reverse undoes the algorithm; play repeats it", async ({ page }) => {
@@ -54,12 +54,12 @@ test("a commutator built from two algorithms", async ({ page }) => {
   await page.click("#undo"); await finish(page);
   await record(page, [1, 2, 1]);
   await page.click("#undo"); await finish(page);
-  await page.click("#mRecord");
+  await page.click(".nx-rec");
   for (const [name, act] of [["A", "play"], ["B", "play"], ["A", "reverse"], ["B", "reverse"]]) {
     await row(page, name).locator(`[data-act="${act}"]`).click(); await finish(page);
   }
-  await page.click("#mRecord");
-  await expect(row(page, "C").locator(".tw-mlen")).toHaveText("4 moves");
+  await page.click(".nx-rec");
+  await expect(row(page, "C").locator(".nx-len")).toHaveText("4 moves");
   expect((await info(page)).solved).toBe(false);
   for (let i = 0; i < 5; i++) { await row(page, "C").locator('[data-act="play"]').click(); await finish(page); }
   expect((await info(page)).solved).toBe(true);
@@ -76,7 +76,7 @@ test("delete removes an algorithm; a new one takes the free letter", async ({ pa
 
 test("algorithms are cleared on switching puzzles, recording too", async ({ page }) => {
   await record(page, [0, 2, 1]);
-  await page.click("#mRecord");
+  await page.click(".nx-rec");
   await page.click("#sizeUp");
   const s = await info(page);
   expect(s.algorithms).toEqual([]);
