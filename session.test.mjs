@@ -98,10 +98,12 @@ test("algorithms: playback is one undo step, reverse plays the inverse", () => {
   const h = new History(inverse);
   h.startRecording(); h.record([R]); h.record([U, F]); h.stopRecording();
   const before = h.movesDone;
-  assert.deepEqual(h.playAlgorithm("A"), [R, U, F]);
+  assert.deepEqual([...h.playAlgorithm("A")], [R, U, F]);
   assert.equal(h.movesDone, before + 3);
   assert.equal(h.entries.at(-1).length, 3);
-  assert.deepEqual(h.playAlgorithm("A", true), [inverse(F), inverse(U), inverse(R)]);
+  assert.deepEqual(h.entries.at(-1).alg, { name: "A", reverse: false }); // (it knows where it came from)
+  assert.deepEqual([...h.playAlgorithm("A", true)], [inverse(F), inverse(U), inverse(R)]);
+  assert.deepEqual(h.entries.at(-1).alg, { name: "A", reverse: true });
   assert.deepEqual(h.undo(), [R, U, F]); // undoing the reverse playback plays A again
   assert.equal(h.playAlgorithm("Z"), null);
 });

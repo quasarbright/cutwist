@@ -87,11 +87,13 @@ export class History {
   algorithm(name) { return this.algorithms.find((a) => a.name === name) || null; }
   deleteAlgorithm(name) { this.algorithms = this.algorithms.filter((a) => a.name !== name); }
   // records a playback of the named algorithm (inverted if reverse) as one step; returns
-  // the moves to play, or null
+  // the moves to play, or null. The step remembers where it came from (moves.alg: { name,
+  // reverse }), so a move list can show it as that algorithm.
   playAlgorithm(name, reverse = false) {
     const alg = this.algorithm(name);
     if (!alg || !alg.moves.length) return null;
     const moves = reverse ? this.inverseOf(alg.moves) : alg.moves.slice();
+    moves.alg = { name, reverse };
     this.record(moves);
     return moves;
   }
