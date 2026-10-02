@@ -132,7 +132,13 @@
       display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 10px;
       background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     }
-    .nx-alg b { color: var(--accent); width: 1.2em; }
+    /* the name: click to rename it. Plain text until then, like the size field */
+    .nx-alg .nx-name {
+      min-width: 1.2em; max-width: 12em; padding: 0; border: 0; border-radius: 4px; background: none;
+      color: var(--accent); font: inherit; font-weight: bold; cursor: text;
+    }
+    .nx-alg .nx-name:hover { background: var(--panel-2); }
+    .nx-alg .nx-name:focus { outline: none; background: var(--panel-2); }
     .nx-alg .nx-len { flex: 1; color: var(--muted); }
     .nx-alg button { font: inherit; color: var(--muted); background: none; border: 0; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
     .nx-alg button:hover { color: var(--text); background: var(--panel-2); }
@@ -1934,7 +1940,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderTape();
     };
     addEventListener("keydown", (e) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!(e.metaKey || e.ctrlKey) || e.target.matches?.("input:not([type=number])")) return; // (typing a name: its own undo)
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) { e.preventDefault(); flush(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); flush(); redo(); }
@@ -3420,8 +3426,20 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const row = document.createElement("div");
         row.className = "nx-alg";
         row.dataset.name = alg.name;
-        row.innerHTML = `<b></b><span class="nx-len"></span><button data-act="play" title="play it">▶</button><button data-act="reverse" title="play it reversed">◀</button><button data-act="delete" title="delete it">✕</button>`;
-        row.querySelector("b").textContent = alg.name;
+        row.innerHTML = `<input class="nx-name" spellcheck="false" maxlength="40" title="rename it" aria-label="algorithm name" /><span class="nx-len"></span><button data-act="play" title="play it">▶</button><button data-act="reverse" title="play it reversed">◀</button><button data-act="delete" title="delete it">✕</button>`;
+        // Enter or clicking away keeps the new name; Escape, a blank name or one that's taken
+        // puts the old one back
+        const name = row.querySelector(".nx-name"), fit = () => { name.style.width = name.value.length + 0.5 + "ch"; };
+        name.value = alg.name; fit();
+        name.oninput = fit;
+        name.onkeydown = (e) => {
+          if (e.key === "Enter") name.blur();
+          else if (e.key === "Escape") { name.value = alg.name; name.blur(); }
+        };
+        name.onblur = () => {
+          if (name.value !== alg.name && history.renameAlgorithm(alg.name, name.value)) { renderTape(); renderAlgorithms(); }
+          else { name.value = alg.name; fit(); }
+        };
         row.querySelector(".nx-len").textContent = count(alg.moves.length);
         const [fwd, back, del] = row.querySelectorAll("button");
         for (const [btn, rev] of [[fwd, false], [back, true]]) {

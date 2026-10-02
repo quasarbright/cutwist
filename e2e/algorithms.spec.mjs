@@ -132,3 +132,21 @@ test("planar: hovering play lights the cells it changes", async ({ page }) => {
   await row(page, "A").locator('[data-act="play"]').click(); await finish(page);
   expect(changed(before, await page.evaluate(() => window.cutwist.state))).toEqual(shown);
 });
+
+test("clicking a name renames it; Escape, a blank name or a taken one keeps the old", async ({ page }) => {
+  await record(page, [0, 2, 1]);
+  await record(page, [1, 2, 1]);
+  const name = row(page, "A").locator(".nx-name");
+  await name.fill("sune");
+  await name.press("Enter");
+  expect((await info(page)).algorithms.map((a) => a.name)).toEqual(["sune", "B"]);
+  await row(page, "sune").locator('[data-act="play"]').click();
+  await finish(page);
+  await expect(page.locator(".nx-moves")).toContainText("sune");
+  for (const [to, key] of [["B", "Enter"], ["  ", "Enter"], ["x", "Escape"]]) {
+    await row(page, "sune").locator(".nx-name").fill(to);
+    await row(page, "sune").locator(".nx-name").press(key);
+    expect((await info(page)).algorithms.map((a) => a.name)).toEqual(["sune", "B"]);
+    await expect(row(page, "sune").locator(".nx-name")).toHaveValue("sune");
+  }
+});

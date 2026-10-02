@@ -86,6 +86,16 @@ export class History {
   }
   algorithm(name) { return this.algorithms.find((a) => a.name === name) || null; }
   deleteAlgorithm(name) { this.algorithms = this.algorithms.filter((a) => a.name !== name); }
+  // renames an algorithm, and the steps that played it; false (and no change) for a blank
+  // name or one another algorithm has
+  renameAlgorithm(name, to) {
+    to = to.trim();
+    const alg = this.algorithm(name);
+    if (!alg || !to || (to !== name && this.algorithm(to))) return false;
+    alg.name = to;
+    for (const e of this.entries) if (e.alg && e.alg.name === name) e.alg.name = to;
+    return true;
+  }
   // records a playback of the named algorithm (inverted if reverse) as one step; returns
   // the moves to play, or null. The step remembers where it came from (moves.alg: { name,
   // reverse }), so a move list can show it as that algorithm.

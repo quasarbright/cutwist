@@ -185,3 +185,17 @@ test("formatTime: seconds with hundredths, minutes past 60 s", () => {
   assert.equal(formatTime(62345), "1:02.34");
   assert.equal(formatTime(754321), "12:34.32");
 });
+
+test("algorithms: rename, and the steps that played it follow; blank or taken names don't", () => {
+  const h = new History(inverse);
+  for (const m of [R, U]) { h.startRecording(); h.record([m]); h.stopRecording(); }
+  h.playAlgorithm("A");
+  assert.equal(h.renameAlgorithm("A", "  sune  "), true);
+  assert.deepEqual(h.algorithms.map((a) => a.name), ["sune", "B"]);
+  assert.equal(h.entries.at(-1).alg.name, "sune");
+  assert.equal(h.renameAlgorithm("sune", "B"), false);
+  assert.equal(h.renameAlgorithm("sune", "   "), false);
+  assert.equal(h.renameAlgorithm("nope", "C"), false);
+  assert.deepEqual(h.algorithms.map((a) => a.name), ["sune", "B"]);
+  assert.deepEqual([...h.playAlgorithm("sune")], [R]);
+});
