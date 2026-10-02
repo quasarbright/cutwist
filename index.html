@@ -517,7 +517,7 @@
     <div class="control tw-look" id="planarViews" hidden>
       <div class="control-head"><span class="name" title="the flat grid, the surface it glues into, or both side by side (one is always on)">view</span></div>
       <label class="check" title="the grid laid flat, its glued edges shown as faint copies past each side"><input type="checkbox" id="viewFlat" checked /> flat</label>
-      <label class="check" title="the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way"><input type="checkbox" id="view3D" checked /> 3D surface</label>
+      <label class="check" title="the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way"><input type="checkbox" id="view3D" checked /> <span id="view3DName">3D surface</span></label>
       <!-- the shape the surface is drawn as, where there's a choice (filled in by renderShapeChoice) -->
       <div class="tw-seg tw-fill tw-sub" role="radiogroup" id="surfaceShape" aria-label="surface shape" title="the same surface drawn another way: both glue the grid's edges the same, so the puzzle is the same" hidden></div>
     </div>
@@ -763,6 +763,13 @@
         whole number per cell: which piece is there, times 4, plus two bits for whether it's been
         mirrored left-right or top-bottom by sliding across a flipped edge. A slide moves the
         numbers around a loop and flips those bits where the loop crosses a mirrored edge.</p>
+
+      <div class="section-label">intersecting circles</div>
+      <p>Families of circles around shared centers, overlapping. Every crossing of two circles is a
+        sticker, colored by which two families cross there. The state is one whole number per
+        crossing: which sticker sits there. A turn moves the numbers on one circle one crossing
+        along. The sphere is the flat drawing wrapped around by stereographic projection, which
+        keeps circles circles and every crossing where it was, then spread out evenly.</p>
     </about-modal>
   </div>
 
@@ -785,6 +792,11 @@
     } from "./planar.mjs";
     import { PlanarView } from "./planar-view.mjs";
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
+    import {
+      CIRCLES_PRESETS, buildCircles, solvedCirclesState, isCirclesSolved, applyCirclesMove, inverseCirclesMove, circlesScrambleMoves,
+      circleIndex, stickersDuring, sphereLayout, spherePlace,
+    } from "./circles.mjs";
+    import { CirclesView, pairColor } from "./circles-view.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -913,13 +925,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let rearView = false; // (set from the link and the screen at startup: see applyURL)
     const rearDefault = () => !phone.matches; // on on a wide screen, off on a phone
     const rearCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-    const rearAllowed = () => !(P && P.kind === "planar" && viewFlat);
+    const rearAllowed = () => !(isFlatKind() && viewFlat);
     const rearOn = () => rearView && rearAllowed();
     // the 3D views on screen: { cam, region } each, regions in CSS px
     function views() {
       // (split, a 3D puzzle's views fit the space clear of the title, panel and bottom controls,
       // like the planar views; alone it keeps the whole screen)
-      const r = P && P.kind === "planar" ? viewRegions().surface : rearOn() ? safeRect() : { left: 0, top: 0, right: W, bottom: H - 90 };
+      const r = isFlatKind() ? viewRegions().surface : rearOn() ? safeRect() : { left: 0, top: 0, right: W, bottom: H - 90 };
       if (!r) return [];
       if (!rearOn()) return [{ cam: camera, region: r, clip: { left: 0, top: 0, right: W, bottom: H } }];
       // Front and back side by side, or in a space taller than it's wide (a phone's) the back
@@ -953,7 +965,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     function placeCamera() {
       nxPlaceBottom(); // (the space left for the puzzle depends on how the bottom is laid out)
-      if (rearOn()) { for (const v of views()) fitView(v.cam, v.region, P.kind === "planar" ? 1.15 : 1.3); return; }
+      if (rearOn()) { for (const v of views()) fitView(v.cam, v.region, isFlatKind() ? 1.15 : 1.3); return; }
       camera.quaternion.identity();
       const vHalf = (camera.fov * Math.PI) / 360;
       const region = typeof cameraRegion === "function" ? cameraRegion() : null;
@@ -1163,12 +1175,17 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // A 3D puzzle (puzzle.mjs) or a planar one (planar.mjs, P.kind "planar"). Both keep their
     // state in an Int32Array and take moves { axis, layer, q }, so everything above the model
     // (history, algorithms, timer, scramble, reset) is shared; these pick the model's rules.
+    // Or intersecting circles (circles.mjs, P.kind "circles"): flat and on a sphere, like the
+    // planar puzzles (isFlatKind: either of the two, which share the flat canvas and the views).
     const isPlanar = () => !!P && P.kind === "planar";
-    const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : applyMove(P, s, m));
-    const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : inverseMove(P, m));
-    const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isSolved(P, s));
-    const freshState = () => (isPlanar() ? solvedPlanarState(P) : solvedState(P));
-    const randomScramble = () => (isPlanar() ? planarScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
+    const isCircles = () => !!P && P.kind === "circles";
+    const isFlatKind = () => isPlanar() || isCircles();
+    const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : isCircles() ? applyCirclesMove(P, s, m) : applyMove(P, s, m));
+    const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : isCircles() ? inverseCirclesMove(P, m) : inverseMove(P, m));
+    const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isCircles() ? isCirclesSolved(P, s) : isSolved(P, s));
+    const freshState = () => (isPlanar() ? solvedPlanarState(P) : isCircles() ? solvedCirclesState(P) : solvedState(P));
+    const randomScramble = () => (isPlanar() ? planarScrambleMoves(P) : isCircles() ? circlesScrambleMoves(P)
+      : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
 
     // ---------- turning: animation queue ----------
     // anim is the layer currently turning: { axis, pieces, theta, ... }. A queued turn
@@ -1179,8 +1196,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
 
     function startNext() {
       if (anim || !queue.length) return;
-      if (isPlanar()) {
-        // a slide: theta is the line's offset in cells, from 0 to q
+      if (isFlatKind()) {
+        // a slide: theta is the line's offset in cells, from 0 to q (a circle's turn: in crossings)
         const e = queue.shift(), q = e.move.q, fast = queue.length > 1 ? 0.45 : 1;
         anim = { axis: e.move.axis, layer: e.move.layer, move: e.move, theta: 0, from: 0, to: q, t: 0,
                  dur: e.dur ?? Math.min(420, 110 + 55 * Math.abs(q)) * fast };
@@ -1257,8 +1274,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       statusText = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
-        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : "scrambled · drag a sticker to turn")
-        : isPlanar() ? "drag a row or column to slide it" : "drag a sticker to turn · drag outside to rotate";
+        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : isCircles() ? "scrambled · click a circle to turn it" : "scrambled · drag a sticker to turn")
+        : isPlanar() ? "drag a row or column to slide it"
+        : isCircles() ? "click a circle to turn it clockwise · right click: counterclockwise"
+        : "drag a sticker to turn · drag outside to rotate";
       nxRenderTape(solved);
     }
 
@@ -1662,8 +1681,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 
-    // the menu: the 3D presets, then the planar ones
-    const MENU = [...PRESETS, ...PLANAR_PRESETS];
+    // the menu: the 3D presets, then the planar ones, then the circles
+    const MENU = [...PRESETS, ...PLANAR_PRESETS, ...CIRCLES_PRESETS];
     let presetIdx = 0, size = MENU[0].size;
     // a family's own numbers (a cuboid's lengths, a prism's sides), over the preset's defaults
     let paramVals = {};
@@ -1715,7 +1734,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let puzzleName = ""; // the full title, numbers and all ("3×3×3 cube"): the test hook reports it
     function load(resetView = true) {
       const spec = currentSpec();
-      const next = spec.rule === "planar" ? buildPlanar(spec) : buildPuzzle(spec, size);
+      const next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "circles" ? buildCircles(spec) : buildPuzzle(spec, size);
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
@@ -1724,25 +1743,34 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       history.reset(); renderAlgorithms(); // algorithms belong to this puzzle
       timer.clear(); renderTimer();
       // a planar puzzle draws on its own 2D canvas; the 3D scene waits, hidden
-      $("c").hidden = isPlanar() && !view3D;
-      $("plane").hidden = !isPlanar() || !viewFlat;
+      $("c").hidden = isFlatKind() && !view3D;
+      $("plane").hidden = !isFlatKind() || !viewFlat;
       $("planarControls").hidden = !isPlanar();
-      $("planarViews").hidden = !isPlanar();
-      document.body.classList.toggle("nx-planar", isPlanar()); // (the view options)
-      $("refPlane").hidden = !isPlanar();
-      if (puzzleGroup) puzzleGroup.visible = !isPlanar();
+      $("planarViews").hidden = !isFlatKind();
+      document.body.classList.toggle("nx-planar", isFlatKind()); // (the view options)
+      $("view3DName").textContent = isCircles() ? "3D sphere" : "3D surface";
+      $("view3D").parentElement.title = isCircles() ? "the circles wrapped onto a sphere: drag to turn it, click a circle to turn it clockwise, right click counterclockwise"
+        : "the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way";
+      $("refPlane").hidden = !isFlatKind();
+      if (puzzleGroup) puzzleGroup.visible = !isFlatKind();
       surfaceGroup.visible = isPlanar();
+      sphereGroup.visible = isCircles();
       if (isPlanar()) {
         edgeHints = null;
         buildSurface();
         if (resetView) root.quaternion.copy(surfaceView());
       }
+      if (isCircles()) {
+        hoverCircle = null;
+        buildSphere();
+        if (resetView) root.quaternion.identity(); // (face on: the sphere looks like the flat drawing)
+      }
       renderShapeChoice();
       planeBox = "";
       placeCamera();
       $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
-      $("textures").hidden = isPlanar(); // planar cells always carry their column's texture
-      if (!isPlanar()) {
+      $("textures").hidden = isFlatKind(); // planar cells always carry their column's texture
+      if (!isFlatKind()) {
         buildMeshes();
         if (resetView) root.quaternion.copy(startView());
         refG = 0;
@@ -1756,11 +1784,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       $("sizeControl").hidden = !!spec.fixed;
       $("builder").hidden = !isCustom();
       $("customize").hidden = !!spec.noCustom; // (the editor can't express a cuboid, a prism or a sliding puzzle)
-      if (!isPlanar()) renderTexturesButton();
+      if (!isFlatKind()) renderTexturesButton();
       if (!isCustom()) setPainting(false);
       if (isCustom()) showStats();
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
-      if (hoverType !== null && !isPlanar()) setHover(hoverType); // meshes were rebuilt
+      if (hoverType !== null && !isFlatKind()) setHover(hoverType); // meshes were rebuilt
       algLit = null; // (an algorithm's hover highlight belonged to the old puzzle)
       renderRearButton();
       renderTape();
@@ -1875,14 +1903,16 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const after = state.slice();
       for (const m of moves) applyAny(after, m);
       const lit = new Set();
-      for (let i = 0; i < after.length; i++) if (after[i] !== state[i]) lit.add(i);
+      // (a circles puzzle's stickers of a color look alike: only a change of color shows)
+      const differ = isCircles() ? (a, b) => P.points[a].color !== P.points[b].color : (a, b) => a !== b;
+      for (let i = 0; i < after.length; i++) if (differ(after[i], state[i])) lit.add(i);
       return lit;
     }
     // shown while an algorithm's play or reverse button is hovered (null: none)
     let algLit = null;
     function showAffected(lit) {
       algLit = lit;
-      if (!isPlanar()) lightPieces(lit); // (a planar puzzle draws it each frame: see drawPlanar)
+      if (!isFlatKind()) lightPieces(lit); // (a planar puzzle draws it each frame: see drawPlanar)
     }
     function playAlgorithm(name, reverse) {
       if (anim && anim.live) return;
@@ -2014,6 +2044,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
       if (pointers.size > 2) return;
       aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
+      if (isCircles()) {
+        // the sphere: a click (no drag) on a circle turns it, left clockwise, right counterclockwise
+        // as you see it there; see endPointer. Anything else turns the view.
+        const ci = (e.button === 0 || e.button === 2) && !e.shiftKey ? sphereCircleAt(e.clientX, e.clientY) : null;
+        drag = ci !== null ? { mode: "circle", x: e.clientX, y: e.clientY, ci, clockwise: e.button === 0 } : { mode: "orbit", x: e.clientX, y: e.clientY };
+        return;
+      }
       if (isPlanar()) {
         // the 3D surface: press a cell to slide its line (or click near an edge); anywhere else turns the view
         const hit = e.button === 0 && !e.shiftKey ? surfaceHit(e.clientX, e.clientY) : null;
@@ -2045,6 +2082,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (!pointers.has(e.pointerId)) {
         if (!pointers.size) aimAt(e.clientX, e.clientY); // (hovering; never mid-drag)
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
+        if (isCircles()) { setHoverCircle(sphereCircleAt(e.clientX, e.clientY)); return; }
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
           const hit = pick(e.clientX, e.clientY);
@@ -2064,7 +2102,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         placeCamera();
         return;
       }
-      if ((drag.mode === "paint" || drag.mode === "segment") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
+      if ((drag.mode === "paint" || drag.mode === "segment" || drag.mode === "circle") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
         drag = { mode: "orbit", x: drag.x, y: drag.y }; // it's a drag after all: rotate the view
       if (drag.mode === "orbit") {
         orbitBy(e.clientX - drag.x, e.clientY - drag.y);
@@ -2119,11 +2157,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (drag && drag.mode === "spress") edgeClick(drag);
       if (drag && drag.mode === "paint") toggleType(drag.piece);
       if (drag && drag.mode === "segment") turnSegment(drag.seg, drag.clockwise);
+      if (drag && drag.mode === "circle") turnCircle(drag.ci, sphereClockwise(drag.ci, drag.clockwise));
       if (!pointers.size || (drag && drag.mode === "pinch")) drag = null;
     }
     canvas.addEventListener("pointerup", endPointer);
     canvas.addEventListener("pointercancel", endPointer);
-    canvas.addEventListener("pointerleave", () => { if (hoverType !== null) setHover(null); setHoverSeg(null); if (isPlanar()) hoverSurface(null); });
+    canvas.addEventListener("pointerleave", () => { if (hoverType !== null) setHover(null); setHoverSeg(null); if (isPlanar()) hoverSurface(null); if (isCircles()) setHoverCircle(null); });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
@@ -2167,10 +2206,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (w >= h && !phone.matches) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
       // (stacked: the grid gets the height its width calls for, up to 65%; the surface, wider
       // than it is tall, the rest)
-      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, planeView.heightFor(P, w)));
+      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, isCircles() ? w : planeView.heightFor(P, w)));
       return { flat: { ...r, bottom: m }, surface: { ...r, top: m } };
     }
-    function cameraRegion() { return isPlanar() && view3D ? viewRegions().surface : null; }
+    function cameraRegion() { return isFlatKind() && view3D ? viewRegions().surface : null; }
     function placePlane(r) {
       const key = [r.left, r.top, r.right, r.bottom].map(Math.round).join();
       if (key === planeBox) return;
@@ -2183,7 +2222,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function applyViews() {
       $("viewFlat").checked = viewFlat;
       $("view3D").checked = view3D;
-      if (isPlanar()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
+      if (isFlatKind()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
       planeBox = "";
       placeCamera();
       renderRearButton();
@@ -2447,6 +2486,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
     }
     plane.addEventListener("pointerdown", (e) => {
+      if (isCircles()) {
+        // a circle: left click turns it clockwise, right click counterclockwise
+        const ci = e.button === 0 || e.button === 2 ? circlesView.circleAt(e.clientX, e.clientY) : null;
+        if (ci !== null) turnCircle(ci, e.button === 0 ? 1 : -1);
+        return;
+      }
       if (!isPlanar() || pdrag) return;
       const a = planeView.arrowAt(e.clientX, e.clientY);
       if (a) { slideLine({ axis: a.axis, layer: a.layer, q: a.q }); return; }
@@ -2456,6 +2501,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       pdrag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, cell, axis: null };
     });
     plane.addEventListener("pointermove", (e) => {
+      if (isCircles()) { setHoverCircle(circlesView.circleAt(e.clientX, e.clientY), plane); return; }
       if (!isPlanar()) return;
       if (!pdrag) {
         hoverArrow = planeView.arrowAt(e.clientX, e.clientY);
@@ -2481,7 +2527,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     plane.addEventListener("pointerup", endPlanarDrag);
     plane.addEventListener("pointercancel", endPlanarDrag);
-    plane.addEventListener("pointerleave", () => { hoverArrow = null; });
+    plane.addEventListener("pointerleave", () => { hoverArrow = null; if (isCircles()) setHoverCircle(null, plane); });
     plane.addEventListener("contextmenu", (e) => e.preventDefault());
     // the look controls: which fill is on, and which checkboxes apply right now
     function renderLook() {
@@ -2516,6 +2562,161 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     $("planarTextures").onchange = () => { planarTextures = $("planarTextures").checked; writeURL(); };
     renderLook();
 
+    // ---------- intersecting circles: drawing and input ----------
+    // CirclesView (circles-view.mjs) draws the flat drawing on the planar puzzles' canvas, in
+    // the same views (flat, 3D, or both). In 3D the drawing is wrapped onto a sphere
+    // (sphereLayout, circles.mjs): a dark ball, each circle a thin ring on it, each sticker a
+    // disc. Click a circle, flat or on the sphere, to turn it one crossing clockwise as you see
+    // it there; right click, counterclockwise. Hovering one lights it up in both views.
+    const circlesView = new CirclesView(plane), refCirclesView = new CirclesView($("refPlane"));
+    const sphereGroup = new THREE.Group();
+    sphereGroup.visible = false;
+    root.add(sphereGroup);
+    const discMat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0 });
+    let sphere = null, hoverCircle = null; // sphere: the layout and its meshes (see sphereObjects)
+    const RING_R = 1.004, STICKER_R = 1.012; // (just off the ball, so they don't flicker into it)
+    // The ball, rings and stickers for puzzle Q laid out on the sphere as L (sphereLayout). The
+    // stickers are one instanced mesh, posed by poseStickers. Also used by the shelf's pictures.
+    function sphereObjects(Q, L) {
+      const group = new THREE.Group();
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), bodyMat);
+      group.add(ball);
+      // stickers a bit over a third of the way to the nearest other crossing; rings thinner
+      let near = Math.PI;
+      for (let i = 0; i < L.points.length; i++)
+        for (let j = i + 1; j < L.points.length; j++) near = Math.min(near, Math.acos(Math.min(1, dot(L.points[i], L.points[j]))));
+      const rad = Math.min(0.13, 0.36 * near), tube = Math.max(0.004, Math.min(0.011, rad * 0.16));
+      const Z = new THREE.Vector3(0, 0, 1);
+      const rings = L.circles.map((c, i) => {
+        const m = new THREE.Mesh(new THREE.TorusGeometry(Math.sqrt(Math.max(0, 1 - c.h * c.h)) * RING_R, tube, 8, 180), axisMat);
+        m.quaternion.setFromUnitVectors(Z, new THREE.Vector3(...c.n)); // (a torus lies square to z)
+        m.position.set(...scale(c.n, c.h * RING_R));
+        m.userData.circle = i;
+        group.add(m);
+        return m;
+      });
+      const stickers = new THREE.InstancedMesh(new THREE.CylinderGeometry(rad, rad, rad * 0.25, 32), discMat, Q.n);
+      group.add(stickers);
+      return { L, group, ball, rings, stickers, rad, solved: solvedCirclesState(Q) };
+    }
+    // put each sticker where state s (turn: mid-turn, or null) has it, lit ones (a Set of
+    // points, or null) lightened
+    const discUp = new THREE.Vector3(0, 1, 0), discQ = new THREE.Quaternion(), discAt = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1);
+    const discM = new THREE.Matrix4(), discColor = new THREE.Color(), WHITE = new THREE.Color(1, 1, 1);
+    function poseStickers(Q, o, s, turn, lit) {
+      const shown = stickersDuring(Q, s, turn, (ci, k, f) => spherePlace(Q, o.L, ci, k, f));
+      shown.forEach((d, i) => {
+        discAt.set(...(d.at || o.L.points[d.point]));
+        discQ.setFromUnitVectors(discUp, discAt);
+        discM.compose(discAt.multiplyScalar(STICKER_R), discQ, ONE);
+        o.stickers.setMatrixAt(i, discM);
+        discColor.set(pairColor(Q.points[d.v].color, Q.colors));
+        if (lit && d.point !== null && lit.has(d.point)) discColor.lerp(WHITE, 0.45);
+        o.stickers.setColorAt(i, discColor);
+      });
+      o.stickers.instanceMatrix.needsUpdate = true;
+      o.stickers.instanceColor.needsUpdate = true;
+      o.stickers.computeBoundingSphere();
+    }
+    function buildSphere() {
+      if (sphere) {
+        sphereGroup.remove(sphere.group);
+        sphere.group.traverse((o) => o.geometry && o.geometry.dispose());
+        sphere.stickers.dispose(); // (its per-sticker buffers)
+      }
+      sphere = sphereObjects(P, sphereLayout(P));
+      sphereGroup.add(sphere.group);
+    }
+    // the circle under a point of the 3D view (its index), or null: the nearest one to the spot
+    // on the ball under the pointer, within a few pixels (or most of a sticker)
+    function sphereCircleAt(x, y) {
+      if (!sphere || !view3D) return null;
+      root.updateMatrixWorld(true);
+      ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, inputCam);
+      const h = raycaster.intersectObject(sphere.ball, false)[0];
+      if (!h) return null;
+      const p = sphere.ball.worldToLocal(h.point.clone()).normalize().toArray();
+      const pxPerUnit = H / (2 * Math.tan((inputCam.fov * Math.PI) / 360) * inputCam.position.length());
+      const clampAsin = (v) => Math.asin(Math.max(-1, Math.min(1, v)));
+      let best = null, bd = Math.max(9 / pxPerUnit, sphere.rad * 0.9);
+      sphere.L.circles.forEach((c, i) => {
+        const d = Math.abs(clampAsin(dot(p, c.n)) - clampAsin(c.h));
+        if (d < bd) { best = i; bd = d; }
+      });
+      return best;
+    }
+    // The turn (q: +1 or −1) that looks clockwise, or counterclockwise, on circle ci from where
+    // the view's camera is. +1 turns it right-handed about its axis (sphereLayout), which looks
+    // counterclockwise from the side the axis points out of.
+    function sphereClockwise(ci, clockwise) {
+      const c = sphere.L.circles[ci];
+      const n = new THREE.Vector3(...c.n).applyQuaternion(root.quaternion);
+      const toCam = inputCam.position.clone().sub(n.clone().multiplyScalar(c.h));
+      return (n.dot(toCam) > 0) === clockwise ? -1 : 1;
+    }
+    function turnCircle(ci, q) {
+      const c = P.circles[ci];
+      slideLine({ axis: c.family, layer: c.ring, q });
+    }
+    // light up circle ci (null: none) in both views; el: the view the pointer is in, for its cursor
+    function setHoverCircle(ci, el = canvas) {
+      if (ci !== hoverCircle) {
+        hoverCircle = ci;
+        if (sphere) sphere.rings.forEach((m, i) => { m.material = i === ci ? axisHiMat : axisMat; });
+      }
+      el.style.cursor = ci !== null ? "pointer" : "";
+    }
+    function renderSphere(turn) {
+      poseStickers(P, sphere, state, turn, algLit);
+      placeCamera();
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, W, H);
+      renderer.clear();
+      renderer.setScissorTest(true);
+      for (const { cam, region: r } of views()) {
+        renderer.setScissor(r.left, H - r.bottom, r.right - r.left, r.bottom - r.top);
+        lightFor(cam);
+        renderer.render(scene, cam);
+      }
+      // the corner card: the solved sphere, turned like the main view, with no circle lit
+      poseStickers(P, sphere, sphere.solved, null, null);
+      if (hoverCircle !== null) sphere.rings[hoverCircle].material = axisMat;
+      for (const { cam, x, y, size } of refSquares()) {
+        renderer.setViewport(x, y, size, size);
+        renderer.setScissor(x, y, size, size);
+        lightFor(cam);
+        renderer.render(scene, cam);
+      }
+      lightFor(camera);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, W, H);
+      if (hoverCircle !== null) sphere.rings[hoverCircle].material = axisHiMat;
+      poseStickers(P, sphere, state, turn, algLit);
+    }
+    function drawCircles() {
+      const reg = viewRegions();
+      plane.hidden = !reg.flat;
+      canvas.hidden = !reg.surface;
+      const turn = anim ? { axis: anim.axis, layer: anim.layer, p: anim.theta } : null;
+      if (reg.flat) {
+        placePlane(reg.flat);
+        circlesView.origin = planeView.origin; // (where placePlane put the canvas)
+        circlesView.layout(P, reg.flat);
+        circlesView.draw(state, turn, { hover: hoverCircle, lit: algLit });
+      }
+      if (reg.surface && sphere) renderSphere(turn);
+      placeSplit();
+      // the corner card without the 3D view: the flat drawing, solved
+      const card = $("refPlane");
+      card.hidden = !!reg.surface;
+      if (!reg.surface) {
+        const dpr = pixelRatio();
+        if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
+        refCirclesView.drawSolvedCard(P, sphere ? sphere.solved : solvedCirclesState(P));
+      }
+    }
+
     // ---------- loop ----------
     let lastT = performance.now();
     function frame(now) {
@@ -2529,6 +2730,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         if (u >= 1) finishAnim();
       }
       if (isPlanar()) { drawPlanar(); requestAnimationFrame(frame); return; }
+      if (isCircles()) { drawCircles(); requestAnimationFrame(frame); return; }
       updatePieces();
       renderer.setViewport(0, 0, W, H);
       renderer.setScissorTest(false);
@@ -2573,7 +2775,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let refG = 0;
     const refQ = new THREE.Quaternion(), refTarget = new THREE.Quaternion(), refM = new THREE.Matrix4();
     function updateReferenceTarget(snap = false) {
-      if (isPlanar()) return; // the planar view draws its own solved grid
+      if (isFlatKind()) return; // the planar view draws its own solved grid
       refG = closestOrientation(P, state, refG);
       const m = P.group.mats[refG];
       refM.set(m[0], m[1], m[2], 0, m[3], m[4], m[5], 0, m[6], m[7], m[8], 0, 0, 0, 0, 1);
@@ -2621,13 +2823,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
       if (!showAxes) q.set("axes", "off");
       if (rearView !== rearDefault()) q.set("rear", rearView ? "on" : "off");
-      if (isPlanar()) {
-        if (planarTextures) q.set("textures", "on");
-        if (shapeId() !== P.topology) q.set("shape", shapeId());
+      if (isFlatKind()) {
+        if (isPlanar() && planarTextures) q.set("textures", "on");
+        if (isPlanar() && shapeId() !== P.topology) q.set("shape", shapeId());
         if (!viewFlat) q.set("flat", "off");
         if (!view3D) q.set("3d", "off");
-        if (!showLabels) q.set("labels", "off");
-        if (!reflectLabels) q.set("mirrored-labels", "off");
+        if (isPlanar() && !showLabels) q.set("labels", "off");
+        if (isPlanar() && !reflectLabels) q.set("mirrored-labels", "off");
       } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
@@ -3351,10 +3553,17 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // A turn as a mark: a dot in the colors of the end you'd grab it by (one face: one color;
     // a corner: a pie of its faces' colors; an edge: two halves), an inner layer's depth
     // before it, and ′ or 2 after. No face letters: they stop meaning anything once the
-    // puzzle is turned in your hands. Planar slides: the line and an arrow.
+    // puzzle is turned in your hands. Planar slides: the line and an arrow. A circle's turn:
+    // its family's letter and its number in the family (from the inside), and which way.
     function nxMark(m, small = false) {
       const el = document.createElement("span");
       el.className = "nx-mark" + (small ? " is-small" : "");
+      if (isCircles()) {
+        const n = Math.abs(m.q);
+        el.classList.add("is-slide");
+        el.textContent = String.fromCharCode(65 + m.axis) + (m.layer + 1) + (m.q > 0 ? "↻" : "↺") + (n > 1 ? n : "");
+        return el;
+      }
       if (isPlanar()) {
         const n = Math.abs(m.q), arrow = m.axis === 0 ? (m.q > 0 ? "→" : "←") : (m.q > 0 ? "↓" : "↑");
         el.classList.add("is-slide");
@@ -3469,6 +3678,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // the shelf: every puzzle as a picture, by family; clicking one loads it
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
+      if (spec.rule === "circles") return "intersecting circles";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
       if (spec.truncate) return "other solids"; // (a truncated solid isn't its base's shape: the soccer ball)
       return { cube: "cubes", tetrahedron: "tetrahedra", octahedron: "octahedra", dodecahedron: "dodecahedra", icosahedron: "icosahedra" }[spec.solid] || "other solids";
@@ -3506,6 +3716,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         trash.push(geo, map);
         const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[spec.topology];
         sc.root.quaternion.setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
+      } else if (spec.rule === "circles") {
+        // the sphere, solved, face on (as it opens)
+        const Q = buildCircles(spec), o = sphereObjects(Q, sphereLayout(Q));
+        poseStickers(Q, o, o.solved, null, null);
+        group.add(o.group);
       } else {
         const Q = buildPuzzle(spec, spec.size);
         group.scale.setScalar(1 / Q.R);
@@ -3515,7 +3730,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       sc.cam.aspect = 1; sc.cam.position.set(0, 0, 4.6); sc.cam.updateProjectionMatrix();
       nxThumbRenderer.render(sc.scene, sc.cam);
       cv.getContext("2d").drawImage(nxThumbRenderer.domElement, 0, 0);
-      group.traverse((o) => o.geometry && o.geometry.dispose());
+      group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.isInstancedMesh) o.dispose(); });
       for (const t of trash) t.dispose();
       return (nxThumbs[spec.id] = cv.toDataURL());
     }
@@ -3666,8 +3881,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       },
       turn(axis, layer, q = 1) {
         flush();
-        // (a planar slide keeps its sign and size: q cells right/down, or left/up if negative)
-        const move = { axis, layer, q: isPlanar() ? q : mod(q, P.axes[axis].order) };
+        // (a planar slide keeps its sign and size: q cells right/down, or left/up if negative;
+        // a circle's turn, q crossings clockwise as drawn flat, or counterclockwise if negative)
+        const move = { axis, layer, q: isFlatKind() ? q : mod(q, P.axes[axis].order) };
         record([move]);
         play(move);
         renderTape();
@@ -3684,7 +3900,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       info() {
         return {
           id: isCustom() ? "custom" : MENU[presetIdx].id, title: puzzleName, size, rear: rearOn(),
-          ...(isPlanar()
+          ...(isCircles()
+            ? { circles: true, families: P.families, rings: P.spec.rings, pieces: P.n, colors: P.colors, views: { flat: viewFlat, surface: view3D } }
+            : isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
@@ -3701,6 +3919,34 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // planar: every arrow button ({ axis, layer, q, x, y }) and a grid cell's middle, in CSS px
       arrows() { planeView.layout(P, viewRegions().flat); return planeView.arrows().map(({ axis, layer, q, x, y }) => ({ axis, layer, q, x, y })); },
       cellCenter(x, y) { planeView.layout(P, viewRegions().flat); return planeView.cellCenter(x, y); },
+      // circles: where circle `layer` of family `axis` is in the flat view, at angle a (radians,
+      // clockwise from its right), in CSS px
+      circlePoint(axis, layer, a = 0) {
+        circlesView.layout(P, viewRegions().flat);
+        const [x, y] = circlesView.circlePoint(circleIndex(P, { axis, layer }), a);
+        return { x, y };
+      },
+      // a spot on that circle in the 3D view, as near the middle of the view as it gets, in CSS px
+      // (view: "front", or "rear" for the rear view's), or null when it's all hidden
+      sphereCirclePoint(axis, layer, view = "front") {
+        placeCamera();
+        root.updateMatrixWorld(true);
+        const cam = view === "rear" ? rearCamera : camera, was = inputCam, ci = circleIndex(P, { axis, layer }), c = sphere.L.circles[ci];
+        cam.updateMatrixWorld();
+        inputCam = cam;
+        // walk around the circle: the spot facing the camera most that the hit test agrees is on it
+        const u = Math.abs(c.n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], e1 = normalize(cross(c.n, u)), e2 = cross(c.n, e1), rr = Math.sqrt(1 - c.h * c.h);
+        let best = null;
+        for (let k = 0; k < 180; k++) {
+          const a = (k / 180) * Math.PI * 2, p = add(scale(c.n, c.h), add(scale(e1, rr * Math.cos(a)), scale(e2, rr * Math.sin(a))));
+          const w = new THREE.Vector3(...p).applyQuaternion(root.quaternion), facing = w.dot(cam.position.clone().sub(w).normalize());
+          const s = w.clone().project(cam), x = ((s.x + 1) / 2) * W, y = ((1 - s.y) / 2) * H;
+          if ((!best || facing > best.facing) && sphereCircleAt(x, y) === ci) best = { x, y, facing };
+        }
+        inputCam = was;
+        return best && { x: best.x, y: best.y };
+      },
+      hoverCircle() { return hoverCircle; },
       // where grid cell (x, y) shows on the 3D surface, at fraction (fx, fy) across it, in CSS
       // px; null when that spot is hidden (facing away, or behind another part of the surface)
       surfacePoint(x, y, fx = 0.5, fy = 0.5) {
