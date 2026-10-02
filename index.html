@@ -3555,6 +3555,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // you can change; done closes the drawer and keeps what you made.
     function nxCustomize(on) {
       if (on && !isCustom()) customizePreset();
+      if (!on) setPainting(false); // (closing the editor ends blacking out)
       document.body.classList.toggle("nx-custom", on);
       resize();
     }

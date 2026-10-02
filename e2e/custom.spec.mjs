@@ -66,3 +66,14 @@ test("undo covers every kind of edit, not just cuts, and counts its steps", asyn
   await expect(page.locator("#bUndo")).toBeDisabled();
   await expect(page.locator("#bRedoN")).toHaveText("2");
 });
+
+test("closing the editor turns off blacking out", async ({ page }) => {
+  await open(page);
+  await page.click(".nx-custombtn");
+  await page.click("#bPaint");
+  await expect(page.locator("#bPaint")).toHaveAttribute("aria-pressed", "true");
+  await page.click("#customizeDone");
+  await page.click(".nx-custombtn");
+  await expect(page.locator("#bPaint")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#bPaintHint")).toBeHidden();
+});
