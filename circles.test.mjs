@@ -4,7 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CIRCLES_PRESETS, buildCircles, circleCrossings, solvedCirclesState, isCirclesSolved, applyCirclesMove, inverseCirclesMove,
-  circlesScrambleMoves, sphereLayout, sphereArcAfter, spherePlace, flatPlace, stickersDuring,
+  circlesScrambleMoves, sphereLayout, sphereArcAfter, spherePlace, flatPlace, stickersDuring, crossingAt, flatAngles, flatAngleOf,
+  sphereAngles, sphereAngleOf,
 } from "./circles.mjs";
 
 const venn = (families, rings) => buildCircles({ ...CIRCLES_PRESETS[0], families, rings });
@@ -120,4 +121,21 @@ test("partway through a turn, moving stickers ride their circle between crossing
   // a whole step lands on the next crossing, on the sphere too
   for (let k = 0; k < cyc.length; k++) assert.ok(close(spherePlace(P, S, ci, k, 1), S.points[cyc[(k + 1) % cyc.length].i]));
   assert.ok(close(spherePlace(P, S, ci, -1, 1), S.points[cyc[0].i])); // (and backward)
+});
+
+test("dragging: an angle around a circle as a crossing count, following uneven spacing", () => {
+  const angles = [0, 1, 3]; // (then back to 0 + 2π)
+  assert.equal(crossingAt(angles, 0), 0);
+  assert.equal(crossingAt(angles, 0.5), 0.5);
+  assert.equal(crossingAt(angles, 2), 1.5);
+  assert.ok(Math.abs(crossingAt(angles, 3 + (2 * Math.PI - 3) / 2) - 2.5) < 1e-12);
+  assert.ok(Math.abs(crossingAt(angles, 2 * Math.PI + 1) - 4) < 1e-12); // once round, then one more
+  assert.ok(Math.abs(crossingAt(angles, -0.5 * (2 * Math.PI - 3)) - -0.5) < 1e-12);
+  // on the sphere and flat, each crossing's own angle is its index
+  const P = venn(3, 2), S = sphereLayout(P), ci = P.circleOf[1][1];
+  const L = P.cycles[ci].length, same = (u, k) => Math.abs(((u - k) % L + L + 0.5) % L - 0.5) < 1e-9; // (mod L: a turn round)
+  P.cycles[ci].forEach((p, k) => {
+    assert.ok(same(crossingAt(flatAngles(P, ci), flatAngleOf(P, ci, P.points[p.i].at)), k));
+    assert.ok(same(crossingAt(sphereAngles(P, S, ci), sphereAngleOf(S, ci, S.points[p.i])), k));
+  });
 });

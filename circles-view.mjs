@@ -33,6 +33,7 @@ export class CirclesView {
     this.oy = safe.top + h / 2 - (b.y + b.h / 2) * this.k;
   }
   toScreen([x, y]) { return [this.ox + x * this.k, this.oy + y * this.k]; }
+  fromScreen(px, py) { return [(px - this.ox) / this.k, (py - this.oy) / this.k]; }
 
   // the circle under a point (its index), or null: the nearest one within a few pixels
   circleAt(px, py) {

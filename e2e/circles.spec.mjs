@@ -69,22 +69,59 @@ test("clicking a circle in the flat view turns it: left clockwise, right counter
   expect((await info(page)).solved).toBe(true);
 });
 
-test("clicking a circle on the sphere turns it, and dragging turns the view instead", async ({ page }) => {
+test("clicking a circle on the sphere turns it; dragging off the circles turns the view", async ({ page }) => {
   await load(page, { families: 3, rings: 1 });
   const at = await page.evaluate(() => window.cutwist.sphereCirclePoint(2, 0));
   expect(at).not.toBeNull();
   await page.mouse.click(at.x, at.y);
   await finish(page);
-  const s = await info(page);
-  expect(s.moves).toBe(1);
+  expect((await info(page)).moves).toBe(1);
   expect(await page.locator("#tapeMoves .nx-mark").count()).toBe(1);
   const view = await page.evaluate(() => window.cutwist.view());
-  await page.mouse.move(at.x, at.y);
+  // (the middle of the screen's right half, just outside the sphere's edge)
+  const box = await page.locator("#c").boundingBox();
+  await page.mouse.move(box.width - 30, box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(at.x + 60, at.y + 20, { steps: 5 });
+  await page.mouse.move(box.width - 90, box.height / 2 + 20, { steps: 5 });
   await page.mouse.up();
   expect((await info(page)).moves).toBe(1);
   expect(await page.evaluate(() => window.cutwist.view())).not.toEqual(view);
+});
+
+test("dragging a circle in the flat view turns it, following the pointer, snapping on release", async ({ page }) => {
+  await load(page, { families: 3, rings: 2 });
+  const drag = async (from, to) => {
+    const pts = await page.evaluate(([from, to]) => Array.from({ length: 13 }, (_, k) => window.cutwist.circlePoint(0, 1, from + ((to - from) * k) / 12)), [from, to]);
+    await page.mouse.move(pts[0].x, pts[0].y);
+    await page.mouse.down();
+    for (const p of pts.slice(1)) await page.mouse.move(p.x, p.y);
+    await page.mouse.up();
+    await finish(page);
+  };
+  await drag(0.3, 0.3 + 2); // clockwise, about a third of the way round
+  const marks = await page.locator("#tapeMoves .nx-mark").allTextContents();
+  expect(marks.length).toBe(1);
+  expect(marks[0]).toMatch(/^A2↻\d*$/);
+  await drag(2.3, 0.3); // straight back
+  expect((await info(page)).solved).toBe(true);
+  expect(await page.locator("#tapeMoves .nx-mark").count()).toBe(2);
+});
+
+test("dragging a circle on the sphere turns it, and leaves the view alone", async ({ page }) => {
+  await load(page, { families: 3, rings: 1 });
+  const path = await page.evaluate(() => window.cutwist.sphereCirclePath(0, 0));
+  expect(path.length).toBeGreaterThan(20);
+  const view = await page.evaluate(() => window.cutwist.view());
+  const run = path.slice(0, Math.min(path.length, 30));
+  await page.mouse.move(run[0].x, run[0].y);
+  await page.mouse.down();
+  for (const p of run.slice(1)) await page.mouse.move(p.x, p.y);
+  await page.mouse.up();
+  await finish(page);
+  expect(await page.evaluate(() => window.cutwist.view())).toEqual(view);
+  const s = await info(page);
+  expect(s.moves).toBe(1);
+  expect(s.solved).toBe(false);
 });
 
 test("on the sphere, left click looks clockwise from either side", async ({ page }) => {
@@ -118,12 +155,14 @@ test("scramble, then undoing it by hand, solves it", async ({ page }) => {
 test("flat only, 3D only, and the rear view with 3D only", async ({ page }) => {
   await load(page, { families: 3, rings: 2 });
   await openView(page);
+  await expect(page.locator("#refPlane")).toBeVisible(); // the solved card: flat, with the flat view on
   await page.locator("#view3D").uncheck();
   await expect(page.locator("#c")).toBeHidden();
-  await expect(page.locator("#refPlane")).toBeVisible(); // the solved card, flat
+  await expect(page.locator("#refPlane")).toBeVisible();
   await page.locator("#view3D").check();
   await page.locator("#viewFlat").uncheck();
   await expect(page.locator("#plane")).toBeHidden();
+  await expect(page.locator("#refPlane")).toBeHidden(); // (3D only: the solved card is the sphere)
   await expect(page.locator("#rear")).toBeEnabled();
   expect(page.url()).toContain("flat=off");
   const back = await page.evaluate(() => window.cutwist.sphereCirclePoint(1, 0, "rear"));

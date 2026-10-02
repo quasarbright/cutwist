@@ -794,7 +794,7 @@
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
     import {
       CIRCLES_PRESETS, buildCircles, solvedCirclesState, isCirclesSolved, applyCirclesMove, inverseCirclesMove, circlesScrambleMoves,
-      circleIndex, stickersDuring, sphereLayout, spherePlace,
+      circleIndex, stickersDuring, sphereLayout, spherePlace, crossingAt, flatAngles, flatAngleOf, sphereAngles, sphereAngleOf,
     } from "./circles.mjs";
     import { CirclesView, pairColor } from "./circles-view.mjs";
 
@@ -2038,6 +2038,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
         if (drag && drag.mode === "turn") releaseTurn();
+        if (drag && drag.mode === "circle" && drag.live && anim && anim.live) releaseSlide();
         const [a, b] = [...pointers.values()];
         drag = { mode: "pinch", dist: Math.hypot(a.x - b.x, a.y - b.y), zoom };
         return;
@@ -2045,10 +2046,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (pointers.size > 2) return;
       aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
       if (isCircles()) {
-        // the sphere: a click (no drag) on a circle turns it, left clockwise, right counterclockwise
-        // as you see it there; see endPointer. Anything else turns the view.
-        const ci = (e.button === 0 || e.button === 2) && !e.shiftKey ? sphereCircleAt(e.clientX, e.clientY) : null;
-        drag = ci !== null ? { mode: "circle", x: e.clientX, y: e.clientY, ci, clockwise: e.button === 0 } : { mode: "orbit", x: e.clientX, y: e.clientY };
+        // the sphere: press a circle to drag it round, or click it (no drag) to turn it, left
+        // clockwise, right counterclockwise as you see it there; see endPointer. Anywhere else
+        // (or shift-drag) turns the view.
+        const ci = !e.shiftKey ? sphereCircleAt(e.clientX, e.clientY) : null, a = ci === null ? null : sphereAngleAt(ci, e.clientX, e.clientY);
+        if (a !== null) drag = { mode: "circle", ...circleDrag(e, ci, sphereAngles(P, sphere.L, ci), a), q: e.button === 0 || e.button === 2 ? sphereClockwise(ci, e.button === 0) : 0 };
+        else drag = { mode: "orbit", x: e.clientX, y: e.clientY };
         return;
       }
       if (isPlanar()) {
@@ -2102,7 +2105,14 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         placeCamera();
         return;
       }
-      if ((drag.mode === "paint" || drag.mode === "segment" || drag.mode === "circle") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
+      if (drag.mode === "circle") {
+        if (!drag.live && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return; // still a click, so far
+        if (!drag.live) { startCircleDrag(drag); canvas.style.cursor = "grabbing"; }
+        const a = sphereAngleAt(drag.ci, e.clientX, e.clientY);
+        if (a !== null) followCircle(drag, a);
+        return;
+      }
+      if ((drag.mode === "paint" || drag.mode === "segment") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
         drag = { mode: "orbit", x: drag.x, y: drag.y }; // it's a drag after all: rotate the view
       if (drag.mode === "orbit") {
         orbitBy(e.clientX - drag.x, e.clientY - drag.y);
@@ -2157,7 +2167,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (drag && drag.mode === "spress") edgeClick(drag);
       if (drag && drag.mode === "paint") toggleType(drag.piece);
       if (drag && drag.mode === "segment") turnSegment(drag.seg, drag.clockwise);
-      if (drag && drag.mode === "circle") turnCircle(drag.ci, sphereClockwise(drag.ci, drag.clockwise));
+      if (drag && drag.mode === "circle") { endCircleDrag(drag); canvas.style.cursor = ""; }
       if (!pointers.size || (drag && drag.mode === "pinch")) drag = null;
     }
     canvas.addEventListener("pointerup", endPointer);
@@ -2487,9 +2497,11 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     plane.addEventListener("pointerdown", (e) => {
       if (isCircles()) {
-        // a circle: left click turns it clockwise, right click counterclockwise
-        const ci = e.button === 0 || e.button === 2 ? circlesView.circleAt(e.clientX, e.clientY) : null;
-        if (ci !== null) turnCircle(ci, e.button === 0 ? 1 : -1);
+        // a circle: drag it round, or click it (left clockwise, right counterclockwise)
+        const ci = cdrag ? null : circlesView.circleAt(e.clientX, e.clientY);
+        if (ci === null) return;
+        try { plane.setPointerCapture(e.pointerId); } catch {}
+        cdrag = { ...circleDrag(e, ci, flatAngles(P, ci), flatAngleOf(P, ci, circlesView.fromScreen(e.clientX, e.clientY))), q: e.button === 0 ? 1 : e.button === 2 ? -1 : 0 };
         return;
       }
       if (!isPlanar() || pdrag) return;
@@ -2501,7 +2513,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       pdrag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, cell, axis: null };
     });
     plane.addEventListener("pointermove", (e) => {
-      if (isCircles()) { setHoverCircle(circlesView.circleAt(e.clientX, e.clientY), plane); return; }
+      if (isCircles()) {
+        if (!cdrag) { setHoverCircle(circlesView.circleAt(e.clientX, e.clientY), plane); return; }
+        if (e.pointerId !== cdrag.id || (!cdrag.live && Math.hypot(e.clientX - cdrag.x0, e.clientY - cdrag.y0) < 6)) return;
+        if (!cdrag.live) { startCircleDrag(cdrag); plane.style.cursor = "grabbing"; }
+        followCircle(cdrag, flatAngleOf(P, cdrag.ci, circlesView.fromScreen(e.clientX, e.clientY)));
+        return;
+      }
       if (!isPlanar()) return;
       if (!pdrag) {
         hoverArrow = planeView.arrowAt(e.clientX, e.clientY);
@@ -2520,6 +2538,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (anim && anim.live) anim.theta = (pdrag.axis === 0 ? dx : dy) / planeView.cell;
     });
     function endPlanarDrag(e) {
+      if (cdrag && e.pointerId === cdrag.id) { endCircleDrag(cdrag); cdrag = null; plane.style.cursor = ""; return; }
       if (!pdrag || e.pointerId !== pdrag.id) return;
       if (anim && anim.live) releaseSlide();
       pdrag = null;
@@ -2659,6 +2678,42 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const c = P.circles[ci];
       slideLine({ axis: c.family, layer: c.ring, q });
     }
+    // Dragging a circle round (flat: cdrag; on the sphere: drag, mode "circle"). The angle
+    // around it under the pointer is followed round (unwrapped: phi) and turned into crossings
+    // moved since the press (crossingAt), so the sticker you grabbed stays under the pointer;
+    // it snaps to whole crossings on release (one move). angles: its crossings' angles, the
+    // same way round as a; q: the turn a click (no drag) makes.
+    let cdrag = null;
+    function circleDrag(e, ci, angles, a) {
+      return { id: e.pointerId, ci, x0: e.clientX, y0: e.clientY, live: false, angles, phi: a, last: a, u0: crossingAt(angles, a) };
+    }
+    function startCircleDrag(d) {
+      flush();
+      d.live = true;
+      const c = P.circles[d.ci];
+      anim = { live: true, axis: c.family, layer: c.ring, move: null, theta: 0 };
+    }
+    function followCircle(d, a) {
+      d.phi += mod(a - d.last + Math.PI, TAU) - Math.PI;
+      d.last = a;
+      if (anim && anim.live) anim.theta = crossingAt(d.angles, d.phi) - d.u0;
+    }
+    function endCircleDrag(d) {
+      if (!d.live) { if (d.q) turnCircle(d.ci, d.q); }
+      else if (anim && anim.live) releaseSlide();
+    }
+    // the angle about circle ci's axis of the point under (x, y) in the circle's plane, or null
+    // when the plane is seen almost edge on
+    function sphereAngleAt(ci, x, y) {
+      root.updateMatrixWorld(true);
+      ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, inputCam);
+      const inv = sphere.ball.matrixWorld.clone().invert();
+      const o = raycaster.ray.origin.clone().applyMatrix4(inv), d = raycaster.ray.direction.clone().transformDirection(inv);
+      const c = sphere.L.circles[ci], n = new THREE.Vector3(...c.n), nd = n.dot(d);
+      if (Math.abs(nd) < 0.03) return null;
+      return sphereAngleOf(sphere.L, ci, o.addScaledVector(d, (c.h - n.dot(o)) / nd).toArray());
+    }
     // light up circle ci (null: none) in both views; el: the view the pointer is in, for its cursor
     function setHoverCircle(ci, el = canvas) {
       if (ci !== hoverCircle) {
@@ -2667,7 +2722,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
       el.style.cursor = ci !== null ? "pointer" : "";
     }
-    function renderSphere(turn) {
+    // card: draw the solved sphere in the corner card too (only the 3D view is on)
+    function renderSphere(turn, card) {
       poseStickers(P, sphere, state, turn, algLit);
       placeCamera();
       renderer.setScissorTest(false);
@@ -2679,7 +2735,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         lightFor(cam);
         renderer.render(scene, cam);
       }
-      // the corner card: the solved sphere, turned like the main view, with no circle lit
+      lightFor(camera);
+      if (card) renderSolvedSphere(turn);
+      renderer.setScissorTest(false);
+    }
+    // the corner card: the solved sphere, turned like the main view, with no circle lit
+    function renderSolvedSphere(turn) {
       poseStickers(P, sphere, sphere.solved, null, null);
       if (hoverCircle !== null) sphere.rings[hoverCircle].material = axisMat;
       for (const { cam, x, y, size } of refSquares()) {
@@ -2705,12 +2766,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         circlesView.layout(P, reg.flat);
         circlesView.draw(state, turn, { hover: hoverCircle, lit: algLit });
       }
-      if (reg.surface && sphere) renderSphere(turn);
+      // the corner card: the flat drawing, solved, unless the 3D view is the only one on
+      const card3D = !!reg.surface && !reg.flat;
+      if (reg.surface && sphere) renderSphere(turn, card3D);
       placeSplit();
-      // the corner card without the 3D view: the flat drawing, solved
       const card = $("refPlane");
-      card.hidden = !!reg.surface;
-      if (!reg.surface) {
+      card.hidden = card3D;
+      if (!card3D) {
         const dpr = pixelRatio();
         if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
         refCirclesView.drawSolvedCard(P, sphere ? sphere.solved : solvedCirclesState(P));
@@ -3945,6 +4007,21 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         }
         inputCam = was;
         return best && { x: best.x, y: best.y };
+      },
+      // the visible spots of that circle in the 3D view, going round it the way +1 turns it, in CSS px
+      sphereCirclePath(axis, layer) {
+        placeCamera();
+        root.updateMatrixWorld(true);
+        camera.updateMatrixWorld();
+        const was = inputCam, ci = circleIndex(P, { axis, layer }), c = sphere.L.circles[ci], rr = Math.sqrt(1 - c.h * c.h), out = [];
+        inputCam = camera;
+        for (let k = 0; k < 360; k += 3) {
+          const a = (k * Math.PI) / 180, p = add(scale(c.n, c.h), add(scale(c.e1, rr * Math.cos(a)), scale(c.e2, rr * Math.sin(a))));
+          const s = new THREE.Vector3(...p).applyQuaternion(root.quaternion).project(camera), x = ((s.x + 1) / 2) * W, y = ((1 - s.y) / 2) * H;
+          if (sphereCircleAt(x, y) === ci) out.push({ x, y, a });
+        }
+        inputCam = was;
+        return out;
       },
       hoverCircle() { return hoverCircle; },
       // where grid cell (x, y) shows on the 3D surface, at fraction (fx, fy) across it, in CSS

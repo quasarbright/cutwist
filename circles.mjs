@@ -168,6 +168,24 @@ export function arcAfter(P, ci, k) {
   const a = cyc[mod(k, L)].a, b = cyc[mod(k + 1, L)].a;
   return mod(b - a, TAU) || TAU;
 }
+// Dragging a circle: where an angle around it falls among its crossings, as a fractional
+// crossing count (unwrapped: a whole way round adds the crossing count), so the sticker under
+// the pointer stays under it however unevenly the crossings are spaced. angles: the crossings'
+// angles in turn order, increasing, within one turn of the first.
+export function crossingAt(angles, phi) {
+  const L = angles.length;
+  if (!L) return 0;
+  const turns = Math.floor((phi - angles[0]) / TAU), x = phi - turns * TAU;
+  let k = L - 1;
+  while (k > 0 && angles[k] > x) k--;
+  const next = k + 1 < L ? angles[k + 1] : angles[0] + TAU;
+  return turns * L + k + (x - angles[k]) / (next - angles[k]);
+}
+// circle ci's crossings' angles as drawn flat (clockwise from the right, y down)
+export const flatAngles = (P, ci) => P.cycles[ci].map((p) => p.a);
+// a point's angle around flat circle ci
+export const flatAngleOf = (P, ci, [x, y]) => Math.atan2(y - P.circles[ci].c[1], x - P.circles[ci].c[0]);
+
 // a point f of the way along the flat circle from its k-th crossing to the next
 export function flatPlace(P, ci, k, f) {
   const c = P.circles[ci], cyc = P.cycles[ci];
@@ -236,7 +254,9 @@ export function sphereLayout(P) {
   sp = sp.map(turn); cs = cs.map((s) => s.map(turn));
   const circles = cs.map(([a, b, c]) => {
     const n = normalize(cross(sub(b, a), sub(c, a))); // (a → b → c goes right-handed about n)
-    return { n, h: dot(n, a), sample: [a, b, c] };
+    // (e1, e2: square to n, for angles about it, increasing right-handed)
+    const e1 = normalize(cross(n, Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), e2 = cross(n, e1);
+    return { n, h: dot(n, a), e1, e2, sample: [a, b, c] };
   });
   // each crossing's angle about its circles' axes, in the order of the circle's cycle
   return { points: sp, circles };
@@ -249,6 +269,19 @@ export function sphereArcAfter(P, S, ci, k) {
   const n = S.circles[ci].n, a = S.points[cyc[mod(k, L)].i], b = S.points[cyc[mod(k + 1, L)].i];
   const pa = sub(a, scale(n, dot(a, n))), pb = sub(b, scale(n, dot(b, n)));
   return mod(Math.atan2(dot(n, cross(pa, pb)), dot(pa, pb)), TAU) || TAU;
+}
+// a point's angle about sphere circle ci's axis (any point: it's measured square to the axis)
+export function sphereAngleOf(S, ci, p) {
+  const c = S.circles[ci];
+  return Math.atan2(dot(p, c.e2), dot(p, c.e1));
+}
+// circle ci's crossings' angles about its axis, in turn order, increasing
+export function sphereAngles(P, S, ci) {
+  const cyc = P.cycles[ci];
+  if (!cyc.length) return [];
+  const out = [sphereAngleOf(S, ci, S.points[cyc[0].i])];
+  for (let k = 1; k < cyc.length; k++) out.push(out[k - 1] + sphereArcAfter(P, S, ci, k - 1));
+  return out;
 }
 export function spherePlace(P, S, ci, k, f) {
   const cyc = P.cycles[ci];
