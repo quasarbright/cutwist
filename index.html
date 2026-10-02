@@ -1896,7 +1896,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderAlgorithms();
     }
     function toggleRecording() {
-      if (history.isRecording) history.stopRecording();
+      if (history.isRecording) { history.stopRecording(); renderTape(); } // (its turns are one step now)
       else history.startRecording();
       renderAlgorithms();
     }

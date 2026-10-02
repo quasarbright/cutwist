@@ -199,3 +199,32 @@ test("algorithms: rename, and the steps that played it follow; blank or taken na
   assert.deepEqual(h.algorithms.map((a) => a.name), ["sune", "B"]);
   assert.deepEqual([...h.playAlgorithm("sune")], [R]);
 });
+
+test("recording: stopping makes what it took one step, shown as the algorithm, that one undo takes back", () => {
+  const h = new History(inverse);
+  h.record([F]); // before recording: its own step
+  h.startRecording();
+  h.record([R]);
+  h.record([U, F]);
+  h.stopRecording();
+  assert.equal(h.length, 2);
+  assert.deepEqual([...h.entries[1]], [R, U, F]);
+  assert.deepEqual(h.entries[1].alg, { name: "A", reverse: false });
+  assert.equal(h.movesDone, 4);
+  assert.deepEqual(h.undo(), h.inverseOf([R, U, F]));
+  assert.equal(h.cursor, 1);
+  assert.deepEqual([...h.redo()], [R, U, F]);
+});
+
+test("recording: a step undone while recording stays redoable after the rest is folded into one", () => {
+  const h = new History(inverse);
+  h.startRecording();
+  h.record([R]);
+  h.record([U]);
+  h.record([F]);
+  h.undo(); // F
+  h.stopRecording();
+  assert.equal(h.cursor, 1);
+  assert.deepEqual([...h.entries[0]], [R, U]);
+  assert.deepEqual(h.redo(), [F]);
+});

@@ -71,13 +71,20 @@ export class History {
   startRecording() {
     if (!this.recording) this.recording = { from: this.cursor, kept: [] };
   }
-  // stops; returns the new algorithm, or null when nothing was recorded
+  // stops; returns the new algorithm, or null when nothing was recorded. The steps it took
+  // become one step, as if it had been played: one undo takes it all back.
   stopRecording() {
-    const moves = this.recorded;
+    const moves = this.recorded, from = this.recording && this.recording.from;
     this.recording = null;
     if (!moves.length) return null;
     const alg = { name: this.nextName(), moves };
     this.algorithms.push(alg);
+    if (from < this.cursor) {
+      const step = this.entries.slice(from, this.cursor).flat();
+      step.alg = { name: alg.name, reverse: false };
+      this.entries.splice(from, this.cursor - from, step);
+      this.cursor = from + 1;
+    }
     return alg;
   }
   nextName() {

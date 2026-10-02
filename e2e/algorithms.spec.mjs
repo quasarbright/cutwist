@@ -150,3 +150,12 @@ test("clicking a name renames it; Escape, a blank name or a taken one keeps the 
     await expect(row(page, "sune").locator(".nx-name")).toHaveValue("sune");
   }
 });
+
+test("stopping a recording makes its turns one undo step, shown on the tape as the algorithm", async ({ page }) => {
+  await record(page, [0, 2, 1], [1, 2, 1], [2, 2, 1]);
+  await expect(page.locator(".nx-moves")).toContainText("A");
+  await page.click("#undo"); await finish(page);
+  const s = await info(page);
+  expect(s.moves).toBe(0);
+  expect(s.solved).toBe(true);
+});
