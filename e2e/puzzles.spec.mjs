@@ -4,6 +4,7 @@ import { test, expect } from "@playwright/test";
 import { open, info, noErrors, pick } from "./helpers.mjs";
 
 test("every puzzle on the shelf loads solved, with no errors", async ({ page }) => {
+  test.setTimeout(90_000); // (one by one, every puzzle there is: slow when the other tests are running too)
   const errors = await open(page);
   await page.click(".nx-pick");
   const ids = await page.$$eval(".nx-card", (cs) => cs.map((c) => c.dataset.id));

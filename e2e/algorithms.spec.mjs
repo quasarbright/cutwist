@@ -133,6 +133,31 @@ test("planar: hovering play lights the cells it changes", async ({ page }) => {
   expect(changed(before, await page.evaluate(() => window.cutwist.state))).toEqual(shown);
 });
 
+test("eyes: off to start; one on lights its pieces, two on light the pieces both would move", async ({ page }) => {
+  await record(page, [0, 2, 1]); // A: a face turn
+  await record(page, [1, 2, 1]); // B: a face next to it
+  const eye = (name) => row(page, name).locator('[data-act="show"]');
+  await expect(eye("A")).toHaveAttribute("aria-pressed", "false");
+  expect(await lit(page)).toBeNull();
+  await row(page, "A").locator('[data-act="play"]').hover();
+  const a = await lit(page);
+  await row(page, "B").locator('[data-act="play"]').hover();
+  const b = await lit(page);
+  await page.mouse.move(5, 5);
+  await eye("A").click();
+  await expect(eye("A")).toHaveAttribute("aria-pressed", "true");
+  expect(await lit(page)).toEqual(a);
+  await eye("B").click();
+  const both = await lit(page);
+  expect(both).toEqual(a.filter((i) => b.includes(i)));
+  expect(both.length).toBe(3); // (two faces of a 3×3×3 share an edge and two corners)
+  // still the overlap after a turn, from where the puzzle is now
+  await page.evaluate(() => { window.cutwist.turn(2, 2, 1); window.cutwist.finish(); });
+  expect((await lit(page)).length).toBe(3);
+  await eye("A").click(); await eye("B").click();
+  expect(await lit(page)).toBeNull();
+});
+
 test("clicking a name renames it; Escape, a blank name or a taken one keeps the old", async ({ page }) => {
   await record(page, [0, 2, 1]);
   await record(page, [1, 2, 1]);

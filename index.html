@@ -142,6 +142,9 @@
     .nx-alg .nx-len { flex: 1; color: var(--muted); }
     .nx-alg button { font: inherit; color: var(--muted); background: none; border: 0; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
     .nx-alg button:hover { color: var(--text); background: var(--panel-2); }
+    .nx-alg .nx-eye { display: inline-flex; align-items: center; padding: 2px 4px; }
+    .nx-alg .nx-eye svg { display: block; }
+    .nx-alg .nx-eye[aria-pressed="true"] { color: var(--accent, #f5c518); }
     .nx-rec { font: inherit; text-align: left; padding: 5px 10px; border: 1px dashed var(--border); border-radius: 8px; background: none; color: #e5484d; cursor: pointer; }
     .nx-rec:hover { color: #ff6b6f; border-color: var(--faint); }
     .nx-rec .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 1px; }
@@ -777,7 +780,7 @@
     import * as THREE from "three";
     import {
       PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, toCustom, CUT_RANGE, TRIM_RANGE,
-      piecesInLayer, layerOf, closestOrientation, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
+      piecesInLayer, layerOf, closestOrientation, TEXTURE_MIN_FACES, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
     import {
@@ -785,6 +788,10 @@
     } from "./planar.mjs";
     import { PlanarView } from "./planar-view.mjs";
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
+    import {
+      TILE_PRESETS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves, piecesInCircle, signedTurn, snapTiles, nearestCopy,
+    } from "./tiles.mjs";
+    import { TileView, tileColor, circleNear, tileNear } from "./tile-view.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -847,6 +854,12 @@
     // the pieces under the pointer while blacking out (see setHover)
     const bodyHiMat = new THREE.MeshStandardMaterial({ color: 0x5a5d6a, roughness: 0.55, metalness: 0, emissive: 0x23252e });
     const stickerHiMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0, emissive: 0x5a5a5a });
+    // the pieces an algorithm would move (see showAffected): the same, glowing in a pulse
+    // (litPulse) so they stand out on any color
+    const bodyLitMat = new THREE.MeshStandardMaterial({ color: 0x5a5d6a, roughness: 0.55, metalness: 0, emissive: 0x23252e });
+    const stickerLitMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0, emissive: 0x5a5a5a });
+    // how strongly lit pieces show right now: up and down about once a second, 0.15 to 0.6
+    const litPulse = () => 0.375 + 0.225 * Math.sin((performance.now() / 1000) * 2 * Math.PI);
     // Textures (puzzles with more than 12 faces; see TEXTURES in puzzle.mjs), drawn as ink
     // over the sticker color: black on light colors, white on dark ones. The pattern is
     // fixed to the screen at TEXTURE_PX per period, like warpaint's board, and each sticker
@@ -857,22 +870,17 @@
     // switching puzzles goes back to the default
     let showTextures = true, textureChoice = null;
     const texturesOn = { value: 1 };
-    function addTextures(mat) {
-      mat.onBeforeCompile = (sh) => {
-        sh.uniforms.uPeriod = texturePeriod;
-        sh.uniforms.uTextures = texturesOn;
-        sh.vertexShader = sh.vertexShader
-          .replace("#include <common>", "#include <common>\nattribute float tex;\nvarying float vTex;")
-          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTex = tex;");
-        sh.fragmentShader = sh.fragmentShader
-          .replace("#include <common>", `#include <common>
+    // the algorithms whose eye is on, and whether a play button is hovered (see shownLit)
+    const algsShown = new Set();
+    let algHovered = false;
+    // (the ink, in GLSL: inkOver(t) darkens or lightens diffuseColor with texture t at this
+    // pixel. tile-view.mjs draws the same patterns in 2D for the tile puzzles' flat view.)
+    const INK_GLSL = `
 uniform float uPeriod, uTextures;
-varying float vTex;
 float cover(float d, float hw, float w) { return 1.0 - smoothstep(hw - 0.5 * w, hw + 0.5 * w, d); }
-float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5), hw, w); }`)
-          .replace("#include <color_fragment>", `#include <color_fragment>
-{
-  int t = uTextures > 0.5 ? int(vTex + 0.5) : 0;
+float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5), hw, w); }
+vec3 inkOver(vec3 color, int t) {
+  if (uTextures < 0.5) return color;
   vec2 p = gl_FragCoord.xy / uPeriod;
   float w = 1.0 / uPeriod, a = 0.0;
   if (t == 1) a = line(p.y, 0.16, w);
@@ -886,13 +894,26 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     vec2 g = abs(dot(ga, ga) < dot(gb, gb) ? ga : gb);
     a = cover(0.7 - max(g.x, dot(g, vec2(0.5, 0.8660254))), 0.07, w);
   }
-  float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-  diffuseColor.rgb = lum > 0.12 ? mix(diffuseColor.rgb, vec3(0.0), 0.34 * a) : mix(diffuseColor.rgb, vec3(1.0), 0.24 * a);
-}`);
+  float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+  return lum > 0.12 ? mix(color, vec3(0.0), 0.34 * a) : mix(color, vec3(1.0), 0.24 * a);
+}`;
+    function addTextures(mat) {
+      mat.onBeforeCompile = (sh) => {
+        sh.uniforms.uPeriod = texturePeriod;
+        sh.uniforms.uTextures = texturesOn;
+        sh.vertexShader = sh.vertexShader
+          .replace("#include <common>", "#include <common>\nattribute float tex;\nvarying float vTex;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTex = tex;");
+        sh.fragmentShader = sh.fragmentShader
+          .replace("#include <common>", `#include <common>
+varying float vTex;${INK_GLSL}`)
+          .replace("#include <color_fragment>", `#include <color_fragment>
+diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       };
     }
     addTextures(stickerMat);
     addTextures(stickerHiMat);
+    addTextures(stickerLitMat);
 
     let W = 0, H = 0, zoom = 1;
     function resize() {
@@ -913,13 +934,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let rearView = false; // (set from the link and the screen at startup: see applyURL)
     const rearDefault = () => !phone.matches; // on on a wide screen, off on a phone
     const rearCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-    const rearAllowed = () => !(P && P.kind === "planar" && viewFlat);
+    const rearAllowed = () => !(isFlat() && viewFlat);
     const rearOn = () => rearView && rearAllowed();
     // the 3D views on screen: { cam, region } each, regions in CSS px
     function views() {
       // (split, a 3D puzzle's views fit the space clear of the title, panel and bottom controls,
       // like the planar views; alone it keeps the whole screen)
-      const r = P && P.kind === "planar" ? viewRegions().surface : rearOn() ? safeRect() : { left: 0, top: 0, right: W, bottom: H - 90 };
+      const r = isFlat() ? viewRegions().surface : rearOn() ? safeRect() : { left: 0, top: 0, right: W, bottom: H - 90 };
       if (!r) return [];
       if (!rearOn()) return [{ cam: camera, region: r, clip: { left: 0, top: 0, right: W, bottom: H } }];
       // Front and back side by side, or in a space taller than it's wide (a phone's) the back
@@ -953,7 +974,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     function placeCamera() {
       nxPlaceBottom(); // (the space left for the puzzle depends on how the bottom is laid out)
-      if (rearOn()) { for (const v of views()) fitView(v.cam, v.region, P.kind === "planar" ? 1.15 : 1.3); return; }
+      if (rearOn()) { for (const v of views()) fitView(v.cam, v.region, isFlat() ? 1.15 : 1.3); return; }
       camera.quaternion.identity();
       const vHalf = (camera.fov * Math.PI) / 360;
       const region = typeof cameraRegion === "function" ? cameraRegion() : null;
@@ -1126,11 +1147,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     // lighten some pieces (a Set of piece indices), or none: hovering a turn's axis segment,
     // a kind of piece while blacking out, or an algorithm's play button
-    function lightPieces(lit) {
+    // (pulse: an algorithm's, pulsing; see litPulse)
+    function lightPieces(lit, pulse = false) {
       pieceObjs.forEach((obj, i) => {
         const on = !!lit && lit.has(i);
-        obj.children[0].material = on ? bodyHiMat : bodyMat;
-        if (obj.children[1]) obj.children[1].material = on ? stickerHiMat : stickerMat;
+        obj.children[0].material = on ? (pulse ? bodyLitMat : bodyHiMat) : bodyMat;
+        if (obj.children[1]) obj.children[1].material = on ? (pulse ? stickerLitMat : stickerHiMat) : stickerMat;
       });
     }
     // clockwise as seen looking at that end: a negative turn about the end's direction
@@ -1159,16 +1181,20 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
     }
 
-    // ---------- the two kinds of puzzle ----------
-    // A 3D puzzle (puzzle.mjs) or a planar one (planar.mjs, P.kind "planar"). Both keep their
-    // state in an Int32Array and take moves { axis, layer, q }, so everything above the model
-    // (history, algorithms, timer, scramble, reset) is shared; these pick the model's rules.
+    // ---------- the kinds of puzzle ----------
+    // A 3D puzzle (puzzle.mjs), a sliding one (planar.mjs, P.kind "planar") or a tile-turning
+    // one (tiles.mjs, P.kind "tiles"). All keep their state in an Int32Array and take moves
+    // { axis, layer, q }, so everything above the model (history, algorithms, timer, scramble,
+    // reset) is shared; these pick the model's rules. The sliding and tile-turning puzzles
+    // share a layout: a flat view and a 3D surface (isFlat).
     const isPlanar = () => !!P && P.kind === "planar";
-    const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : applyMove(P, s, m));
-    const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : inverseMove(P, m));
-    const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isSolved(P, s));
-    const freshState = () => (isPlanar() ? solvedPlanarState(P) : solvedState(P));
-    const randomScramble = () => (isPlanar() ? planarScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
+    const isTiles = () => !!P && P.kind === "tiles";
+    function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles"); } // (hoisted: the camera asks before this line runs)
+    const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : isTiles() ? applyTileMove(P, s, m) : applyMove(P, s, m));
+    const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : isTiles() ? inverseTileMove(P, m) : inverseMove(P, m));
+    const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isTiles() ? isTileSolved(P, s) : isSolved(P, s));
+    const freshState = () => (isPlanar() ? solvedPlanarState(P) : isTiles() ? solvedTileState(P) : solvedState(P));
+    const randomScramble = () => (isPlanar() ? planarScrambleMoves(P) : isTiles() ? tileScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
 
     // ---------- turning: animation queue ----------
     // anim is the layer currently turning: { axis, pieces, theta, ... }. A queued turn
@@ -1184,6 +1210,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const e = queue.shift(), q = e.move.q, fast = queue.length > 1 ? 0.45 : 1;
         anim = { axis: e.move.axis, layer: e.move.layer, move: e.move, theta: 0, from: 0, to: q, t: 0,
                  dur: e.dur ?? Math.min(420, 110 + 55 * Math.abs(q)) * fast };
+        return;
+      }
+      if (isTiles()) {
+        // a tile's circle: theta in radians, clockwise, from 0 to q steps the short way round
+        const e = queue.shift(), qs = signedTurn(P, e.move.q), fast = queue.length > 1 ? 0.45 : 1;
+        anim = { axis: e.move.axis, layer: 0, move: e.move, theta: 0, from: 0, to: qs * P.step, t: 0,
+                 dur: e.dur ?? (130 + 90 * Math.abs(qs)) * fast, pieces: piecesInCircle(P, state, e.move.axis) };
         return;
       }
       const e = queue.shift(), ax = P.axes[e.move.axis];
@@ -1249,6 +1282,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // the status: the move count, solved, or a hint while there are no moves yet
     let statusText = "";
     function renderTape() {
+      if (algsShown.size && !algHovered) showAffected(shownLit()); // (the shown algorithms' pieces, from where the puzzle is now)
       const idle = !anim && !queue.length;
       updateReferenceTarget();
       const solved = idle && (scrambled || history.cursor > 0) && solvedAny(state);
@@ -1257,8 +1291,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       statusText = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
-        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : "scrambled · drag a sticker to turn")
-        : isPlanar() ? "drag a row or column to slide it" : "drag a sticker to turn · drag outside to rotate";
+        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : isTiles() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
+        : isPlanar() ? "drag a row or column to slide it"
+        : isTiles() ? "drag a circle · tap a tile's middle"
+        : "drag a sticker to turn · drag outside to rotate";
       nxRenderTape(solved);
     }
 
@@ -1662,8 +1698,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 
-    // the menu: the 3D presets, then the planar ones
-    const MENU = [...PRESETS, ...PLANAR_PRESETS];
+    // the menu: the 3D presets, then the sliding ones, then the tile-turning ones
+    const MENU = [...PRESETS, ...PLANAR_PRESETS, ...TILE_PRESETS];
     let presetIdx = 0, size = MENU[0].size;
     // a family's own numbers (a cuboid's lengths, a prism's sides), over the preset's defaults
     let paramVals = {};
@@ -1714,8 +1750,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // resetView: point the camera at the new solid's corner (on switching puzzles, not sizes)
     let puzzleName = ""; // the full title, numbers and all ("3×3×3 cube"): the test hook reports it
     function load(resetView = true) {
-      const spec = currentSpec();
-      const next = spec.rule === "planar" ? buildPlanar(spec) : buildPuzzle(spec, size);
+      let spec = currentSpec();
+      if (spec.rule === "tiles") { // (too few tiles for a circle to fit: the nearest size that fits)
+        const fit = snapTiles(spec);
+        if (fit.a !== spec.a) { paramVals.a = fit.a; spec = currentSpec(); renderParams(); }
+      }
+      const next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : buildPuzzle(spec, size);
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
@@ -1723,16 +1763,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       anim = null; queue = []; scrambled = false; scrambledState = null;
       history.reset(); renderAlgorithms(); // algorithms belong to this puzzle
       timer.clear(); renderTimer();
-      // a planar puzzle draws on its own 2D canvas; the 3D scene waits, hidden
-      $("c").hidden = isPlanar() && !view3D;
-      $("plane").hidden = !isPlanar() || !viewFlat;
-      $("planarControls").hidden = !isPlanar();
-      $("planarViews").hidden = !isPlanar();
-      document.body.classList.toggle("nx-planar", isPlanar()); // (the view options)
-      $("refPlane").hidden = !isPlanar();
-      if (puzzleGroup) puzzleGroup.visible = !isPlanar();
-      surfaceGroup.visible = isPlanar();
-      if (isPlanar()) {
+      // a sliding or tile-turning puzzle draws flat on its own 2D canvas, and the 3D scene
+      // shows just its surface
+      $("c").hidden = isFlat() && !view3D;
+      $("plane").hidden = !isFlat() || !viewFlat;
+      $("planarControls").hidden = !isPlanar(); // (labels, a picture: the sliding grids')
+      $("planarViews").hidden = !isFlat();
+      document.body.classList.toggle("nx-planar", isFlat()); // (the view options)
+      $("refPlane").hidden = !isFlat();
+      if (puzzleGroup) puzzleGroup.visible = !isFlat();
+      surfaceGroup.visible = isFlat();
+      tileHover = null; tdrag = null; tilePointer = null;
+      if (isFlat()) {
         edgeHints = null;
         buildSurface();
         if (resetView) root.quaternion.copy(surfaceView());
@@ -1741,8 +1783,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       planeBox = "";
       placeCamera();
       $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
-      $("textures").hidden = isPlanar(); // planar cells always carry their column's texture
-      if (!isPlanar()) {
+      $("textures").hidden = isPlanar(); // (planar cells' textures: the view menu's look options)
+      if (!isFlat()) {
         buildMeshes();
         if (resetView) root.quaternion.copy(startView());
         refG = 0;
@@ -1760,8 +1802,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (!isCustom()) setPainting(false);
       if (isCustom()) showStats();
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
-      if (hoverType !== null && !isPlanar()) setHover(hoverType); // meshes were rebuilt
-      algLit = null; // (an algorithm's hover highlight belonged to the old puzzle)
+      if (hoverType !== null && !isFlat()) setHover(hoverType); // meshes were rebuilt
+      algLit = null; algsShown.clear(); // (an algorithm's highlight belonged to the old puzzle)
       renderRearButton();
       renderTape();
       writeURL();
@@ -1874,15 +1916,33 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     function affectedBy(moves) {
       const after = state.slice();
       for (const m of moves) applyAny(after, m);
-      const lit = new Set();
-      for (let i = 0; i < after.length; i++) if (after[i] !== state[i]) lit.add(i);
+      const lit = new Set(), per = isTiles() ? 3 : 1; // (a tile puzzle's state: three numbers a piece)
+      for (let i = 0; i < after.length; i++) if (after[i] !== state[i]) lit.add(Math.floor(i / per));
       return lit;
     }
-    // shown while an algorithm's play or reverse button is hovered (null: none)
+    // shown while an algorithm's play or reverse button is hovered, or while its eye is on
+    // (null: none)
     let algLit = null;
+    // The algorithms whose eye is on (by name): lit, the pieces every one of them would move
+    // if played now. Two halves of a commutator show their overlap, the few pieces it cycles.
+    // Kept up to date as the puzzle moves (see renderTape); a hovered play button shows its
+    // own instead for a moment.
+    // (algsShown and algHovered are declared near the top: the first load draws the tape)
+    function shownLit() {
+      let lit = null;
+      for (const alg of history.algorithms) {
+        if (!algsShown.has(alg.name)) continue;
+        const mine = affectedBy(alg.moves);
+        lit = lit ? new Set([...lit].filter((i) => mine.has(i))) : mine;
+      }
+      return lit;
+    }
+    // an eye, open (shown) or crossed out (hidden), drawn in the text's color
+    const EYE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    const EYE_OFF = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>`;
     function showAffected(lit) {
       algLit = lit;
-      if (!isPlanar()) lightPieces(lit); // (a planar puzzle draws it each frame: see drawPlanar)
+      if (!isFlat()) lightPieces(lit, true); // (a flat puzzle draws it each frame: see drawPlanar)
     }
     function playAlgorithm(name, reverse) {
       if (anim && anim.live) return;
@@ -1902,7 +1962,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
 
     function renderTexturesButton() {
-      showTextures = textureChoice ?? !!P.texturesByDefault;
+      // (tile-turning puzzles: on from 13 tiles, like 3D puzzles from 13 faces)
+      showTextures = textureChoice ?? (isTiles() ? P.tiles.length >= TEXTURE_MIN_FACES : !!P.texturesByDefault);
       texturesOn.value = showTextures ? 1 : 0;
       $("textures").classList.toggle("is-active", showTextures);
       $("textures").setAttribute("aria-pressed", String(showTextures));
@@ -2008,12 +2069,29 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
         if (drag && drag.mode === "turn") releaseTurn();
+        if (drag && drag.mode === "tpress") releaseTileDrag();
         const [a, b] = [...pointers.values()];
         drag = { mode: "pinch", dist: Math.hypot(a.x - b.x, a.y - b.y), zoom };
         return;
       }
       if (pointers.size > 2) return;
       aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
+      if (isTiles()) {
+        // the 3D torus: press a circle to drag it round, click a tile's middle to turn it;
+        // anywhere else (or shift) turns the view
+        const hit = !e.shiftKey && (e.button === 0 || e.button === 2) ? surfaceHit(e.clientX, e.clientY) : null;
+        const p = hit && tilePoint(hit), c = p && e.button === 0 ? circleNear(P, p, 0.07) : null, mid = p && !c ? tileNear(P, p) : null;
+        if (c) {
+          flush();
+          drag = { mode: "tpress", x: e.clientX, y: e.clientY };
+          startTileDrag(c, p);
+          canvas.style.cursor = "grabbing";
+          tilePointer = { at: p, real: false, cursor: "grabbing" };
+        }
+        else if (mid !== null) drag = { mode: "tclick", x: e.clientX, y: e.clientY, axis: mid, q: e.button === 0 ? 1 : -1 };
+        else drag = { mode: "orbit", x: e.clientX, y: e.clientY };
+        return;
+      }
       if (isPlanar()) {
         // the 3D surface: press a cell to slide its line (or click near an edge); anywhere else turns the view
         const hit = e.button === 0 && !e.shiftKey ? surfaceHit(e.clientX, e.clientY) : null;
@@ -2045,6 +2123,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (!pointers.has(e.pointerId)) {
         if (!pointers.size) aimAt(e.clientX, e.clientY); // (hovering; never mid-drag)
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
+        if (isTiles()) { hoverTiles3D(e.clientX, e.clientY); return; }
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
           const hit = pick(e.clientX, e.clientY);
@@ -2064,8 +2143,14 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         placeCamera();
         return;
       }
-      if ((drag.mode === "paint" || drag.mode === "segment") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
+      if ((drag.mode === "paint" || drag.mode === "segment" || drag.mode === "tclick") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
         drag = { mode: "orbit", x: drag.x, y: drag.y }; // it's a drag after all: rotate the view
+      if (drag.mode === "tpress") {
+        // the circle follows the pointer around its center, on the surface (off it: stays put)
+        const hit = surfaceHit(e.clientX, e.clientY);
+        if (hit) { tilePointer = { at: tilePoint(hit), real: false, cursor: "grabbing" }; dragTileTo(tilePointer.at, true); }
+        return;
+      }
       if (drag.mode === "orbit") {
         orbitBy(e.clientX - drag.x, e.clientY - drag.y);
         drag.x = e.clientX; drag.y = e.clientY;
@@ -2117,13 +2202,24 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (drag && drag.mode === "turn") releaseTurn();
       if (drag && drag.mode === "sslide" && anim && anim.live) { releaseSlide(); canvas.style.cursor = ""; }
       if (drag && drag.mode === "spress") edgeClick(drag);
+      if (drag && drag.mode === "tpress") {
+        releaseTileDrag();
+        canvas.style.cursor = "grab";
+        if (tilePointer) tilePointer.cursor = "grab";
+      }
+      if (drag && drag.mode === "tclick") turnTile({ axis: drag.axis, layer: 0, q: drag.q });
       if (drag && drag.mode === "paint") toggleType(drag.piece);
       if (drag && drag.mode === "segment") turnSegment(drag.seg, drag.clockwise);
       if (!pointers.size || (drag && drag.mode === "pinch")) drag = null;
     }
     canvas.addEventListener("pointerup", endPointer);
     canvas.addEventListener("pointercancel", endPointer);
-    canvas.addEventListener("pointerleave", () => { if (hoverType !== null) setHover(null); setHoverSeg(null); if (isPlanar()) hoverSurface(null); });
+    canvas.addEventListener("pointerleave", () => {
+      if (hoverType !== null) setHover(null);
+      setHoverSeg(null);
+      if (isPlanar()) hoverSurface(null);
+      if (isTiles() && !tdrag) { tileHover = null; tilePointer = null; canvas.style.cursor = ""; }
+    });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
@@ -2136,7 +2232,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // free and draws it. Drag a cell along its row or column to slide that line; it follows
     // the pointer, wrapping across the glued edges, and snaps to whole cells on release (one
     // move). The arrows at each line's ends slide it one cell; the axes button hides them.
-    const plane = $("plane"), planeView = new PlanarView(plane);
+    const plane = $("plane"), planeView = new PlanarView(plane), tileView = new TileView(plane);
     // look: planarPicture stays loaded after switching back to colors, so picture needs no re-upload
     let showLabels = true, reflectLabels = true, planarTextures = false, planarPicture = null, usePicture = false, hoverArrow = null, pdrag = null;
     function safeRect() {
@@ -2167,10 +2263,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (w >= h && !phone.matches) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
       // (stacked: the grid gets the height its width calls for, up to 65%; the surface, wider
       // than it is tall, the rest)
-      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, planeView.heightFor(P, w)));
+      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, (isTiles() ? tileView : planeView).heightFor(P, w)));
       return { flat: { ...r, bottom: m }, surface: { ...r, top: m } };
     }
-    function cameraRegion() { return isPlanar() && view3D ? viewRegions().surface : null; }
+    function cameraRegion() { return isFlat() && view3D ? viewRegions().surface : null; }
     function placePlane(r) {
       const key = [r.left, r.top, r.right, r.bottom].map(Math.round).join();
       if (key === planeBox) return;
@@ -2179,11 +2275,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       Object.assign(plane.style, { left: r.left + "px", top: r.top + "px", width: w + "px", height: h + "px" });
       plane.width = Math.max(1, Math.round(w * dpr)); plane.height = Math.max(1, Math.round(h * dpr));
       planeView.origin = { x: r.left, y: r.top };
+      tileView.origin = { x: r.left, y: r.top };
     }
     function applyViews() {
       $("viewFlat").checked = viewFlat;
       $("view3D").checked = view3D;
-      if (isPlanar()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
+      if (isFlat()) { plane.hidden = !viewFlat; canvas.hidden = !view3D; }
       planeBox = "";
       placeCamera();
       renderRearButton();
@@ -2234,13 +2331,60 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           diffuseColor *= sampledDiffuseColor;
         #endif`);
     };
+    // A tile-turning puzzle's torus: the same, with its own shader. While a circle turns, the
+    // texture stays as it was and a point inside the circle shows what was there turned back by
+    // theta. Flat coordinates (s, t) span the patch's steps A and B (plane coordinates), and
+    // the texture repeats, so the circle can be any copy of it.
+    // Textures go on the same way as on the 3D puzzles, fixed to the screen (INK_GLSL): a
+    // second picture, drawn alongside, says which tile's texture each spot shows (its red:
+    // 32 per texture index), read at the same turned-back spot as the colors.
+    const tileTexView = new TileView(texCanvas), idCanvas = document.createElement("canvas"), tileIdView = new TileView(idCanvas);
+    const turnUniforms = {
+      uTurn: { value: 0 }, uC: { value: new THREE.Vector2() }, uTheta: { value: 0 }, uR: { value: 1 },
+      uA: { value: new THREE.Vector2() }, uB: { value: new THREE.Vector2() }, uS: { value: new THREE.Vector2() }, uT: { value: new THREE.Vector2() },
+      uIds: { value: null },
+    };
+    const tileMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
+    tileMat.onBeforeCompile = (shader) => tileShader(shader, turnUniforms);
+    let idTexture = null;
+    function tileShader(shader, uniforms) {
+      Object.assign(shader.uniforms, uniforms, { uPeriod: texturePeriod, uTextures: texturesOn });
+      shader.fragmentShader = shader.fragmentShader
+        .replace("void main() {", `uniform int uTurn; uniform vec2 uC, uA, uB, uS, uT; uniform float uTheta, uR; uniform sampler2D uIds;${INK_GLSL}
+        void main() {`)
+        .replace("#include <map_fragment>", `
+        #ifdef USE_MAP
+          vec2 uv = vMapUv;
+          if (uTurn == 1) {
+            // from the circle's center to here, in plane coordinates, the nearest copy
+            vec2 st = vec2(uv.x, 1.0 - uv.y), d = st - uC;
+            d -= floor(d + 0.5);
+            vec2 best = vec2(1e9);
+            for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) {
+              vec2 p = (d.x + float(i)) * uA + (d.y + float(j)) * uB;
+              if (dot(p, p) < dot(best, best)) best = p;
+            }
+            if (length(best) < uR) {
+              float c = cos(uTheta), s = sin(uTheta);
+              vec2 back = vec2(c * best.x + s * best.y, -s * best.x + c * best.y); // (turned back by theta)
+              vec2 st2 = uC + vec2(dot(uS, back), dot(uT, back));
+              uv = vec2(st2.x, 1.0 - st2.y);
+            }
+          }
+          // (gradients from the unmoved coordinates: the jump at the circle's edge would pick a blurry mip)
+          diffuseColor *= textureGrad(map, uv, dFdx(vMapUv), dFdy(vMapUv));
+          // (not on the black lines between pieces: their edges blend into the next texture's number)
+          if (dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)) > 0.03) diffuseColor.rgb = inkOver(diffuseColor.rgb, int(texture2D(uIds, uv).r * 255.0 / 32.0));
+        #endif`);
+    }
     // the solved grid, for the corner card: its own texture, redrawn only when the look changes
     const solvedCanvas = document.createElement("canvas"), solvedView = new PlanarView(solvedCanvas);
     let solvedTexture = null, solvedKey = "";
     const solvedMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
     function buildSurface() {
       if (surfaceMesh) { surfaceGroup.remove(surfaceMesh); surfaceMesh.geometry.dispose(); }
-      const nu = Math.min(400, Math.max(120, P.W * 16)), nv = Math.min(400, Math.max(120, P.H * 16));
+      const [cols, rows] = isTiles() ? [Math.ceil(Math.sqrt(P.tiles.length) * 2), Math.ceil(Math.sqrt(P.tiles.length) * 2)] : [P.W, P.H]; // (whole numbers: the grid's steps)
+      const nu = Math.min(400, Math.max(120, cols * 16)), nv = Math.min(400, Math.max(120, rows * 16));
       const pos = new Float32Array((nu + 1) * (nv + 1) * 3), uv = new Float32Array((nu + 1) * (nv + 1) * 2), idx = [];
       for (let j = 0; j <= nv; j++)
         for (let i = 0; i <= nu; i++) {
@@ -2257,22 +2401,40 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       // the texture: square cells, up to 384 px each (the bottle's bulb stretches one cell a
       // long way), in a texture of at most 3072 px or the GPU's limit
       const maxTex = Math.min(3072, renderer.capabilities.maxTextureSize);
-      const C = Math.max(8, Math.floor(Math.min(384, maxTex / Math.max(P.W, P.H))));
-      texCanvas.width = P.W * C; texCanvas.height = P.H * C;
+      if (isTiles()) { // (a square of the torus's flat coordinates: about 320 px per tile across)
+        texCanvas.width = texCanvas.height = Math.min(maxTex, 2048, Math.ceil(320 * Math.sqrt(P.tiles.length)));
+      } else {
+        const C = Math.max(8, Math.floor(Math.min(384, maxTex / Math.max(P.W, P.H))));
+        texCanvas.width = P.W * C; texCanvas.height = P.H * C;
+      }
       solvedCanvas.width = texCanvas.width; solvedCanvas.height = texCanvas.height;
       const texture = (c) => {
         const t = new THREE.CanvasTexture(c);
         t.colorSpace = THREE.SRGBColorSpace;
         t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        if (isTiles()) t.wrapS = t.wrapT = THREE.RepeatWrapping; // (the turn shader reads across the edges)
         return t;
       };
       if (surfaceTexture) { surfaceTexture.dispose(); solvedTexture.dispose(); } // (a new size needs new textures)
       surfaceTexture = texture(texCanvas);
       solvedTexture = texture(solvedCanvas);
-      surfaceMat.map = surfaceTexture; surfaceMat.needsUpdate = true;
+      const mat = isTiles() ? tileMat : surfaceMat;
+      mat.map = surfaceTexture; mat.needsUpdate = true;
       solvedMat.map = solvedTexture; solvedMat.needsUpdate = true;
+      if (isTiles()) {
+        // the pictures of which texture shows where: exact values, so no blending between pixels
+        const ids = (c) => {
+          c.width = texCanvas.width; c.height = texCanvas.height;
+          const t = new THREE.CanvasTexture(c);
+          t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+          return t;
+        };
+        if (idTexture) idTexture.dispose();
+        idTexture = turnUniforms.uIds.value = ids(idCanvas);
+      }
       texKey = ""; solvedKey = "";
-      surfaceMesh = new THREE.Mesh(geo, surfaceMat);
+      surfaceMesh = new THREE.Mesh(geo, mat);
       surfaceGroup.add(surfaceMesh);
     }
     // a starting view per surface that shows its shape
@@ -2288,7 +2450,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // bottle or a figure 8, the projective plane as Boy's or the Roman surface), per puzzle
     // kind, kept across puzzles for the session. The first is the default.
     const shapeChoice = {};
-    const shapeId = () => shapeChoice[P.topology] || P.topology;
+    const shapeId = () => (isTiles() ? "torus" : shapeChoice[P.topology] || P.topology);
     function renderShapeChoice() {
       const shapes = isPlanar() ? SURFACE_SHAPES[P.topology] : [];
       const bar = $("surfaceShape");
@@ -2311,19 +2473,22 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }));
     }
     function renderSurface(region, slide, look) {
-      const hints = slide ? null : edgeHints; // (none while a line moves)
-      const key = state.join(",") + "|" + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
-        + "|" + (look.lit ? [...look.lit].join(".") : "")
-        + "|" + (hints ? `${hints.x},${hints.y},${hints.edge}` : "");
-      if (key !== texKey) { texKey = key; texView.drawBare(P, state, null, { ...look, edgeHints: hints }); surfaceTexture.needsUpdate = true; }
-      // the moving line, and the one its loop continues in across a mirrored seam
-      const u = slideUniforms;
-      u.uSlide.value = slide && slide.p ? 1 : 0;
-      u.uGrid.value.set(P.W, P.H);
-      u.uSeams.value.set(P.T.x ? 1 : 0, P.T.y ? 1 : 0);
-      if (slide) {
-        const partner = slide.axis === 0 ? (P.T.x ? P.H - 1 - slide.layer : slide.layer) : (P.T.y ? P.W - 1 - slide.layer : slide.layer);
-        u.uAxis.value = slide.axis; u.uP.value = slide.p; u.uLines.value.set(slide.layer, partner);
+      if (isTiles()) tileSurface(slide, look);
+      else {
+        const hints = slide ? null : edgeHints; // (none while a line moves)
+        const key = state.join(",") + "|" + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
+          + "|" + (look.lit ? [...look.lit].join(".") : "")
+          + "|" + (hints ? `${hints.x},${hints.y},${hints.edge}` : "");
+        if (key !== texKey) { texKey = key; texView.drawBare(P, state, null, { ...look, edgeHints: hints }); surfaceTexture.needsUpdate = true; }
+        // the moving line, and the one its loop continues in across a mirrored seam
+        const u = slideUniforms;
+        u.uSlide.value = slide && slide.p ? 1 : 0;
+        u.uGrid.value.set(P.W, P.H);
+        u.uSeams.value.set(P.T.x ? 1 : 0, P.T.y ? 1 : 0);
+        if (slide) {
+          const partner = slide.axis === 0 ? (P.T.x ? P.H - 1 - slide.layer : slide.layer) : (P.T.y ? P.W - 1 - slide.layer : slide.layer);
+          u.uAxis.value = slide.axis; u.uP.value = slide.p; u.uLines.value.set(slide.layer, partner);
+        }
       }
       placeCamera();
       renderer.setScissorTest(false);
@@ -2337,13 +2502,18 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
       lightFor(camera);
       renderer.setScissorTest(false);
-      renderSolvedSurface(look);
+      if (!isTiles()) renderSolvedSurface(look); // (a tile puzzle's card is always flat: see drawTiles)
     }
     // The corner card, with the 3D view on: the solved surface, turned the same way as the
     // main view, drawn into the card's square with the card's camera (like the 3D puzzles').
     function renderSolvedSurface(look) {
       const key = [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join();
-      if (key !== solvedKey) { solvedKey = key; solvedView.drawBare(P, solvedPlanarState(P), null, look); solvedTexture.needsUpdate = true; }
+      if (key !== solvedKey) {
+        solvedKey = key;
+        solvedView.drawBare(P, solvedPlanarState(P), null, look);
+        solvedTexture.needsUpdate = true;
+      }
+      const main = surfaceMesh.material;
       surfaceMesh.material = solvedMat;
       renderer.setScissorTest(true);
       for (const { cam, x, y, size } of refSquares()) {
@@ -2355,7 +2525,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       lightFor(camera);
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, W, H);
-      surfaceMesh.material = surfaceMat;
+      surfaceMesh.material = main;
     }
     // the grid cell under a point of the 3D view, and where in it: { s, t, cell } (flat
     // coordinates in [0, 1]), or null
@@ -2367,6 +2537,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       const h = raycaster.intersectObject(surfaceMesh, false)[0];
       if (!h || !h.uv) return null;
       const s = h.uv.x, t = 1 - h.uv.y;
+      if (isTiles()) return { s, t };
       return { s, t, cell: { x: Math.min(P.W - 1, Math.floor(s * P.W)), y: Math.min(P.H - 1, Math.floor(t * P.H)) } };
     }
     // screen position (CSS px) of the surface at flat coordinates (s, t)
@@ -2423,13 +2594,116 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       renderAlgorithms();
     }
 
+    // ---------- tile-turning puzzles: drawing and input ----------
+    // TileView (tile-view.mjs) draws the torus flat; the 3D view wraps the same drawing around
+    // a torus. Press a circle's line and drag: the circle turns under the pointer, about its
+    // tile's middle, and snaps to whole steps on release (one move). A click on a tile's middle
+    // turns it a step clockwise (right click: counterclockwise). Hovering a circle lights it.
+    let tileHover = null; // the tile whose circle is lit (under the pointer)
+    // the spot under the pointer, for its copies in the flat view: { at (plane), real (the
+    // pointer's on the flat view itself, so that copy needs no arrow) }, or null
+    let tilePointer = null;
+    let tdrag = null; // the circle being dragged: { axis, center (plane, the copy pressed), at (the pointer), last (its angle), theta, id }
+    const refTileView = new TileView($("refPlane"));
+    // a spot on the 3D torus (flat coordinates s, t) in plane coordinates
+    const tilePoint = ({ s, t }) => [s * P.Ap[0] + t * P.Bp[0], s * P.Ap[1] + t * P.Bp[1]];
+    function startTileDrag(c, p) {
+      tdrag = { axis: c.axis, center: c.center, at: p, last: Math.atan2(p[1] - c.center[1], p[0] - c.center[0]), theta: 0 };
+      anim = { live: true, axis: c.axis, layer: 0, move: null, theta: 0, pieces: piecesInCircle(P, state, c.axis) };
+      tileHover = c.axis;
+    }
+    // the pointer at plane point p: the angle it's turned through around the pressed circle's
+    // middle since the press, counted continuously (more than a full turn keeps counting).
+    // Always that copy of the circle, however near another copy the pointer gets. On the 3D
+    // torus a spot's plane point jumps by a step as it crosses a seam, so there (wrap) it's
+    // followed as the copy nearest where the pointer just was.
+    function dragTileTo(p, wrap = false) {
+      if (!tdrag || !anim || !anim.live) return;
+      const q = wrap ? nearestCopy(P, p, tdrag.at).q : p, dx = q[0] - tdrag.center[0], dy = q[1] - tdrag.center[1];
+      tdrag.at = q;
+      if (Math.hypot(dx, dy) < 0.04) return; // (right at the middle the angle jumps around)
+      const a = Math.atan2(dy, dx);
+      tdrag.theta += ((a - tdrag.last + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+      tdrag.last = a;
+      anim.theta = tdrag.theta;
+    }
+    function releaseTileDrag() {
+      if (!tdrag) return;
+      if (anim && anim.live) {
+        const qs = Math.round(anim.theta / P.step), move = { axis: tdrag.axis, layer: 0, q: signedTurn(P, qs) };
+        Object.assign(anim, { live: false, move, from: anim.theta, to: qs * P.step, t: 0,
+                              dur: 90 + 160 * Math.min(1, Math.abs(qs * P.step - anim.theta) / P.step) });
+        if (move.q) record([move]);
+      }
+      tdrag = null;
+      renderTape();
+      renderAlgorithms();
+    }
+    // a turn made at once (a click on a tile's middle): one move, animated
+    function turnTile(move) {
+      flush();
+      record([move]);
+      play(move);
+      renderTape();
+      renderAlgorithms();
+    }
+    function hoverTiles3D(x, y) {
+      const hit = surfaceHit(x, y), p = hit && tilePoint(hit), c = p && circleNear(P, p, 0.07);
+      tileHover = c ? c.axis : null;
+      canvas.style.cursor = c ? "grab" : p && tileNear(P, p) !== null ? "pointer" : "";
+      tilePointer = p ? { at: p, real: false, cursor: canvas.style.cursor } : null; // (its copies show the same)
+    }
+    function drawTiles() {
+      const reg = viewRegions();
+      plane.hidden = !reg.flat;
+      canvas.hidden = !reg.surface;
+      const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta } : null;
+      const look = { hover: tdrag ? tdrag.axis : tileHover, lit: algLit, litAlpha: litPulse(), pointer: tilePointer, textures: showTextures };
+      if (reg.flat) {
+        placePlane(reg.flat);
+        tileView.layout(P, reg.flat);
+        tileView.draw(state, turn, look);
+      }
+      if (reg.surface && surfaceMesh) renderSurface(reg.surface, turn, look);
+      placeSplit();
+      // the corner card: the solved puzzle, flat (whichever views are on)
+      const card = $("refPlane"), dpr = pixelRatio();
+      card.hidden = false;
+      if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
+      refTileView.drawSolvedCard(P, look);
+    }
+    // the 3D torus's texture (redrawn when the state, the lit circle or the lit pieces change),
+    // and the shader's turn
+    function tileSurface(turn, look) {
+      // (textures: the shader's, from the picture of which tile is where, redrawn with the state)
+      const key = state.join(",") + "|" + look.hover + "|" + (look.lit ? [...look.lit].join(".") : "");
+      if (key !== texKey) {
+        const moved = texKey.split("|")[0] !== state.join(",");
+        texKey = key;
+        tileTexView.drawBare(P, state, { ...look, textures: false });
+        surfaceTexture.needsUpdate = true;
+        if (moved) { tileIdView.drawBare(P, state, look, true); idTexture.needsUpdate = true; }
+      }
+      const u = turnUniforms, { Ap, Bp } = P, det = Ap[0] * Bp[1] - Ap[1] * Bp[0];
+      u.uTurn.value = turn && turn.theta ? 1 : 0;
+      u.uR.value = P.r;
+      u.uA.value.set(...Ap); u.uB.value.set(...Bp);
+      u.uS.value.set(Bp[1] / det, -Bp[0] / det); u.uT.value.set(-Ap[1] / det, Ap[0] / det); // (plane → flat coordinates)
+      if (turn) {
+        const c = P.tiles[anim.axis].center;
+        u.uC.value.set((c[0] * Bp[1] - c[1] * Bp[0]) / det, (Ap[0] * c[1] - Ap[1] * c[0]) / det);
+        u.uTheta.value = turn.theta;
+      }
+    }
+
     const refView = new PlanarView($("refPlane"));
     function drawPlanar() {
+      if (isTiles()) { drawTiles(); return; }
       const reg = viewRegions();
       plane.hidden = !reg.flat;
       canvas.hidden = !reg.surface;
       const slide = anim ? { axis: anim.axis, layer: anim.layer, p: anim.theta } : null;
-      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: planeView.showArrows, hover: hoverArrow, lit: algLit };
+      const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: planeView.showArrows, hover: hoverArrow, lit: algLit, litAlpha: litPulse() };
       if (reg.flat) {
         placePlane(reg.flat);
         planeView.layout(P, reg.flat);
@@ -2447,6 +2721,22 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       }
     }
     plane.addEventListener("pointerdown", (e) => {
+      if (isTiles()) {
+        if (tdrag) return;
+        const c = e.button === 0 ? tileView.circleAt(e.clientX, e.clientY) : null;
+        if (c) {
+          try { plane.setPointerCapture(e.pointerId); } catch {}
+          flush();
+          startTileDrag(c, tileView.toPlane(e.clientX, e.clientY));
+          tdrag.id = e.pointerId;
+          plane.style.cursor = "grabbing";
+          tilePointer = { at: tileView.toPlane(e.clientX, e.clientY), real: true, cursor: "grabbing" }; // (its copies close their hands too)
+          return;
+        }
+        const mid = tileView.tileAt(e.clientX, e.clientY);
+        if (mid !== null && (e.button === 0 || e.button === 2)) turnTile({ axis: mid, layer: 0, q: e.button === 0 ? 1 : -1 });
+        return;
+      }
       if (!isPlanar() || pdrag) return;
       const a = planeView.arrowAt(e.clientX, e.clientY);
       if (a) { slideLine({ axis: a.axis, layer: a.layer, q: a.q }); return; }
@@ -2456,6 +2746,20 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       pdrag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, cell, axis: null };
     });
     plane.addEventListener("pointermove", (e) => {
+      if (isTiles()) {
+        const at = tileView.toPlane(e.clientX, e.clientY);
+        if (tdrag) {
+          tilePointer = { at, real: true, cursor: "grabbing" };
+          if (e.pointerId === tdrag.id) dragTileTo(at);
+          return;
+        }
+        const c = tileView.circleAt(e.clientX, e.clientY);
+        tileHover = c ? c.axis : null;
+        plane.style.cursor = c ? "grab" : tileView.tileAt(e.clientX, e.clientY) !== null ? "pointer" : "";
+        // its copies show the same (none while it's off the tiles, in the space around them)
+        tilePointer = tileView.shows(e.clientX, e.clientY) ? { at, real: true, cursor: plane.style.cursor } : null;
+        return;
+      }
       if (!isPlanar()) return;
       if (!pdrag) {
         hoverArrow = planeView.arrowAt(e.clientX, e.clientY);
@@ -2474,6 +2778,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       if (anim && anim.live) anim.theta = (pdrag.axis === 0 ? dx : dy) / planeView.cell;
     });
     function endPlanarDrag(e) {
+      if (tdrag && e.pointerId === tdrag.id) {
+        // (let go: an open hand again, over the circle it's still on)
+        releaseTileDrag();
+        plane.style.cursor = "grab";
+        if (tilePointer) tilePointer.cursor = "grab";
+        return;
+      }
       if (!pdrag || e.pointerId !== pdrag.id) return;
       if (anim && anim.live) releaseSlide();
       pdrag = null;
@@ -2481,7 +2792,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     }
     plane.addEventListener("pointerup", endPlanarDrag);
     plane.addEventListener("pointercancel", endPlanarDrag);
-    plane.addEventListener("pointerleave", () => { hoverArrow = null; });
+    plane.addEventListener("pointerleave", () => { hoverArrow = null; if (!tdrag) { tileHover = null; tilePointer = null; } });
     plane.addEventListener("contextmenu", (e) => e.preventDefault());
     // the look controls: which fill is on, and which checkboxes apply right now
     function renderLook() {
@@ -2528,8 +2839,13 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         anim.theta = anim.from + (anim.to - anim.from) * ease(u);
         if (u >= 1) finishAnim();
       }
-      if (isPlanar()) { drawPlanar(); requestAnimationFrame(frame); return; }
+      if (isFlat()) { drawPlanar(); requestAnimationFrame(frame); return; }
       updatePieces();
+      if (algLit) { // (the pulse: from half the hover highlight's glow to two and a half times it)
+        const k = 0.5 + (2 * (litPulse() - 0.15)) / 0.45;
+        stickerLitMat.emissive.copy(stickerHiMat.emissive).multiplyScalar(k);
+        bodyLitMat.emissive.copy(bodyHiMat.emissive).multiplyScalar(k);
+      }
       renderer.setViewport(0, 0, W, H);
       renderer.setScissorTest(false);
       if (rearOn()) {
@@ -2573,7 +2889,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     let refG = 0;
     const refQ = new THREE.Quaternion(), refTarget = new THREE.Quaternion(), refM = new THREE.Matrix4();
     function updateReferenceTarget(snap = false) {
-      if (isPlanar()) return; // the planar view draws its own solved grid
+      if (isFlat()) return; // the flat views draw their own solved puzzle
       refG = closestOrientation(P, state, refG);
       const m = P.group.mats[refG];
       refM.set(m[0], m[1], m[2], 0, m[3], m[4], m[5], 0, m[6], m[7], m[8], 0, 0, 0, 0, 1);
@@ -2628,6 +2944,10 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         if (!view3D) q.set("3d", "off");
         if (!showLabels) q.set("labels", "off");
         if (!reflectLabels) q.set("mirrored-labels", "off");
+      } else if (isTiles()) {
+        if (!viewFlat) q.set("flat", "off");
+        if (!view3D) q.set("3d", "off");
+        if (textureChoice !== null && textureChoice !== P.tiles.length >= TEXTURE_MIN_FACES) q.set("textures", textureChoice ? "on" : "off");
       } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
@@ -3351,7 +3671,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // A turn as a mark: a dot in the colors of the end you'd grab it by (one face: one color;
     // a corner: a pie of its faces' colors; an edge: two halves), an inner layer's depth
     // before it, and ′ or 2 after. No face letters: they stop meaning anything once the
-    // puzzle is turned in your hands. Planar slides: the line and an arrow.
+    // puzzle is turned in your hands. Planar slides: the line and an arrow. Tile turns: the
+    // tile's color, and how many steps (′: counterclockwise).
     function nxMark(m, small = false) {
       const el = document.createElement("span");
       el.className = "nx-mark" + (small ? " is-small" : "");
@@ -3359,6 +3680,12 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const n = Math.abs(m.q), arrow = m.axis === 0 ? (m.q > 0 ? "→" : "←") : (m.q > 0 ? "↓" : "↑");
         el.classList.add("is-slide");
         el.textContent = (m.axis === 0 ? String(m.layer + 1) : String.fromCharCode(65 + m.layer)) + arrow + (n > 1 ? n : "");
+        return el;
+      }
+      if (isTiles()) {
+        const q = signedTurn(P, m.q), n = Math.abs(q), suffix = (n > 1 ? String(n) : "") + (q < 0 ? "′" : "");
+        el.append(Object.assign(document.createElement("i"), { style: `background: ${tileColor(P, m.axis)}` }));
+        if (suffix) el.append(Object.assign(document.createElement("sup"), { textContent: suffix }));
         return el;
       }
       const l = moveLabel(P, m), k = l.colors.length;
@@ -3426,7 +3753,8 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         const row = document.createElement("div");
         row.className = "nx-alg";
         row.dataset.name = alg.name;
-        row.innerHTML = `<input class="nx-name" spellcheck="false" maxlength="40" title="rename it" aria-label="algorithm name" /><span class="nx-len"></span><button data-act="play" title="play it">▶</button><button data-act="reverse" title="play it reversed">◀</button><button data-act="delete" title="delete it">✕</button>`;
+        const shown = algsShown.has(alg.name);
+        row.innerHTML = `<button data-act="show" class="nx-eye" aria-pressed="${shown}" title="${shown ? "stop showing" : "show"} the pieces it would move (with more on: the pieces they'd all move)">${shown ? EYE : EYE_OFF}</button><input class="nx-name" spellcheck="false" maxlength="40" title="rename it" aria-label="algorithm name" /><span class="nx-len"></span><button data-act="play" title="play it">▶</button><button data-act="reverse" title="play it reversed">◀</button><button data-act="delete" title="delete it">✕</button>`;
         // Enter or clicking away keeps the new name; Escape, a blank name or one that's taken
         // puts the old one back
         const name = row.querySelector(".nx-name"), fit = () => { name.style.width = name.value.length + 0.5 + "ch"; };
@@ -3437,24 +3765,33 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           else if (e.key === "Escape") { name.value = alg.name; name.blur(); }
         };
         name.onblur = () => {
-          if (name.value !== alg.name && history.renameAlgorithm(alg.name, name.value)) { renderTape(); renderAlgorithms(); }
-          else { name.value = alg.name; fit(); }
+          const old = alg.name;
+          if (name.value !== old && history.renameAlgorithm(old, name.value)) {
+            if (algsShown.delete(old)) algsShown.add(alg.name);
+            renderTape(); renderAlgorithms();
+          } else { name.value = alg.name; fit(); }
         };
         row.querySelector(".nx-len").textContent = count(alg.moves.length);
-        const [fwd, back, del] = row.querySelectorAll("button");
+        const [eye, fwd, back, del] = row.querySelectorAll("button");
+        eye.onclick = () => {
+          if (!algsShown.delete(alg.name)) algsShown.add(alg.name);
+          showAffected(shownLit());
+          renderAlgorithms();
+        };
         for (const [btn, rev] of [[fwd, false], [back, true]]) {
           const moves = () => (rev ? history.inverseOf(alg.moves) : alg.moves);
-          btn.onclick = () => { showAffected(null); nx.preview.hidden = true; playAlgorithm(alg.name, rev); };
+          btn.onclick = () => { algHovered = false; showAffected(shownLit()); nx.preview.hidden = true; playAlgorithm(alg.name, rev); };
           btn.onpointerenter = () => {
+            algHovered = true;
             showAffected(affectedBy(moves()));
             nx.preview.replaceChildren(Object.assign(document.createElement("b"), { textContent: alg.name + (rev ? "′" : "") }), nxStrip(moves(), false));
             const r = row.getBoundingClientRect();
             Object.assign(nx.preview.style, { left: r.right + 8 + "px", top: r.top + r.height / 2 + "px" });
             nx.preview.hidden = false;
           };
-          btn.onpointerleave = () => { showAffected(null); nx.preview.hidden = true; };
+          btn.onpointerleave = () => { algHovered = false; showAffected(shownLit()); nx.preview.hidden = true; };
         }
-        del.onclick = () => { history.deleteAlgorithm(alg.name); renderAlgorithms(); };
+        del.onclick = () => { history.deleteAlgorithm(alg.name); algsShown.delete(alg.name); showAffected(shownLit()); renderAlgorithms(); };
         nx.algs.append(row);
       }
       const rec = document.createElement("button");
@@ -3469,6 +3806,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
     // the shelf: every puzzle as a picture, by family; clicking one loads it
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
+      if (spec.rule === "tiles") return "tile turning";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
       if (spec.truncate) return "other solids"; // (a truncated solid isn't its base's shape: the soccer ball)
       return { cube: "cubes", tetrahedron: "tetrahedra", octahedron: "octahedra", dodecahedron: "dodecahedra", icosahedron: "icosahedra" }[spec.solid] || "other solids";
@@ -3485,14 +3823,23 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       nxThumbRenderer.setClearColor(0x000000, 0);
       const sc = vizScene(), group = new THREE.Group(), trash = [];
       sc.root.add(group);
+      if (spec.rule === "tiles") {
+        // flat, as the flat view draws it: the patch outlined, its copies around it
+        const Q = buildTiles(snapTiles(spec)), v = new TileView(cv);
+        v.layout(Q, { left: 6, top: 6, right: S - 6, bottom: S - 6 });
+        v.draw(solvedTileState(Q), null, { hover: null, lit: null });
+        sc.root.remove(group);
+        return (nxThumbs[spec.id] = cv.toDataURL());
+      }
       if (spec.rule === "planar") {
         // the surface, with the solved grid wrapped on it (as the 3D view draws it)
-        const Q = buildPlanar(spec), tex = document.createElement("canvas"), C = 128;
+        const tex = document.createElement("canvas"), topology = spec.topology;
+        const Q = buildPlanar(spec), C = 128;
         tex.width = Q.W * C; tex.height = Q.H * C;
         new PlanarView(tex).drawBare(Q, solvedPlanarState(Q), null, { labels: false, textures: false });
         const N = 90, pos = [], uv = [], idx = [];
         for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
-          pos.push(...surfacePoint(spec.topology, i / N, j / N)); uv.push(i / N, 1 - j / N);
+          pos.push(...surfacePoint(topology, i / N, j / N)); uv.push(i / N, 1 - j / N);
           if (i < N && j < N) { const k = j * (N + 1) + i; idx.push(k, k + N + 1, k + 1, k + 1, k + N + 1, k + N + 2); }
         }
         const geo = new THREE.BufferGeometry();
@@ -3504,7 +3851,7 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         // (some of the color glows on its own, so the surface's far side isn't murky at this size)
         group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map, side: THREE.DoubleSide, roughness: 0.5, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.35 })));
         trash.push(geo, map);
-        const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[spec.topology];
+        const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[topology];
         sc.root.quaternion.setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
       } else {
         const Q = buildPuzzle(spec, spec.size);
@@ -3666,8 +4013,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
       },
       turn(axis, layer, q = 1) {
         flush();
-        // (a planar slide keeps its sign and size: q cells right/down, or left/up if negative)
-        const move = { axis, layer, q: isPlanar() ? q : mod(q, P.axes[axis].order) };
+        // (a planar slide keeps its sign and size: q cells right/down, or left/up if negative;
+        // a tile turn too: q steps clockwise, or counterclockwise if negative)
+        const move = { axis, layer, q: isPlanar() || isTiles() ? q : mod(q, P.axes[axis].order) };
         record([move]);
         play(move);
         renderTape();
@@ -3687,6 +4035,9 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
           ...(isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
+            : isTiles()
+            ? { tiles: P.tiles.length, tiling: P.spec.tiling, a: P.spec.a, b: P.spec.b, pieces: P.n, order: P.order,
+                kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}), views: { flat: viewFlat, surface: view3D }, hover: tileHover }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
@@ -3698,6 +4049,24 @@ float line(float x, float hw, float w) { return cover(abs(fract(x + 0.5) - 0.5),
         };
       },
       // ---- screen positions, for the pointer-input tests ----
+      // tiles: a point on tile `axis`'s circle line at `angle` (radians, clockwise from the
+      // right), and its middle, on the flat view, in CSS px (its copy in the outlined patch)
+      tileCircle(axis, angle = 0) {
+        tileView.layout(P, viewRegions().flat);
+        const c = P.tiles[axis].center;
+        return tileView.toScreen([c[0] + P.r * Math.cos(angle), c[1] + P.r * Math.sin(angle)]);
+      },
+      tileMiddle(axis) { tileView.layout(P, viewRegions().flat); return tileView.toScreen(P.tiles[axis].center); },
+      // the same point on the 3D torus, in CSS px, or null where it's hidden
+      tileCircle3D(axis, angle = 0) {
+        placeCamera();
+        root.updateMatrixWorld(true);
+        camera.updateMatrixWorld();
+        const c = P.tiles[axis].center, p = [c[0] + P.r * Math.cos(angle), c[1] + P.r * Math.sin(angle)], { Ap, Bp } = P, det = Ap[0] * Bp[1] - Ap[1] * Bp[0];
+        const s = (((p[0] * Bp[1] - p[1] * Bp[0]) / det) % 1 + 1) % 1, t = (((Ap[0] * p[1] - Ap[1] * p[0]) / det) % 1 + 1) % 1;
+        const [x, y] = surfaceToScreen(s, t), hit = surfaceHit(x, y);
+        return hit && Math.hypot(hit.s - s, hit.t - t) < 0.01 ? { x, y } : null;
+      },
       // planar: every arrow button ({ axis, layer, q, x, y }) and a grid cell's middle, in CSS px
       arrows() { planeView.layout(P, viewRegions().flat); return planeView.arrows().map(({ axis, layer, q, x, y }) => ({ axis, layer, q, x, y })); },
       cellCenter(x, y) { planeView.layout(P, viewRegions().flat); return planeView.cellCenter(x, y); },

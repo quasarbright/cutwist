@@ -145,6 +145,9 @@ const PAIRS_15 = [
   ["#007a89", "#5ec4b6"], ["#5c5c5c", "#292929"], ["#1e3a5f", "#8fc7ff"], ["#6b7a1f", "#c9c27a"],
   ["#d4a017", "#ffc49b"], ["#3f2a8c", "#8c8cff"], ["#1f8f5f", "#9ff0c8"],
 ]; // the icosahedron's 10 pairs, plus navy/sky, olive/khaki, gold/peach, indigo/periwinkle, jade/mint
+// twisty-puzzle palettes by size (the icosahedron's 20, the triacontahedron's 30), for
+// coloring anything else like a puzzle with that many faces
+export const PUZZLE_PALETTES = { 20: Object.values(ICOSA_COLORS), 30: PAIRS_15.flat() };
 
 // Face normals, and a sticker color per face (index-aligned).
 export const SOLIDS = {

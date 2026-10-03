@@ -107,7 +107,7 @@ export class PlanarView {
       const at = { x: i % P.W, y: Math.floor(i / P.W) };
       this.drawSlot(slots[i], this.ox + at.x * c, this.oy + at.y * c, c, 0, look, at);
     }
-    if (look.lit) this.drawLit(look.lit, this.ox, this.oy, c);
+    if (look.lit) this.drawLit(look.lit, this.ox, this.oy, c, look.litAlpha);
     this.drawCoordinates();
     if (look.arrows) this.drawArrows(look.hover);
   }
@@ -131,11 +131,12 @@ export class PlanarView {
   }
 
   // Lighten some cells (a Set of cell indices), the grid's top-left at (x0, y0), cells c
-  // wide: the cells an algorithm would change, while its play button is hovered
-  drawLit(lit, x0, y0, c) {
+  // wide: the cells an algorithm would change, while its play button is hovered or its eye is
+  // on. alpha: how strongly (the page pulses it)
+  drawLit(lit, x0, y0, c, alpha = 0.34) {
     const { ctx, P } = this, inset = 0.03;
     ctx.save();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
     for (const i of lit) {
       roundRect(ctx, x0 + ((i % P.W) + inset) * c, y0 + (Math.floor(i / P.W) + inset) * c, (1 - 2 * inset) * c, (1 - 2 * inset) * c, 0.1 * c);
       ctx.fill();
@@ -411,6 +412,8 @@ function vividColor(hueDeg) {
 export const PUZZLE_COLORS = ["#f4f4ee", "#c8102e", "#0051ba", "#ffe600", "#009e60", "#ff6a13",
   "#7b3fb3", "#5ab4ff", "#ff7eb6", "#8ed142", "#007a89", "#d6c298"];
 const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+// a hue (OKLCH angle, degrees) at full strength, as #rrggbb
+export const vividHex = (hueDeg) => `#${vividColor(hueDeg).map((c) => Math.round(c * 255).toString(16).padStart(2, "0")).join("")}`;
 export function cellColor(x, y, W, H) {
   const base = H <= PUZZLE_COLORS.length ? rgbOf(PUZZLE_COLORS[y]) : vividColor((y * 360) / H + 29); // +29: row 1 starts at red
   const v = W > 1 ? 1 - ((1 - DARK) * x) / (W - 1) : 1;
