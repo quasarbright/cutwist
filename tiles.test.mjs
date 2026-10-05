@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   TILE_PRESETS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves,
-  piecesInLayer, piecePose, tileCount, tilesFit, snapTiles, signedTurn, outlineArea, tileSnapCandidates, tileRadiusCap, tileRegularTrims,
+  piecesInLayer, piecePose, tileCount, tilesFit, snapTiles, signedTurn, tileSnapCandidates, tileRadiusCap, tileRegularTrims, tileFaceAt,
 } from "./tiles.mjs";
 
 const presetSpec = (tiling, a, b = 0, more = {}) => ({ ...TILE_PRESETS.find((p) => p.tiling === tiling), a, b, ...more });
@@ -34,6 +34,76 @@ test("tile counts: a² + ab + b² hexagons, a² + b² squares, twice the hexagon
   }
 });
 
+// Every point of the torus inside some circle is in exactly one piece's outline, and that piece
+// has a sticker on the face under it; a point outside every circle is in none. (Two pieces'
+// outlines over the same spot, or a spot in none, is a color drawn where it isn't: it pops as
+// the pieces turn.) Points within a hair of a circle are skipped (they're on an edge).
+function checkCover(P, rand, count = 250) {
+  const shifts = [-2, -1, 0, 1, 2].flatMap((n) => [-2, -1, 0, 1, 2].map((m) => [n * P.Ap[0] + m * P.Bp[0], n * P.Ap[1] + m * P.Bp[1]]));
+  const circles = P.axes.flatMap((ax) => ax.radii.map((r) => ({ c: ax.center, r })));
+  const polys = new Map(), polysOf = (pc) => {
+    if (!polys.has(pc.outline)) polys.set(pc.outline, pc.outline.map((loop) => loop.flatMap(({ c, r, a0, a1 }) => {
+      const k = Math.max(8, Math.ceil((Math.abs(a1 - a0) * r) / 0.002));
+      return Array.from({ length: k }, (_, i) => { const a = a0 + ((a1 - a0) * i) / k; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
+    })));
+    return polys.get(pc.outline);
+  };
+  const inPoly = (poly, [x, y]) => {
+    let w = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [ax, ay] = poly[i], [bx, by] = poly[j];
+      if ((ay > y) !== (by > y) && x < ax + ((y - ay) * (bx - ax)) / (by - ay)) w = !w;
+    }
+    return w;
+  };
+  for (let t = 0; t < count; t++) {
+    const u = rand(), v = rand(), p = [u * P.Ap[0] + v * P.Bp[0], u * P.Ap[1] + v * P.Bp[1]];
+    let covered = false, onEdge = false;
+    for (const { c, r } of circles) for (const [dx, dy] of shifts) {
+      const d = Math.hypot(p[0] - c[0] - dx, p[1] - c[1] - dy);
+      if (Math.abs(d - r) < 1e-4) onEdge = true;
+      if (d < r) covered = true;
+    }
+    if (onEdge) continue;
+    const hits = [];
+    for (const pc of P.pieces) for (const [dx, dy] of shifts) {
+      if (Math.hypot(p[0] - pc.anchor[0] - dx, p[1] - pc.anchor[1] - dy) > pc.extent + 1e-3) continue;
+      const q = [p[0] - pc.offset[0] - dx, p[1] - pc.offset[1] - dy];
+      if (polysOf(pc).filter((poly) => inPoly(poly, q)).length % 2) hits.push({ pc, q });
+    }
+    const where = `${JSON.stringify(P.spec.cuts)} at (${p[0].toFixed(4)}, ${p[1].toFixed(4)})`;
+    assert.equal(hits.length, covered ? 1 : 0, `${P.spec.tiling} ${where}: in ${hits.length} pieces`);
+    if (!hits.length) continue;
+    const [{ pc, q }] = hits;
+    assert.ok(pc.stickers.some((st) => st.face === P.faceAt(tileFaceAt(P, p))), `${P.spec.tiling} ${where}: no sticker for the face there`);
+    // (and it's inside the same circles as the rest of its piece: one region, not two run together)
+    const inside = (x) => circles.flatMap(({ c, r }, i) => shifts.flatMap(([dx, dy], j) => (Math.hypot(x[0] - c[0] - dx, x[1] - c[1] - dy) < r ? [`${i}:${j}`] : []))).join();
+    assert.equal(inside(q), inside([pc.anchor[0] - pc.offset[0], pc.anchor[1] - pc.offset[1]]), `${P.spec.tiling} ${where}: inside other circles than its piece`);
+  }
+}
+
+test("no color drawn where it isn't: at every snap radius, each covered point is in exactly one piece", () => {
+  const rand = seeded(11);
+  for (const tiling of ["hex", "square", "triangle"]) {
+    const base = presetSpec(tiling, TILE_PRESETS.find((p) => p.tiling === tiling).a, TILE_PRESETS.find((p) => p.tiling === tiling).b);
+    for (const kind of ["face", "vertex", "edge"]) {
+      // (the radii where the drawing changes: circles touching, or meeting at a point; and a
+      // hair to either side)
+      const marks = tileSnapCandidates({ ...base, cuts: [] }, { kind, i: 0 }).filter((r) => r <= 1.05);
+      for (const r of marks) for (const d of [0, 0.002]) {
+        const spec = { ...base, cuts: [{ on: kind, depths: [r + d] }] };
+        if (tilesFit(spec)) checkCover(buildTiles(spec), rand, 60);
+      }
+    }
+  }
+  for (const spec of TILE_PRESETS) checkCover(buildTiles(spec), rand);
+  // (big circles: many crossings, and many tiny pieces)
+  for (const r of [1, 1.3]) checkCover(preset("hex", 2, 2, { cuts: [{ on: "vertex", depths: [r] }] }), rand, 120);
+  // (two kinds at once, both through the corners)
+  checkCover(preset("triangle", 2, 0, { cuts: [{ on: "face", depths: [0.5] }, { on: "vertex", depths: [0.5] }] }), rand);
+  checkCover(preset("hex", 2, 2, { cuts: [{ on: "face", depths: [1 / Math.sqrt(3)] }, { on: "vertex", depths: [1 / Math.sqrt(3)] }] }), rand);
+});
+
 test("every preset fits its torus, and its scrambles undo", () => {
   for (const spec of TILE_PRESETS) {
     assert.ok(tilesFit(spec), spec.name);
@@ -59,7 +129,7 @@ test("squares and triangles: the same pieces on every tile, corners of 4 and 6 t
   assert.deepEqual(kinds(S), { 1: 5 * 9, 2: 2 * 9, 4: 9 });
   const T = preset("triangle", 2);
   assert.deepEqual(kinds(T), { 1: 7 * 8, 2: 4.5 * 8, 6: 0.5 * 8 });
-  // every piece is a real region, not a sampling speck
+  // (no specks at these radii)
   for (const P of [S, T, preset("hex", 3)]) assert.ok(Math.min(...P.pieces.map((pc) => pc.area)) > 0.005);
 });
 
@@ -71,14 +141,9 @@ test("every sticker knows its face, and each face has the same stickers as the r
   }
 });
 
-test("each piece's exact outline encloses the area the sampling found", () => {
-  for (const [tiling, a, b, more] of [["hex", 3, 0], ["square", 3, 0], ["triangle", 2, 0], ...Object.values(DESIGNS)]) {
-    const P = preset(tiling, a, b, more);
-    for (const pc of P.pieces) {
-      const area = outlineArea(pc.outline);
-      assert.ok(Math.abs(area - pc.area) < 0.05 * pc.area + 0.003, `${tiling} ${JSON.stringify(more)}: area ${area} vs ${pc.area}`);
-    }
-  }
+test("the pieces cover every design exactly once, stickers and all (truncations, rings, corners)", () => {
+  const rand = seeded(5);
+  for (const [tiling, a, b, more] of [["hex", 3, 0], ["square", 3, 0], ["triangle", 2, 0], ...Object.values(DESIGNS)]) checkCover(preset(tiling, a, b, more), rand);
 });
 
 test("a turn's order: six sixths, four quarters or three thirds is no change", () => {
@@ -180,7 +245,7 @@ test("snap marks: the radii through other points of the drawing, like the neighb
   const corner = 1 / Math.sqrt(3) / 2;
   assert.ok(tileSnapCandidates(presetSpec("hex", 3, 0), { kind: "vertex", i: 0 }).some((r) => Math.abs(r - corner) < 1e-6));
   const P = preset("hex", 3, 0, { cuts: [{ on: "vertex", depths: [corner] }] });
-  for (const pc of P.pieces) assert.ok(Math.abs(outlineArea(pc.outline) - pc.area) < 0.05 * pc.area + 0.003);
+  checkCover(P, seeded(2));
 });
 
 test("truncation snaps where faces turn regular: a square's octagon, a hexagon's dodecagon, a triangle's hexagon", () => {

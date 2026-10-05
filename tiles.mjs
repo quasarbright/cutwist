@@ -86,10 +86,15 @@ const tilePreset = (id, name, tiling, cuts) => ({
 });
 const CRYSTAL = { hex: 1, square: 1, triangle: 1 / SQ3 }; // (out to the neighbors' middles)
 const CORNER = { hex: 0.41, square: 0.6, triangle: 0.54 };
+// a flower: a circle around every tile, out to its corners, so the circles meet there. (A
+// triangle's corners are its neighbors' middles away: its crystal is its flower, one puzzle.)
+const FLOWER = { hex: 1 / SQ3, square: Math.SQRT1_2, triangle: 1 / SQ3 };
+const same = (tiling) => CRYSTAL[tiling] === FLOWER[tiling];
 export const TILE_PRESETS = ["hex", "square", "triangle"].flatMap((tiling) => [
   tilePreset(`tiles-${tiling}`, `Face-Turning ${NAMES[tiling]}`, tiling, [{ on: "face", depths: [TILINGS[tiling].r] }]),
   tilePreset(`tiles-${tiling}-corner`, `Corner-Turning ${NAMES[tiling]}`, tiling, [{ on: "vertex", depths: [CORNER[tiling]] }]),
-  tilePreset(`tiles-${tiling}-crystal`, `${NAMES[tiling]} Crystal`, tiling, [{ on: "face", depths: [CRYSTAL[tiling]] }]),
+  tilePreset(`tiles-${tiling}-crystal`, `${NAMES[tiling]} ${same(tiling) ? "Crystal/Flower" : "Crystal"}`, tiling, [{ on: "face", depths: [CRYSTAL[tiling]] }]),
+  ...(same(tiling) ? [] : [tilePreset(`tiles-${tiling}-flower`, `${NAMES[tiling]} Flower`, tiling, [{ on: "face", depths: [FLOWER[tiling]] }])]),
   ...(tiling === "triangle" ? [tilePreset("tiles-spiderman", "Spiderman", tiling, [{ on: "face", depths: [1 / (2 * SQ3)] }, { on: "vertex", depths: [0.5] }])] : []),
 ]);
 export const TILE_PARAMS = PARAMS;
@@ -229,7 +234,9 @@ function clip(poly, n, k, below) {
   });
   return out;
 }
-// which face (its point, internal) a plane point belongs to
+// which face (its point, internal) a plane point belongs to (for the tests: a check on the
+// stickers the pieces get from their exact outlines)
+export const tileFaceAt = (P, p) => faceOf(P.G, p, P.truncate);
 function faceOf(G, p, truncate) {
   const c = G.tileOf(p), rel = sub(p, G.toPlane(c)), { corners, edges } = G.shapeOf(c);
   const ratio = (o) => { const q = G.toPlane(o); return dot(rel, q) / dot(q, q); };
@@ -244,7 +251,19 @@ function faceOf(G, p, truncate) {
   return c;
 }
 
+// A radius within 1e-5 of one where circles meet (a snap mark) is that radius exactly: a
+// rounded one (from a link, or typed) leaves circles a hair from meeting, specks of pieces too
+// small to see or to work out reliably.
+function exactRadii(spec) {
+  const cuts = (spec.cuts || []).map((c) => ({ ...c, depths: [...c.depths] })), out = { ...spec, cuts };
+  for (const kind of KINDS) radiiOf(out, kind).forEach((r, i) => {
+    const m = tileSnapCandidates(out, { kind, i }).find((m) => Math.abs(m - r) < 1e-5);
+    if (m !== undefined && m !== r) for (const c of cuts) if (c.on === kind) c.depths = c.depths.map((d) => (d === r ? m : d));
+  });
+  return out;
+}
 export function buildTiles(spec) {
+  spec = exactRadii(spec);
   const K = TILINGS[spec.tiling], G = geometry(K);
   let A = K.steps(spec.a, spec.b), B = K.rot(A);
   if (cross(A, B) < 0) [A, B] = [B, A];
@@ -320,16 +339,13 @@ function findPoints(P, kind) {
 // ---- the pieces ----
 // The circles' pattern repeats with the tiling, so the pieces come from the infinite tiling
 // once per tiling and cut design, then a copy goes on every copy of the tiling's repeating cell
-// on the torus. Sample the plane around the cell at the origin on a fine grid, give each
-// sample the set of circles it's inside, and flood-fill neighbors with the same set: each
-// region is a piece, the cell's if its middle is in it. Each piece gets an anchor (the sample
-// deepest inside it, for telling which circles it's in), its exact outline (arcs) and its
+// on the torus. The circles around the cell at the origin cut the plane into regions, worked
+// out exactly (arrangement): each region inside at least one circle is a piece, the cell's if
+// its middle is in it. Nothing is sampled, so no piece is too small or too thin to find, even
+// at the radii where circles touch or several meet at a point. Each piece gets an anchor (a
+// point well inside it, for telling which circles it's in), its outline (arcs) and its
 // stickers (the faces it covers, each with its parts' polygons), all at its home copy.
-const NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const patterns = new Map(); // tiling, cuts and truncation → the cell's pieces
-// a fixed random sequence (the same pieces, in the same order, every time)
-let seed = 12345;
-const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
 function cellPattern(P) {
   const { K, G, spec, truncate } = P;
   const cutsKey = KINDS.map((k) => radiiOf(spec, k).join("/")).join("|");
@@ -337,78 +353,51 @@ function cellPattern(P) {
   if (patterns.has(id)) return patterns.get(id);
   const rmax = widest(spec), out = [];
   if (!rmax) { patterns.set(id, out); return out; }
-  const sample = rmax > 0.9 ? 0.011 : 0.008; // (sample spacing, plane units)
   const cellP = K.cell.map((v) => G.toPlane(v)), mid = [(cellP[0][0] + cellP[1][0]) / 2, (cellP[0][1] + cellP[1][1]) / 2];
+  // (every circle that can bound a piece whose middle is in the cell: a piece is inside some
+  // circle, so it's within 2·rmax of its middle, and the circles bounding it reach that circle)
   const half = Math.hypot(...cellP[0]) + 2 * rmax + 0.1;
-  const n = Math.ceil((2 * half) / sample), x0 = mid[0] - half, y0 = mid[1] - half;
-  const at = (s) => [x0 + ((s % n) + 0.5) * sample, y0 + (Math.floor(s / n) + 0.5) * sample];
-  // The circles that reach the square, and for each rmax-sized cell of it the ones that reach
-  // that cell. A sample's set of circles is labeled by two random hashes XORed over the set
-  // (fast, and two different sets agreeing on both is a 1-in-2⁵² chance).
-  const circles = KINDS.flatMap((kind) => radiiOf(spec, kind).flatMap((r) =>
-    G.near(kind, mid, half * Math.SQRT2 + r).map((c) => ({ c, p: G.toPlane(c), r, h1: (rand() * 2 ** 31) | 0, h2: (rand() * 2 ** 21) | 0 }))));
-  const bs = rmax, nb = Math.ceil((2 * half) / bs), bucket = Array.from({ length: nb * nb }, (_, b) => {
-    const bx = x0 + ((b % nb) + 0.5) * bs, by = y0 + (Math.floor(b / nb) + 0.5) * bs;
-    return circles.filter(({ p, r }) => Math.hypot(p[0] - bx, p[1] - by) < r + bs * Math.SQRT1_2 + 1e-9);
-  });
-  const near = (p) => bucket[Math.min(nb - 1, Math.floor((p[1] - y0) / bs)) * nb + Math.min(nb - 1, Math.floor((p[0] - x0) / bs))];
-  const label = new Float64Array(n * n);
-  for (let s = 0; s < n * n; s++) {
-    const p = at(s);
-    let h1 = 0, h2 = 0;
-    for (const c of near(p)) if ((c.p[0] - p[0]) ** 2 + (c.p[1] - p[1]) ** 2 < c.r * c.r) { h1 ^= c.h1; h2 ^= c.h2; }
-    label[s] = (h1 >>> 0) * 2 ** 21 + (h2 & 0x1fffff);
-  }
-  // flood fill, corner neighbors too: a sample at a piece's sharp tip can touch the rest of it
-  // only diagonally. (Two different pieces that touch at a point never share a set of circles:
-  // where two circles cross, the four corners around the crossing are each inside a different
-  // pair.) Outside every circle (label 0) nothing moves: not a piece.
-  const comp = new Int32Array(n * n).fill(-1), cellInv = inverse2(K.cell), found = [], biggest = new Map();
-  for (let s = 0; s < n * n; s++) {
-    if (comp[s] >= 0 || label[s] === 0) { comp[s] = s; continue; }
-    const members = [s], stack = [s];
-    comp[s] = s;
-    let edge = false;
-    while (stack.length) {
-      const c = stack.pop(), i = c % n, j = (c - i) / n;
-      for (const [di, dj] of NEIGHBORS) {
-        if (i + di < 0 || j + dj < 0 || i + di >= n || j + dj >= n) { edge = true; continue; }
-        const m = (j + dj) * n + i + di;
-        if (comp[m] < 0 && label[m] === label[c]) { comp[m] = s; members.push(m); stack.push(m); }
-      }
-    }
-    found.push({ members, edge, label: label[s] });
-    biggest.set(label[s], Math.max(biggest.get(label[s]) || 0, members.length));
-  }
-  for (const { members, edge, label: l } of found) {
-    if (edge) continue; // (cut off by the sampled square: another cell's)
-    // a speck of a sample or two with the same circles as a bigger piece: a bit of that piece's
-    // thin tip (between two circles that nearly touch) the samples landed in apart from the rest
-    if (members.length < 4 && biggest.get(l) > members.length) continue;
+  const circles = KINDS.flatMap((kind) => radiiOf(spec, kind).flatMap((r) => G.near(kind, mid, half * Math.SQRT2 + r).map((c) => ({ c: G.toPlane(c), r }))));
+  const cellInv = inverse2(K.cell);
+  for (const f of arrangement(circles)) {
     // its middle, nudged off points and lines (a piece centered on a corner has its middle
     // there) at 17°, clear of every edge's direction, picks its cell
-    const pts = members.map(at), mean = [0, 1].map((k) => pts.reduce((a, p) => a + p[k], 0) / pts.length + (k ? 0.0088 : 0.0287));
-    const f = G.fromPlane(mean), cf = apply(cellInv, f);
+    const cf = apply(cellInv, G.fromPlane([f.mid[0] + 0.0287, f.mid[1] + 0.0088]));
     if (Math.floor(cf[0]) !== 0 || Math.floor(cf[1]) !== 0) continue;
-    // the anchor: the sample farthest from every circle
-    const depth = (p) => Math.min(...near(p).map(({ p: q, r }) => Math.abs(Math.hypot(q[0] - p[0], q[1] - p[1]) - r)));
-    let anchor = null, best = -1;
-    for (let k = 0; k < pts.length; k += 3) { const d = depth(pts[k]); if (d > best) { best = d; anchor = pts[k]; } }
-    let extent = 0;
-    const faces = new Map();
-    for (const p of pts) {
-      extent = Math.max(extent, Math.hypot(p[0] - anchor[0], p[1] - anchor[1]));
-      const fc = faceOf(G, p, truncate);
-      faces.set(key(fc), fc);
+    // (the circles reaching it)
+    const reach = Math.max(...f.box.map((v, i) => Math.abs(v - f.mid[i % 2])));
+    const near = circles.filter(({ c, r }) => Math.hypot(c[0] - f.mid[0], c[1] - f.mid[1]) < r + reach * Math.SQRT2 + 1e-6);
+    // outside every circle, it doesn't move: not a piece
+    const inner = faceInner(f, near);
+    if (!near.some(({ c, r }) => Math.hypot(inner[0] - c[0], inner[1] - c[1]) < r)) continue;
+    // the anchor: of points spread over it, the one farthest from every circle
+    const depth = (p) => Math.min(...near.map(({ c, r }) => Math.abs(Math.hypot(c[0] - p[0], c[1] - p[1]) - r)));
+    let anchor = inner, best = depth(inner);
+    const [x0, y0, x1, y1] = f.box;
+    for (let i = 1; i < 16; i++) for (let j = 1; j < 16; j++) {
+      const p = [x0 + ((x1 - x0) * i) / 16, y0 + ((y1 - y0) * j) / 16];
+      if (!faceHas(f, p)) continue;
+      const d = depth(p);
+      if (d > best) { best = d; anchor = p; }
     }
-    // (every circle it's inside, even one far around it, and every other one reaching it)
-    const cuts = circles.filter(({ p, r }) => Math.hypot(p[0] - anchor[0], p[1] - anchor[1]) - r < extent + 4 * sample)
-      .map(({ p, r }) => ({ c: p, r, in: Math.hypot(p[0] - anchor[0], p[1] - anchor[1]) < r }));
+    let extent = 0;
+    for (const poly of [f.poly(), ...f.holePolys()]) for (const p of poly) extent = Math.max(extent, Math.hypot(p[0] - anchor[0], p[1] - anchor[1]));
+    // its stickers: the tiles' parts it covers some of
+    const homes = new Map();
+    for (const c of G.near("face", f.mid, reach * Math.SQRT2 + 1.2)) {
+      const pc = G.toPlane(c);
+      for (const pt of tileParts(G, c, truncate)) {
+        const part = pt.poly.map(([x, y]) => [x + pc[0], y + pc[1]]);
+        if (overlapArea(f, part) > 1e-7) { const fc = add(c, pt.to); homes.set(key(fc), fc); }
+      }
+    }
     out.push({
-      anchor, extent, area: members.length * sample * sample, outline: outline(cuts, anchor),
-      stickers: [...faces.values()].map((fc) => ({ home: fc, parts: faceParts(G, fc, truncate) })),
+      anchor, extent, area: f.area, outline: [f.outer, ...f.holes], mid: f.mid,
+      stickers: [...homes.values()].map((fc) => ({ home: fc, parts: faceParts(G, fc, truncate) })),
     });
   }
+  // (the same pieces, in the same order, every time: by their middles, top to bottom)
+  out.sort((a, b) => Math.round((a.mid[1] - b.mid[1]) * 1e6) || a.mid[0] - b.mid[0]);
   // a piece's type: pieces alike up to the tiling's turns (the same size, the same number of
   // faces), for blacking out every piece like one
   const types = [];
@@ -441,84 +430,217 @@ export function partsNear(P, p, d) {
   return out;
 }
 
-// A piece's edge, exactly: the arcs of its circles where every other circle's rule holds
-// (inside the ones it's inside, outside the rest), chained end to end into closed loops.
-// cuts: [{ c (plane), r, in }]. Returns loops of arcs { c, r, a0, a1 }, each running from
-// angle a0 to a1 (either way round), for drawing and for the area (outlineArea). Those rules
-// can hold in more than one place (two separate regions inside and outside the same circles):
-// with anchor (a point inside the piece), just the loop around it and the holes in that.
-export function outline(cuts, anchor = null) {
-  const loops = outlineLoops(cuts);
-  if (!anchor || loops.length < 2) return loops;
-  const polys = loops.map(loopPolygon), inside = (poly, p) => {
-    let w = false;
-    poly.forEach((a, i) => { const b = poly[(i + 1) % poly.length]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < a[0] + ((p[1] - a[1]) * (b[0] - a[0])) / (b[1] - a[1])) w = !w; });
-    return w;
-  };
-  const around = loops.map((_, i) => i).filter((i) => inside(polys[i], anchor));
-  if (!around.length) return loops;
-  const outer = around.sort((i, j) => Math.abs(polyArea(polys[i])) - Math.abs(polyArea(polys[j])))[0];
-  return loops.filter((_, i) => i === outer || (!around.includes(i) && inside(polys[outer], polys[i][0])));
-}
-// a loop of arcs as a polygon, finely
-const loopPolygon = (loop) => loop.flatMap(({ c, r, a0, a1 }) => Array.from({ length: 24 }, (_, k) => { const a = a0 + ((a1 - a0) * k) / 24; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; }));
-function outlineLoops(cuts) {
-  const ok = (p, skip) => cuts.every((k, j) => j === skip || (Math.hypot(p[0] - k.c[0], p[1] - k.c[1]) < k.r) === k.in);
+// The regions ("faces") circles cut the plane into, exactly: like tracing a map's borders.
+// Every circle is split into arcs at every point where another circle crosses or touches it,
+// and each arc borders two regions: the one inside its circle (on its left going round
+// counterclockwise) and the one outside (on its left going round clockwise). Walking a
+// region's border with it on the left, at each point where arcs meet, the next arc is the
+// first one clockwise from the way back. That keeps to the same region even where three,
+// four or more arcs meet: circles touching, or several circles through one point, which is
+// what happens at the radii where the drawing changes (its snap marks). Arcs are { c, r, a0,
+// a1 }, running from angle a0 to a1 (either way round). circles: [{ c (plane), r }]. Returns
+// the bounded regions: [{ outer (a loop of arcs), holes (loops), area, mid (its middle), box
+// ([x0, y0, x1, y1]), poly() and holePolys() (as fine polygons) }].
+const TAU = 2 * Math.PI;
+// (crossing points this close are one point: several circles through it. Radii within 1e-5 of
+// meeting exactly are made exact (exactRadii), so real points are never this close, only the
+// rounding in working out the same point from different circles is: about 1e-15, but where
+// two circles touch, the crossing's angle is the arc cosine of nearly 1, which turns that
+// into about 1e-8.)
+const SAME = 1e-7;
+function arrangement(circles) {
   const pt = (k, a) => [k.c[0] + k.r * Math.cos(a), k.c[1] + k.r * Math.sin(a)];
-  const arcs = [], TAU = 2 * Math.PI;
-  cuts.forEach((k, j) => {
-    // where the other circles cross this one, exactly (sampling the circle misses an arc
-    // shorter than its spacing, and near a radius where circles meet at a point those are
-    // everywhere), and between each two crossings, whether the edge runs there
-    const at = [];
-    cuts.forEach((o, m) => {
-      const dx = o.c[0] - k.c[0], dy = o.c[1] - k.c[1], d = Math.hypot(dx, dy);
-      if (m === j || d < 1e-12 || d > k.r + o.r || d < Math.abs(k.r - o.r)) return;
-      const base = Math.atan2(dy, dx), h = Math.acos(Math.max(-1, Math.min(1, (k.r * k.r + d * d - o.r * o.r) / (2 * k.r * d))));
-      at.push((((base - h) % TAU) + TAU) % TAU, (((base + h) % TAU) + TAU) % TAU);
-    });
-    at.sort((x, y) => x - y);
-    if (!at.length) { if (ok(pt(k, 0), j)) arcs.push({ c: k.c, r: k.r, a0: 0, a1: TAU, whole: true }); return; }
-    const spans = at.map((a0, i) => ({ a0, a1: i + 1 < at.length ? at[i + 1] : at[0] + TAU })).filter(({ a0, a1 }) => a1 - a0 > 1e-9);
-    const on = spans.map(({ a0, a1 }) => ok(pt(k, (a0 + a1) / 2), j));
-    if (on.every(Boolean)) { arcs.push({ c: k.c, r: k.r, a0: 0, a1: TAU, whole: true }); return; }
-    // runs of spans where it does, joined (across a circle that only touches this one)
-    const n = spans.length, first = on.findIndex((v) => !v);
-    for (let s = 1; s <= n; s++) {
-      const i = (first + s) % n;
-      if (!on[i] || on[(i - 1 + n) % n]) continue; // (a run starts at i)
-      let e = i, a1 = spans[i].a1;
-      while (on[(e + 1) % n]) { e = (e + 1) % n; a1 = spans[e].a1; }
-      const a0 = spans[i].a0;
-      while (a1 < a0) a1 += TAU;
-      arcs.push({ c: k.c, r: k.r, a0, a1 });
+  // (which circles can meet which: buckets as wide as the widest circle)
+  // (neighboring buckets by index: adding a bucket's width to a coordinate rounds, and a
+  // circle just short of a bucket's edge would look two buckets over and miss its neighbors)
+  const bs = 2 * Math.max(...circles.map((k) => k.r)), bucket = new Map(), bk = ([x, y]) => [Math.floor(x / bs), Math.floor(y / bs)];
+  circles.forEach((k, i) => { const b = bk(k.c).join(); if (!bucket.has(b)) bucket.set(b, []); bucket.get(b).push(i); });
+  const meets = (c) => { const [i, j] = bk(c); return [-1, 0, 1].flatMap((dx) => [-1, 0, 1].flatMap((dy) => bucket.get(`${i + dx},${j + dy}`) || [])); };
+  // Every crossing (or touch) of two circles, then the points: crossings within SAME of each
+  // other (chained) are one point, decided once for everything, so splitting the circles and
+  // walking the borders agree on which arcs meet where, however near a radius is to circles
+  // meeting at a point.
+  const xs = []; // { k (circle), a (its angle on k), p }
+  circles.forEach((k, j) => {
+    for (const m of meets(k.c)) {
+      const o = circles[m], dx = o.c[0] - k.c[0], dy = o.c[1] - k.c[1], d = Math.hypot(dx, dy);
+      if (m === j || d < 1e-12) continue;
+      const cos = (k.r * k.r + d * d - o.r * o.r) / (2 * k.r * d);
+      if (Math.abs(cos) > 1 + 1e-9) continue; // (they don't meet)
+      const base = Math.atan2(dy, dx), h = Math.acos(Math.max(-1, Math.min(1, cos)));
+      // (touching, from outside or inside: one point)
+      const touch = h * k.r < SAME || Math.abs(d - k.r - o.r) < 1e-12 || Math.abs(d - Math.abs(k.r - o.r)) < 1e-12;
+      for (const a of touch ? [cos > 0 ? base : base + Math.PI] : [base - h, base + h]) xs.push({ k: j, a: ((a % TAU) + TAU) % TAU, p: pt(k, a) });
     }
   });
-  // chain them: each arc's end is the next one's start (or end: then run it backwards). A
-  // whole circle is a loop of its own (a disk's edge, or a ring's two).
-  const loops = [], left = arcs.filter((a) => !a.whole), end = (a, at) => pt(a, at), near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-6;
-  for (const a of arcs) if (a.whole) loops.push([a]);
-  while (left.length) {
-    const loop = [left.shift()];
-    for (;;) {
-      const p = end(loop.at(-1), loop.at(-1).a1);
-      const i = left.findIndex((a) => near(end(a, a.a0), p) || near(end(a, a.a1), p));
-      if (i < 0) break;
-      const a = left.splice(i, 1)[0];
-      loop.push(near(end(a, a.a0), p) ? a : { c: a.c, r: a.r, a0: a.a1, a1: a.a0 });
+  const root = xs.map((_, i) => i), find = (i) => (root[i] === i ? i : (root[i] = find(root[i])));
+  const grid = new Map(), gk = (p, dx = 0, dy = 0) => `${Math.floor(p[0] / SAME) + dx},${Math.floor(p[1] / SAME) + dy}`;
+  xs.forEach((x, i) => {
+    for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) for (const j of grid.get(gk(x.p, dx, dy)) || [])
+      if (Math.hypot(xs[j].p[0] - x.p[0], xs[j].p[1] - x.p[1]) < SAME) root[find(i)] = find(j);
+    const g = gk(x.p);
+    if (!grid.has(g)) grid.set(g, []);
+    grid.get(g).push(i);
+  });
+  const onCircle = circles.map(() => []);
+  xs.forEach((x, i) => onCircle[x.k].push({ a: x.a, v: find(i) }));
+  const arcs = [], loops = [];
+  circles.forEach((k, j) => {
+    // nothing meets it: a whole circle, around the inside and around the outside
+    if (!onCircle[j].length) { loops.push([{ c: k.c, r: k.r, a0: 0, a1: TAU }], [{ c: k.c, r: k.r, a0: 0, a1: -TAU }]); return; }
+    // its points, by angle, each once
+    const cuts = [];
+    for (const x of onCircle[j].sort((x, y) => x.a - y.a)) if (!cuts.some((c) => c.v === x.v)) cuts.push(x);
+    cuts.forEach(({ a: a0, v: v0 }, i) => {
+      const { a, v: v1 } = cuts[(i + 1) % cuts.length], a1 = i + 1 < cuts.length ? a : a + TAU;
+      arcs.push({ c: k.c, r: k.r, a0, a1, v0, v1 }, { c: k.c, r: k.r, a0: a1, a1: a0, v0: v1, v1: v0 });
+    });
+  });
+  // Which way an arc leaves its start (its tangent there) and how it bends (its curvature, +
+  // to the left), and the same for the way back from its end. Arcs leaving a point the same
+  // way (circles touching there) are told apart by their bend: on a tiny circle around the
+  // point, the one bending left is further round counterclockwise.
+  const leaving = new Map();
+  arcs.forEach((e, i) => {
+    const sg = Math.sign(e.a1 - e.a0);
+    e.out = e.a0 + (sg * Math.PI) / 2; e.bend = sg / e.r;
+    e.back = e.a1 + (sg * Math.PI) / 2 + Math.PI; e.backBend = -sg / e.r;
+    if (!leaving.has(e.v0)) leaving.set(e.v0, []);
+    leaving.get(e.v0).push(i);
+  });
+  // how far clockwise from the way back an arc leaves: [angle, bend], compared in that order
+  const turnOf = (e, f) => {
+    let d = (((e.back - f.out) % TAU) + TAU) % TAU;
+    if (d > TAU - 1e-9) d -= TAU;
+    const s = e.backBend - f.bend;
+    if (Math.abs(d) < 1e-9) return s > 1e-12 ? [0, s] : s < -1e-12 ? [TAU, s] : null; // (null: straight back)
+    return [d, s];
+  };
+  const before = (a, b) => (Math.abs(a[0] - b[0]) > 1e-9 ? a[0] < b[0] : a[1] < b[1]);
+  const used = new Uint8Array(arcs.length);
+  for (let s = 0; s < arcs.length; s++) {
+    if (used[s]) continue;
+    const loop = [];
+    let i = s;
+    for (let guard = 0; guard <= arcs.length; guard++) {
+      used[i] = 1;
+      loop.push(arcs[i]);
+      // the next: the first arc leaving this point clockwise from the way back
+      // (every arc borders just one region on its left, so the next is never one already walked,
+      // other than the first: back round to the start)
+      const e = arcs[i];
+      let best = -1, bestTurn = null;
+      for (const k of leaving.get(e.v1)) {
+        const turn = turnOf(e, arcs[k]);
+        if (turn && (!bestTurn || before(turn, bestTurn))) { bestTurn = turn; best = k; }
+      }
+      if (best < 0) best = leaving.get(e.v1).find((k) => !turnOf(e, arcs[k])) ?? -1; // (a dead end: back the way it came)
+      if (best < 0 || best === s || used[best]) break;
+      i = best;
     }
-    loops.push(loop);
+    loops.push(loop.map(({ c, r, a0, a1 }) => ({ c, r, a0, a1 })));
   }
-  return loops;
+  // the regions: a loop running counterclockwise is a region's outside edge, clockwise a hole,
+  // which belongs to the smallest region around it (or none: the outside of everything)
+  const info = loops.map((loop) => ({ loop, area: signedArea(loop), box: loopBox(loop) }));
+  const faces = info.filter((l) => l.area > 1e-14).map((l) => {
+    const f = { outer: l.loop, holes: [], area: l.area, box: l.box };
+    let poly = null, holePolys = null;
+    f.poly = () => (poly ??= loopPolygon(f.outer));
+    f.holePolys = () => (holePolys ??= f.holes.map(loopPolygon));
+    return f;
+  });
+  for (const h of info.filter((l) => l.area < -1e-14)) {
+    const [x0, y0, x1, y1] = h.box, p = pt(h.loop[0], (h.loop[0].a0 + h.loop[0].a1) / 2);
+    let owner = null;
+    for (const f of faces) {
+      const [u0, v0, u1, v1] = f.box;
+      if (u0 > x0 + 1e-9 || v0 > y0 + 1e-9 || u1 < x1 - 1e-9 || v1 < y1 - 1e-9 || f.area <= -h.area) continue;
+      if ((!owner || f.area < owner.area) && inPolygon(f.poly(), p)) owner = f;
+    }
+    if (owner) { owner.holes.push(h.loop); owner.area += h.area; }
+  }
+  for (const f of faces) f.mid = loopsCentroid([f.outer, ...f.holes]);
+  return faces;
 }
-// the area inside an outline (Green's theorem along each arc; a ring's inner circle runs the
-// other way round from its outer one, so it subtracts)
-export function outlineArea(loops) {
-  const signed = (loop) => loop.reduce((s, { c, r, a0, a1 }) => s + r * r * (a1 - a0) + c[0] * r * (Math.sin(a1) - Math.sin(a0)) - c[1] * r * (Math.cos(a1) - Math.cos(a0)), 0) / 2;
-  const areas = loops.map((l) => Math.abs(signed(l))), big = Math.max(...areas);
-  // (loops inside the biggest one are holes)
-  return areas.reduce((s, a) => s + (a === big ? a : -a), 0);
+// a point inside a region, for telling which circles it's in: just off the middle of its
+// longest edge, less than half as far in as any other circle comes near there
+function faceInner(f, circles) {
+  const e = f.outer.reduce((b, a) => (Math.abs(a.a1 - a.a0) * a.r > Math.abs(b.a1 - b.a0) * b.r ? a : b));
+  const t = (e.a0 + e.a1) / 2, m = [e.c[0] + e.r * Math.cos(t), e.c[1] + e.r * Math.sin(t)];
+  let clear = 1e-3;
+  for (const { c, r } of circles) {
+    if (c === e.c && r === e.r) continue;
+    clear = Math.min(clear, Math.abs(Math.hypot(m[0] - c[0], m[1] - c[1]) - r));
+  }
+  // (going round counterclockwise, the region is inside the arc's circle: in, toward the middle)
+  const inward = e.a1 > e.a0 ? -1 : 1, s = (inward * clear) / 2;
+  return [m[0] + s * Math.cos(t), m[1] + s * Math.sin(t)];
 }
+// a loop's box: its ends, and where its arcs pass the circle's far left, right, top or bottom
+function loopBox(loop) {
+  const b = [Infinity, Infinity, -Infinity, -Infinity], add = (x, y) => { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); };
+  for (const { c, r, a0, a1 } of loop) {
+    const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+    add(c[0] + r * Math.cos(a0), c[1] + r * Math.sin(a0));
+    for (let q = Math.ceil(lo / (Math.PI / 2)); q * (Math.PI / 2) <= hi; q++) add(c[0] + r * Math.cos(q * (Math.PI / 2)), c[1] + r * Math.sin(q * (Math.PI / 2)));
+  }
+  return b;
+}
+// the middle (center of area) of loops of arcs, exactly (Green's theorem, holes counting
+// against: they run the other way round)
+function loopsCentroid(loops) {
+  let A = 0, X = 0, Y = 0;
+  for (const loop of loops) for (const { c: [cx, cy], r, a0, a1 } of loop) {
+    A += signedArea([{ c: [cx, cy], r, a0, a1 }]);
+    // ∮ x² dy and ∮ y² dx along the arc x = cx + r cos t, y = cy + r sin t
+    const Fx = (t) => r * (cx * cx * Math.sin(t) + 2 * cx * r * (t / 2 + Math.sin(2 * t) / 4) + r * r * (Math.sin(t) - Math.sin(t) ** 3 / 3));
+    const Fy = (t) => r * (-cy * cy * Math.cos(t) + 2 * cy * r * (t / 2 - Math.sin(2 * t) / 4) + r * r * (-Math.cos(t) + Math.cos(t) ** 3 / 3));
+    X += Fx(a1) - Fx(a0);
+    Y += Fy(a1) - Fy(a0);
+  }
+  return [X / (2 * A), Y / (2 * A)];
+}
+// how much of a region a convex polygon covers (the region's polygons clipped to it)
+function overlapArea(f, convex) {
+  const s = Math.sign(convex.reduce((a, p, i) => a + cross(p, convex[(i + 1) % convex.length]), 0));
+  const clipTo = (poly) => {
+    let out = poly;
+    convex.forEach((a, i) => {
+      const b = convex[(i + 1) % convex.length], side = (p) => s * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]));
+      const next = [];
+      out.forEach((p, j) => {
+        const q = out[(j + 1) % out.length], sp = side(p), sq = side(q);
+        if (sp >= 0) next.push(p);
+        if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); next.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
+      });
+      out = next;
+    });
+    return Math.abs(out.reduce((a, p, i) => a + cross(p, out[(i + 1) % out.length]), 0)) / 2;
+  };
+  const [u0, v0, u1, v1] = f.box, xs = convex.map((p) => p[0]), ys = convex.map((p) => p[1]);
+  if (Math.max(...xs) < u0 || Math.min(...xs) > u1 || Math.max(...ys) < v0 || Math.min(...ys) > v1) return 0;
+  return clipTo(f.poly()) - f.holePolys().reduce((a, h) => a + clipTo(h), 0);
+}
+const faceHas = (f, p) => inPolygon(f.poly(), p) && !f.holePolys().some((h) => inPolygon(h, p));
+// a loop of arcs as a polygon, finely (a point every 0.004 or so)
+const loopPolygon = (loop) => loop.flatMap(({ c, r, a0, a1 }) => {
+  const k = Math.max(6, Math.ceil((Math.abs(a1 - a0) * r) / 0.004));
+  return Array.from({ length: k }, (_, i) => { const a = a0 + ((a1 - a0) * i) / k; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
+});
+function inPolygon(poly, p) {
+  let w = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < a[0] + ((p[1] - a[1]) * (b[0] - a[0])) / (b[1] - a[1])) w = !w;
+  }
+  return w;
+}
+// a loop's area, signed: counterclockwise positive (Green's theorem along each arc)
+const signedArea = (loop) => loop.reduce((s, { c, r, a0, a1 }) => s + r * r * (a1 - a0) + c[0] * r * (Math.sin(a1) - Math.sin(a0)) - c[1] * r * (Math.cos(a1) - Math.cos(a0)), 0) / 2;
+// the area inside an outline (its regions' edges and holes: a hole runs the other way round,
+// so it subtracts)
+export const outlineArea = (loops) => Math.abs(loops.reduce((s, l) => s + signedArea(l), 0));
 
 // every cell's copy of the pattern's pieces, at the copy near the flat view's middle
 function findPieces(P) {
@@ -621,9 +743,10 @@ export const signedTurn = (P, q, axis = 0) => { const n = P.axes[axis] ? P.axes[
 export function tileSnapCandidates(spec, target) {
   const K = TILINGS[spec.tiling], G = geometry(K), [lo, hi] = TILE_CUT_RANGE;
   const top = Math.min(hi, spec.a ? tileRadiusCap(spec) : hi);
-  const c0 = K.classes[target.kind][0], p0 = G.toPlane(c0), out = new Set();
+  const c0 = K.classes[target.kind][0], p0 = G.toPlane(c0), out = [];
   const own = radiiOf(spec, target.kind).filter((r, i) => i !== target.i); // (landing on one of these just merges the two)
-  const addD = (d) => { if (d > lo + 1e-6 && d < top - 1e-6 && !own.some((r) => Math.abs(r - d) < 1e-6)) out.add(Math.round(d * 1e6) / 1e6); };
+  // (exact: a mark rounded off would put circles a hair from meeting, not meeting)
+  const addD = (d) => { if (d > lo + 1e-6 && d < top - 1e-6 && !own.some((r) => Math.abs(r - d) < 1e-6) && !out.some((e) => Math.abs(e - d) < 1e-9)) out.push(d); };
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   // through other points: tiles' corners, middles, edges' middles
   for (const kind of KINDS) for (const v of G.near(kind, p0, top)) addD(dist(G.toPlane(v), p0));
@@ -646,7 +769,7 @@ export function tileSnapCandidates(spec, target) {
   }
   for (let i = 0; i < copies.length; i++)
     for (let j = i + 1; j < copies.length; j++) { const c = circumcenter(p0, copies[i], copies[j]); if (c) addD(dist(c, p0)); }
-  return [...out].sort((a, b) => a - b);
+  return out.sort((a, b) => a - b);
 }
 // The truncations (in range) that make some face regular: a square's corners cut to a regular
 // octagon, a hexagon's to a dodecagon, a triangle's to a hexagon, an edge's face to a square.
