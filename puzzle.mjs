@@ -649,8 +649,24 @@ export function customSolid(spec) {
   return { baseNormals, baseSolid, normals, colors, labels, solid };
 }
 
+// A depth within 1e-5 of one where the cuts meet the solid's corners or edges, or each other (a
+// snap candidate), is that depth exactly: one a hair off cuts slivers thinner than EPS,
+// pieces of nothing. (The same for a truncation.)
+function exactDepths(spec) {
+  const out = { ...spec, truncate: { ...(spec.truncate || {}) }, cuts: cutSets(spec).map((c) => ({ ...c, depths: [...c.depths] })) };
+  for (const kind of ["vertex", "edge"]) if (out.truncate[kind] !== undefined) {
+    const m = alignedDepthCandidates(out, { trim: kind }).find((f) => Math.abs(f - out.truncate[kind]) < 1e-5);
+    if (m !== undefined) out.truncate[kind] = m;
+  }
+  out.cuts.forEach((set, s) => set.depths.forEach((d, i) => {
+    const m = alignedDepthCandidates(out, { s, i }).find((f) => Math.abs(f - d) < 1e-5);
+    if (m !== undefined) set.depths[i] = m;
+  }));
+  return out;
+}
 export function buildPuzzle(spec, size = spec.size) {
   const custom = spec.rule === "custom";
+  if (custom) spec = exactDepths(spec);
   let normals, colors, solid, baseSolid, baseNormals, labels = null;
   if (custom) ({ normals, colors, solid, baseSolid, baseNormals, labels } = customSolid(spec));
   else if (spec.rule === "cuboid" || spec.rule === "prism") {
