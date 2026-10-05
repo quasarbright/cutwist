@@ -21,7 +21,18 @@ export function unevenness(verts) {
 // The outline of convex polygons that meet along whole sides (a face made of parts from
 // several tiles): the sides only one of them has, chained into a loop. 2D points.
 export function unionOutline(polys) {
-  const k = (p) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`;
+  // (points within 1e-9 are one, each numbered once: rounding them to a key instead, two
+  // copies of one point a hair apart can round apart)
+  const pts = [], grid = new Map(), cell = 1e-9;
+  const k = (p) => {
+    const gx = Math.floor(p[0] / cell), gy = Math.floor(p[1] / cell);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+      for (const i of grid.get(`${gx + dx},${gy + dy}`) || []) if (Math.abs(pts[i][0] - p[0]) < cell && Math.abs(pts[i][1] - p[1]) < cell) return i;
+    pts.push(p);
+    if (!grid.has(`${gx},${gy}`)) grid.set(`${gx},${gy}`, []);
+    grid.get(`${gx},${gy}`).push(pts.length - 1);
+    return pts.length - 1;
+  };
   const sides = new Map();
   for (const poly of polys) poly.forEach((a, i) => {
     const b = poly[(i + 1) % poly.length];

@@ -361,11 +361,24 @@ function cellPattern(P) {
   const half = Math.hypot(...cellP[0]) + 2 * rmax + 0.1;
   const circles = KINDS.flatMap((kind) => radiiOf(spec, kind).flatMap((r) => G.near(kind, mid, half * Math.SQRT2 + r).map((c) => ({ c: G.toPlane(c), r }))));
   const cellInv = inverse2(K.cell);
+  // Which copy of a region is the cell's: the one whose middle, nudged off points and lines (a
+  // piece centered on a corner has its middle there) at 17°, clear of every edge's direction,
+  // is in the cell. Each copy's middle is worked out from its own arcs, so one right on the
+  // cell's edge could look inside for two copies, or for none: the copies near the cell are
+  // matched up (middles a whole number of cells apart, the same size), and exactly one of
+  // each is kept, the one inside (or else the first).
+  const nearCell = [];
   for (const f of arrangement(circles)) {
-    // its middle, nudged off points and lines (a piece centered on a corner has its middle
-    // there) at 17°, clear of every edge's direction, picks its cell
-    const cf = apply(cellInv, G.fromPlane([f.mid[0] + 0.0287, f.mid[1] + 0.0088]));
-    if (Math.floor(cf[0]) !== 0 || Math.floor(cf[1]) !== 0) continue;
+    f.cf = apply(cellInv, G.fromPlane([f.mid[0] + 0.0287, f.mid[1] + 0.0088]));
+    if (f.cf.every((v) => v > -0.01 && v < 1.01)) nearCell.push(f);
+  }
+  const inCell = (f) => f.cf.every((v) => v >= 0 && v < 1), mine = [];
+  for (const f of nearCell) {
+    const twin = mine.findIndex((g) => Math.abs(g.area - f.area) < 1e-9 && g.cf.every((v, i) => Math.abs(f.cf[i] - v - Math.round(f.cf[i] - v)) < 1e-6));
+    if (twin < 0) mine.push(f);
+    else if (!inCell(mine[twin]) && inCell(f)) mine[twin] = f;
+  }
+  for (const f of mine) {
     // (the circles reaching it)
     const reach = Math.max(...f.box.map((v, i) => Math.abs(v - f.mid[i % 2])));
     const near = circles.filter(({ c, r }) => Math.hypot(c[0] - f.mid[0], c[1] - f.mid[1]) < r + reach * Math.SQRT2 + 1e-6);
@@ -399,14 +412,16 @@ function cellPattern(P) {
     });
   }
   // (the same pieces, in the same order, every time: by their middles, top to bottom)
-  out.sort((a, b) => Math.round((a.mid[1] - b.mid[1]) * 1e6) || a.mid[0] - b.mid[0]);
+  // (each by its own rounded height, so the order is consistent)
+  for (const pc of out) pc.row = Math.round(pc.mid[1] * 1e6);
+  out.sort((a, b) => a.row - b.row || a.mid[0] - b.mid[0]);
   // a piece's type: pieces alike up to the tiling's turns (the same size, the same number of
-  // faces), for blacking out every piece like one
+  // faces), for blacking out every piece like one. (Sizes compared to within a hair, not
+  // rounded: two copies' sizes can round apart.)
   const types = [];
   for (const pc of out) {
-    const sig = `${pc.stickers.length}:${pc.area.toFixed(3)}`;
-    let t = types.indexOf(sig);
-    if (t < 0) { types.push(sig); t = types.length - 1; }
+    let t = types.findIndex((u) => u.n === pc.stickers.length && Math.abs(u.area - pc.area) < 1e-7);
+    if (t < 0) { types.push({ n: pc.stickers.length, area: pc.area }); t = types.length - 1; }
     pc.type = t;
   }
   patterns.set(id, out);

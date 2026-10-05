@@ -104,6 +104,18 @@ test("no color drawn where it isn't: at every snap radius, each covered point is
   checkCover(preset("hex", 2, 2, { cuts: [{ on: "face", depths: [1 / Math.sqrt(3)] }, { on: "vertex", depths: [1 / Math.sqrt(3)] }] }), rand);
 });
 
+test("piece types: every piece of a type alike, and each type on every cell (so blacking one out takes them all)", () => {
+  for (const spec of [...TILE_PRESETS, ...Object.values(DESIGNS).map(([t, a, b, more]) => presetSpec(t, a, b, more))]) {
+    const P = buildTiles(spec), cells = P.pieces.length / new Set(P.pieces.map((pc) => pc.outline)).size;
+    const byType = new Map();
+    for (const pc of P.pieces) { if (!byType.has(pc.type)) byType.set(pc.type, []); byType.get(pc.type).push(pc); }
+    for (const [t, ps] of byType) {
+      assert.ok(ps.every((pc) => pc.kind === ps[0].kind && Math.abs(pc.area - ps[0].area) < 1e-7), `${spec.name}: type ${t}`);
+      assert.equal(ps.length % cells, 0, `${spec.name}: type ${t} has ${ps.length} pieces on ${cells} cells`);
+    }
+  }
+});
+
 test("every preset fits its torus, and its scrambles undo", () => {
   for (const spec of TILE_PRESETS) {
     assert.ok(tilesFit(spec), spec.name);

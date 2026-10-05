@@ -759,14 +759,14 @@ export function buildPuzzle(spec, size = spec.size) {
 // exactly on another piece; match them by centroid. Types are numbered in order of their
 // first piece, which is stable for a given declaration (so a shared link can name them).
 export function pieceTypes(pieces, group) {
-  const key = (v) => v.map((x) => Math.round(x * 1e5)).join(",");
-  const at = new Map(pieces.map((p, i) => [key(p.centroid), i]));
+  // (matched to within a hair, not by rounded keys: a rotated centroid and its match can round apart)
+  const findPiece = pieceFinder(pieces), index = new Map(pieces.map((p, i) => [p, i]));
   const parent = pieces.map((_, i) => i);
   const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for (const m of group.mats)
     pieces.forEach((p, i) => {
-      const j = at.get(key(applyMat(m, p.centroid)));
-      if (j !== undefined) parent[find(i)] = find(j);
+      const q = findPiece(applyMat(m, p.centroid));
+      if (q) parent[find(i)] = find(index.get(q));
     });
   const number = new Map();
   return pieces.map((_, i) => {

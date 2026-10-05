@@ -3527,7 +3527,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         sc.root.add(group);
         const margin = 0.028 * P.R * (3 / 7), lift = 0.004 * P.R;
         // one set per distance from the center, outermost first: that depth along every axis, both ways
-        const depths = [...new Set(P.axes[0].offsets.map((o) => Math.abs(o).toFixed(9)))].map(Number).sort((a, b) => b - a);
+        const depths = P.axes[0].offsets.map(Math.abs).sort((a, b) => b - a).filter((d, i, a) => !i || a[i - 1] - d > 1e-9);
         const sets = depths.map((d) => P.axes.flatMap((ax) => [[ax.dir, d], [ax.dir, -d]]));
         let pieces = [P.solid];
         const stages = [pieces];
