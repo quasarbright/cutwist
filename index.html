@@ -560,7 +560,7 @@
       </section>
 
       <section>
-        <div class="tw-label" title="the shape before it's cut">solid</div>
+        <div class="tw-label" id="bSolidLabel" title="the shape before it's cut">solid</div>
         <div class="tw-chips" id="bSolid" role="radiogroup" aria-label="solid"></div>
       </section>
 
@@ -779,7 +779,7 @@
   <script type="module">
     import * as THREE from "three";
     import {
-      PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, toCustom, CUT_RANGE, TRIM_RANGE,
+      PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, regularTrims, toCustom, CUT_RANGE, TRIM_RANGE,
       piecesInLayer, layerOf, closestOrientation, TEXTURE_MIN_FACES, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
@@ -789,9 +789,10 @@
     import { PlanarView } from "./planar-view.mjs";
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
     import {
-      TILE_PRESETS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves, piecesInCircle, signedTurn, snapTiles, nearestCopy,
+      TILE_PRESETS, TILE_PARAMS, TILE_CUT_RANGE, TILINGS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves,
+      piecesInLayer as tilePiecesInLayer, signedTurn, snapTiles, nearestCopy, tileSnapCandidates, tileRegularTrims, tileStats, tileDesign, tileCount, tileRadiusCap,
     } from "./tiles.mjs";
-    import { TileView, tileColor, circleNear, tileNear } from "./tile-view.mjs";
+    import { TileView, faceColor, circleNear, axisNear, pieceNear } from "./tile-view.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1213,10 +1214,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         return;
       }
       if (isTiles()) {
-        // a tile's circle: theta in radians, clockwise, from 0 to q steps the short way round
-        const e = queue.shift(), qs = signedTurn(P, e.move.q), fast = queue.length > 1 ? 0.45 : 1;
-        anim = { axis: e.move.axis, layer: 0, move: e.move, theta: 0, from: 0, to: qs * P.step, t: 0,
-                 dur: e.dur ?? (130 + 90 * Math.abs(qs)) * fast, pieces: piecesInCircle(P, state, e.move.axis) };
+        // a layer around a turning point: theta in radians, clockwise, from 0 to q of its turns
+        // the short way round
+        const e = queue.shift(), { axis, layer } = e.move, qs = signedTurn(P, e.move.q, axis), fast = queue.length > 1 ? 0.45 : 1;
+        anim = { axis, layer, move: e.move, theta: 0, from: 0, to: (qs * TAU) / P.axes[axis].order, t: 0,
+                 dur: e.dur ?? (130 + 90 * Math.abs(qs)) * fast, pieces: tilePiecesInLayer(P, state, axis, layer) };
         return;
       }
       const e = queue.shift(), ax = P.axes[e.move.axis];
@@ -1335,13 +1337,24 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // may list them differently, or repeat a kind)
     const threeSets = (cuts) => ["face", "vertex", "edge"].map((on) => ({ on, depths: (cuts || []).filter((c) => c.on === on).flatMap((c) => c.depths) }));
     let custom = { name: "Custom", rule: "custom", size: 2, fixed: true, solid: "cube", truncate: {}, cuts: threeSets([{ on: "face", depths: [0.33] }]), blackout: [] };
-    const design = () => ({ solid: custom.solid, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout });
+    // A tile-turning design is the same, on a tiling instead of a solid, with its torus's size
+    // and skew, and cuts' depths as circles' radii (in tile spacings)
+    const isTileDesign = () => custom.rule === "tiles";
+    const design = () => (isTileDesign()
+      ? { rule: "tiles", tiling: custom.tiling, a: custom.a, b: custom.b, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout }
+      : { solid: custom.solid, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout });
+    // a tile-turning design as a puzzle spec: the design, with the steppers for its torus
+    const tileCustom = (d) => ({
+      name: "Custom", size: 2, fixed: true, params: TILE_PARAMS, ...d, cuts: threeSets(d.cuts),
+      title: (n, s) => `${tileCount(s)} ${TILINGS[s.tiling].name}s on a torus`,
+    });
 
     function readShared() {
       try {
         const q = new URLSearchParams(location.search), p = q.get("design") ?? q.get("p"); // (p: older links)
         if (!p) return null;
         const c = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
+        if (c.rule === "tiles") return readTileDesign(c);
         if (!SOLID_NAMES[c.solid]) return null;
         const clampDepths = (ds) => (Array.isArray(ds) ? ds : []).map(Number).filter(Number.isFinite).map((d) => Math.max(-0.95, Math.min(0.99, d)));
         // older links carried one set as on/depths
@@ -1353,8 +1366,23 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (Number.isFinite(f)) truncate[k] = Math.max(TRIM_MIN, Math.min(TRIM_MAX, f));
         }
         const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
-        return { ...custom, solid: c.solid, truncate, cuts: threeSets(cuts), blackout };
+        return { name: "Custom", rule: "custom", size: 2, fixed: true, solid: c.solid, truncate, cuts: threeSets(cuts), blackout };
       } catch { return null; }
+    }
+    // a tile-turning design from a link, its numbers kept in range
+    function readTileDesign(c) {
+      if (!TILINGS[c.tiling]) return null;
+      const int = (v, lo, hi, d) => (Number.isInteger(v) ? Math.max(lo, Math.min(hi, v)) : d);
+      const [lo, hi] = TILE_CUT_RANGE;
+      const cuts = (Array.isArray(c.cuts) ? c.cuts : []).filter((s) => ON_NAMES[s.on])
+        .map((s) => ({ on: s.on, depths: (Array.isArray(s.depths) ? s.depths : []).map(Number).filter(Number.isFinite).map((d) => Math.max(lo, Math.min(hi, d))) }));
+      const truncate = {};
+      for (const k of ["vertex", "edge"]) {
+        const f = c.truncate && Number(c.truncate[k]);
+        if (Number.isFinite(f)) truncate[k] = Math.max(TRIM_MIN, Math.min(TRIM_MAX, f));
+      }
+      const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
+      return tileCustom({ rule: "tiles", tiling: c.tiling, a: int(c.a, 1, 8, 3), b: int(c.b, 0, 8, 0), truncate, cuts, blackout });
     }
     // a custom design as URL-safe base64 JSON
     const designCode = () => btoa(JSON.stringify(design())).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -1375,6 +1403,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let hoverType = null;
     function setHover(type) {
       hoverType = type;
+      if (isTiles()) return; // (a tile puzzle lights them as it draws each frame: see drawTiles)
       lightPieces(type === null ? null : new Set(P.types.flatMap((t, i) => (t === type ? [i] : []))));
     }
     function restoreAll() {
@@ -1385,7 +1414,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     function toggleType(piece) {
       pushUndo();
-      const t = P.types[piece], list = custom.blackout;
+      const t = isTiles() ? P.pieces[piece].type : P.types[piece], list = custom.blackout;
       custom.blackout = list.includes(t) ? list.filter((x) => x !== t) : [...list, t];
       load(false);
     }
@@ -1447,45 +1476,72 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const kept = (r, i) => keep && keep[0] === r && keep[1] === i;
       snaps = RULERS.map((R, r) => R.values().map((_, i) => (kept(r, i) ? (snaps[r] && snaps[r][i]) || [] : [])));
       showSnaps();
+      // (work: [ruler, handle, a depth to check, or null for a truncation's regular faces])
       const work = [];
       RULERS.forEach((R, r) => R.values().forEach((v, i) => {
         if (kept(r, i)) return;
-        const near = alignedDepthCandidates(spec, R.target(i)).sort((a, b) => Math.abs(a - v) - Math.abs(b - v)).slice(0, SNAP_NEAREST);
+        const t = R.target(i);
+        if (isTileDesign()) {
+          // (a tiling's cut marks: circles through other points of the drawing, no check needed)
+          if (t.trim) work.push([r, i, null]);
+          else snaps[r][i] = tileSnapCandidates(spec, { kind: CUT_KINDS[t.s], i: t.i });
+          return;
+        }
+        if (t.trim) work.push([r, i, null]);
+        const near = alignedDepthCandidates(spec, t).sort((a, b) => Math.abs(a - R.depth(v)) - Math.abs(b - R.depth(v))).slice(0, SNAP_NEAREST);
         for (const f of near) work.push([r, i, f]);
       }));
+      if (isTileDesign()) showSnaps();
       work.sort((a, b) => (b[0] === sel.r && b[1] === sel.i) - (a[0] === sel.r && a[1] === sel.i));
       const step = () => {
         if (job !== snapJob || !work.length) return;
-        const [r, i, f] = work.shift();
-        if (isGoodSnap(spec, RULERS[r].target(i), f, MAX_PIECES)) { snaps[r][i].push(f); showSnaps(); }
+        const [r, i, f] = work.shift(), R = RULERS[r], t = R.target(i);
+        // (marks are where the ruler shows them: a truncation's by what it takes off)
+        if (f === null) {
+          const fs = isTileDesign() ? tileRegularTrims(spec, t.trim, TRIM_RANGE) : regularTrims(spec, t.trim);
+          snaps[r][i].push(...fs.map(R.depth));
+          showSnaps();
+        } else if (isGoodSnap(spec, t, f, MAX_PIECES)) { snaps[r][i].push(R.depth(f)); showSnaps(); }
         setTimeout(step, 0);
       };
       setTimeout(step, 150);
     }
     // ---------- the rulers ----------
     // Every depth in the design is a handle on a ruler. There are five: truncating corners
-    // and edges (at most one handle each; 1 is the tip of the corner or edge), then cuts
+    // and edges (at most one handle each; 0 takes nothing off the corner or edge), then cuts
     // around faces, corners and edges (any number; 0 is the center, 1 the surface, negative
     // past the center). One handle across all rulers is selected: its ruler shows its snap
     // marks and its readout. Pressing anywhere on a ruler grabs its nearest handle, so small
     // handles are still easy to catch.
     const CUT_KINDS = ["face", "vertex", "edge"];
     const setOf = (on) => custom.cuts.find((c) => c.on === on);
+    // (on a tiling, a cut set's depths are circles' radii, from nothing out: no center mark)
     const cutRuler = (on) => ({
-      group: "bSets", label: ON_SHORT[on], range: CUT_RANGE, max: Infinity, noun: "cut", center: true,
-      title: `cuts around every ${ON_NAMES[on].replace("around ", "").replace(/s$/, "")}: each depth cuts all of them the same way`,
+      group: "bSets", label: ON_SHORT[on], max: Infinity, noun: "cut",
+      // (a tiling's radii stop where a circle would reach around the torus to overlap itself)
+      get range() { return isTileDesign() ? [TILE_CUT_RANGE[0], Math.min(TILE_CUT_RANGE[1], tileRadiusCap(custom))] : CUT_RANGE; },
+      get center() { return !isTileDesign(); },
+      get title() {
+        const one = ON_NAMES[on].replace("around ", "").replace(/s$/, "");
+        return isTileDesign() ? `circles around every ${on === "face" ? "tile's middle" : on === "vertex" ? "corner" : "edge's middle"}: each radius cuts all of them the same way; the circles around one point make layers that turn on their own`
+          : `cuts around every ${one}: each depth cuts all of them the same way`;
+      },
+      depth: (v) => v,
       values: () => setOf(on).depths,
       set: (i, v) => { setOf(on).depths[i] = v; },
       add: (v) => setOf(on).depths.push(v),
       remove: (i) => setOf(on).depths.splice(i, 1),
       target: (i) => ({ s: custom.cuts.indexOf(setOf(on)), i }),
     });
+    // (a truncation's ruler reads how much it takes off, 1 − its depth: 0 at the left is the
+    // tip, nothing off. The design keeps the depth.)
     const trimRuler = (kind) => ({
-      group: "bTrim", label: kind === "vertex" ? "corners" : "edges", range: TRIM_RANGE, max: 1, noun: "truncation", center: false,
-      title: `cut the solid's ${kind === "vertex" ? "corners" : "edges"} off flat; 1 is the tip, lower cuts more off`,
-      values: () => (custom.truncate[kind] === undefined ? [] : [custom.truncate[kind]]),
-      set: (_, v) => { custom.truncate[kind] = v; },
-      add: (v) => { custom.truncate[kind] = v; },
+      group: "bTrim", label: kind === "vertex" ? "corners" : "edges", range: [1 - TRIM_RANGE[1], 1 - TRIM_RANGE[0]], max: 1, noun: "truncation", center: false,
+      get title() { return `cut the ${isTileDesign() ? "tiles'" : "solid's"} ${kind === "vertex" ? "corners" : "edges"} off flat; 0 takes nothing off, higher cuts more off`; },
+      depth: (v) => 1 - v, // (ruler → design, and back)
+      values: () => (custom.truncate[kind] === undefined ? [] : [1 - custom.truncate[kind]]),
+      set: (_, v) => { custom.truncate[kind] = 1 - v; },
+      add: (v) => { custom.truncate[kind] = 1 - v; },
       remove: () => { delete custom.truncate[kind]; },
       target: () => ({ trim: kind }),
     });
@@ -1560,9 +1616,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function addValue(r) {
       pushUndo();
       const R = RULERS[r];
-      let v = 0.85;
+      let v = 0.15;
       if (R.max !== 1) {
-        const pts = [0, ...R.values().filter((d) => d > 0 && d < 0.95), 0.95].sort((a, b) => a - b);
+        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : [0, 0.95]; // (a tiling's: out to the next tile's middle, or the cap)
+        const pts = [lo, ...R.values().filter((d) => d > lo && d < hi), hi].sort((a, b) => a - b);
         let gap = -1;
         for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1] - pts[k] > gap) { gap = pts[k + 1] - pts[k]; v = (pts[k] + pts[k + 1]) / 2; }
       }
@@ -1677,7 +1734,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     function renderBuilder() {
-      radio($("bSolid"), Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]), custom.solid,
+      // a solid, or a tile-turning design's tiling
+      const tiles = isTileDesign();
+      $("bSolidLabel").textContent = tiles ? "tiling" : "solid";
+      $("bSolidLabel").title = tiles ? "the tiles on the torus before it's cut" : "the shape before it's cut";
+      if (tiles) radio($("bSolid"), Object.keys(TILINGS).map((k) => [k, TILINGS[k].name + "s", `${TILINGS[k].name}s on a torus`]), custom.tiling,
+        (k) => { pushUndo(); custom.tiling = k; changed(); computeSnaps(); });
+      else radio($("bSolid"), Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]), custom.solid,
         (k) => { pushUndo(); custom.solid = k; changed(); computeSnaps(); });
       renderRulers();
     }
@@ -1690,7 +1753,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     function showStats(n, tooMany) {
-      if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or shallower cuts.</span>`; return; }
+      if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isTileDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
+      if (isTiles()) {
+        const st = tileStats(P), pct = st.smallest * 100;
+        $("bStats").title = "how many pieces, and the smallest one as a share of a tile (red: slivers)";
+        $("bStats").innerHTML = `${st.pieces} pieces<br>smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
+        return;
+      }
       const st = puzzleStats(P);
       const pct = st.smallest * 100;
       $("bStats").title = "how many pieces show, and the smallest sticker as a share of its face (red: slivers)";
@@ -1710,7 +1779,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function renderParams() {
       const spec = currentSpec(), host = $("paramControls");
       host.replaceChildren();
-      for (const q of (!isCustom() && spec.params) || []) {
+      for (const q of ((!isCustom() || isTileDesign()) && spec.params) || []) { // (a tile-turning design keeps its torus's steppers)
         const row = document.createElement("div");
         row.className = "control";
         if (q.options) { // a choice: a dropdown
@@ -1735,7 +1804,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         input.setAttribute("aria-label", q.label);
         const set = (v) => {
           v = Number.isFinite(v) ? Math.max(q.min, Math.min(max, Math.round(v))) : currentSpec()[q.key];
-          if (v !== currentSpec()[q.key]) { paramVals[q.key] = v; load(); } // new shape: new starting view
+          if (v !== currentSpec()[q.key]) {
+            if (isCustom()) { pushUndo(); custom[q.key] = v; changed(); } // (a design's: an edit, undoable)
+            else { paramVals[q.key] = v; load(); } // new shape: new starting view
+          }
           renderParams();
         };
         down.disabled = spec[q.key] <= q.min; up.disabled = spec[q.key] >= max;
@@ -1751,9 +1823,16 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let puzzleName = ""; // the full title, numbers and all ("3×3×3 cube"): the test hook reports it
     function load(resetView = true) {
       let spec = currentSpec();
-      if (spec.rule === "tiles") { // (too few tiles for a circle to fit: the nearest size that fits)
-        const fit = snapTiles(spec);
-        if (fit.a !== spec.a) { paramVals.a = fit.a; spec = currentSpec(); renderParams(); }
+      if (spec.rule === "tiles") { // (too few tiles for a circle to fit: a preset grows to the nearest size that fits)
+        // (a design's circles shrink to fit instead, keeping the size you picked)
+        if (isCustom()) {
+          const cap = tileRadiusCap(custom);
+          custom.cuts = custom.cuts.map((c) => ({ ...c, depths: [...new Set(c.depths.map((d) => Math.min(d, cap)))] }));
+          spec = currentSpec();
+        } else {
+          const fit = snapTiles(spec);
+          if (fit.a !== spec.a) { paramVals.a = fit.a; spec = currentSpec(); renderParams(); }
+        }
       }
       const next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : buildPuzzle(spec, size);
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
@@ -1841,8 +1920,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // was there before is a different puzzle: undoing back to it turned a preset into a cube).
     function customizePreset() {
       resetEdits();
-      custom = toCustom(P);
-      custom.cuts = threeSets(custom.cuts);
+      if (isTiles()) custom = tileCustom(tileDesign(currentSpec()));
+      else {
+        custom = toCustom(P);
+        custom.cuts = threeSets(custom.cuts);
+      }
       presetIdx = "custom";
       size = custom.size;
       renderParams();
@@ -1962,8 +2044,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     function renderTexturesButton() {
-      // (tile-turning puzzles: on from 13 tiles, like 3D puzzles from 13 faces)
-      showTextures = textureChoice ?? (isTiles() ? P.tiles.length >= TEXTURE_MIN_FACES : !!P.texturesByDefault);
+      // (tile-turning puzzles: on from 13 faces, like 3D puzzles)
+      showTextures = textureChoice ?? (isTiles() ? P.faces.length >= TEXTURE_MIN_FACES : !!P.texturesByDefault);
       texturesOn.value = showTextures ? 1 : 0;
       $("textures").classList.toggle("is-active", showTextures);
       $("textures").setAttribute("aria-pressed", String(showTextures));
@@ -2080,7 +2162,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         // the 3D torus: press a circle to drag it round, click a tile's middle to turn it;
         // anywhere else (or shift) turns the view
         const hit = !e.shiftKey && (e.button === 0 || e.button === 2) ? surfaceHit(e.clientX, e.clientY) : null;
-        const p = hit && tilePoint(hit), c = p && e.button === 0 ? circleNear(P, p, 0.07) : null, mid = p && !c ? tileNear(P, p) : null;
+        const p = hit && tilePoint(hit);
+        if (p && painting && isCustom()) { // (blacking out: a click picks a piece's kind)
+          const piece = pieceNear(P, state, p, tileView.ctx);
+          drag = piece !== null ? { mode: "paint", x: e.clientX, y: e.clientY, piece } : { mode: "orbit", x: e.clientX, y: e.clientY };
+          return;
+        }
+        const c = p && e.button === 0 ? circleNear(P, p, 0.07) : null, mid = p && !c ? axisNear(P, p) : null;
         if (c) {
           flush();
           drag = { mode: "tpress", x: e.clientX, y: e.clientY };
@@ -2207,7 +2295,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         canvas.style.cursor = "grab";
         if (tilePointer) tilePointer.cursor = "grab";
       }
-      if (drag && drag.mode === "tclick") turnTile({ axis: drag.axis, layer: 0, q: drag.q });
+      if (drag && drag.mode === "tclick") turnTile({ axis: drag.axis, layer: 0, q: drag.q }); // (a middle: the innermost layer)
       if (drag && drag.mode === "paint") toggleType(drag.piece);
       if (drag && drag.mode === "segment") turnSegment(drag.seg, drag.clockwise);
       if (!pointers.size || (drag && drag.mode === "pinch")) drag = null;
@@ -2340,7 +2428,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // 32 per texture index), read at the same turned-back spot as the colors.
     const tileTexView = new TileView(texCanvas), idCanvas = document.createElement("canvas"), tileIdView = new TileView(idCanvas);
     const turnUniforms = {
-      uTurn: { value: 0 }, uC: { value: new THREE.Vector2() }, uTheta: { value: 0 }, uR: { value: 1 },
+      uTurn: { value: 0 }, uC: { value: new THREE.Vector2() }, uTheta: { value: 0 }, uR: { value: 1 }, uRin: { value: 0 },
       uA: { value: new THREE.Vector2() }, uB: { value: new THREE.Vector2() }, uS: { value: new THREE.Vector2() }, uT: { value: new THREE.Vector2() },
       uIds: { value: null },
     };
@@ -2350,7 +2438,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function tileShader(shader, uniforms) {
       Object.assign(shader.uniforms, uniforms, { uPeriod: texturePeriod, uTextures: texturesOn });
       shader.fragmentShader = shader.fragmentShader
-        .replace("void main() {", `uniform int uTurn; uniform vec2 uC, uA, uB, uS, uT; uniform float uTheta, uR; uniform sampler2D uIds;${INK_GLSL}
+        .replace("void main() {", `uniform int uTurn; uniform vec2 uC, uA, uB, uS, uT; uniform float uTheta, uR, uRin; uniform sampler2D uIds;${INK_GLSL}
         void main() {`)
         .replace("#include <map_fragment>", `
         #ifdef USE_MAP
@@ -2364,7 +2452,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
               vec2 p = (d.x + float(i)) * uA + (d.y + float(j)) * uB;
               if (dot(p, p) < dot(best, best)) best = p;
             }
-            if (length(best) < uR) {
+            if (length(best) < uR && length(best) >= uRin) {
               float c = cos(uTheta), s = sin(uTheta);
               vec2 back = vec2(c * best.x + s * best.y, -s * best.x + c * best.y); // (turned back by theta)
               vec2 st2 = uC + vec2(dot(uS, back), dot(uT, back));
@@ -2599,18 +2687,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // a torus. Press a circle's line and drag: the circle turns under the pointer, about its
     // tile's middle, and snaps to whole steps on release (one move). A click on a tile's middle
     // turns it a step clockwise (right click: counterclockwise). Hovering a circle lights it.
-    let tileHover = null; // the tile whose circle is lit (under the pointer)
+    let tileHover = null; // the layer whose circles are lit (under the pointer): { axis, layer }, or null
     // the spot under the pointer, for its copies in the flat view: { at (plane), real (the
     // pointer's on the flat view itself, so that copy needs no arrow) }, or null
     let tilePointer = null;
-    let tdrag = null; // the circle being dragged: { axis, center (plane, the copy pressed), at (the pointer), last (its angle), theta, id }
+    let tdrag = null; // the circle being dragged: { axis, layer, center (plane, the copy pressed), at (the pointer), last (its angle), theta, id }
     const refTileView = new TileView($("refPlane"));
     // a spot on the 3D torus (flat coordinates s, t) in plane coordinates
     const tilePoint = ({ s, t }) => [s * P.Ap[0] + t * P.Bp[0], s * P.Ap[1] + t * P.Bp[1]];
     function startTileDrag(c, p) {
-      tdrag = { axis: c.axis, center: c.center, at: p, last: Math.atan2(p[1] - c.center[1], p[0] - c.center[0]), theta: 0 };
-      anim = { live: true, axis: c.axis, layer: 0, move: null, theta: 0, pieces: piecesInCircle(P, state, c.axis) };
-      tileHover = c.axis;
+      tdrag = { axis: c.axis, layer: c.layer, center: c.center, at: p, last: Math.atan2(p[1] - c.center[1], p[0] - c.center[0]), theta: 0 };
+      anim = { live: true, axis: c.axis, layer: c.layer, move: null, theta: 0, pieces: tilePiecesInLayer(P, state, c.axis, c.layer) };
+      tileHover = { axis: c.axis, layer: c.layer };
     }
     // the pointer at plane point p: the angle it's turned through around the pressed circle's
     // middle since the press, counted continuously (more than a full turn keeps counting).
@@ -2630,9 +2718,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function releaseTileDrag() {
       if (!tdrag) return;
       if (anim && anim.live) {
-        const qs = Math.round(anim.theta / P.step), move = { axis: tdrag.axis, layer: 0, q: signedTurn(P, qs) };
-        Object.assign(anim, { live: false, move, from: anim.theta, to: qs * P.step, t: 0,
-                              dur: 90 + 160 * Math.min(1, Math.abs(qs * P.step - anim.theta) / P.step) });
+        const step = TAU / P.axes[tdrag.axis].order, qs = Math.round(anim.theta / step);
+        const move = { axis: tdrag.axis, layer: tdrag.layer, q: signedTurn(P, qs, tdrag.axis) };
+        Object.assign(anim, { live: false, move, from: anim.theta, to: qs * step, t: 0,
+                              dur: 90 + 160 * Math.min(1, Math.abs(qs * step - anim.theta) / step) });
         if (move.q) record([move]);
       }
       tdrag = null;
@@ -2648,9 +2737,16 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       renderAlgorithms();
     }
     function hoverTiles3D(x, y) {
-      const hit = surfaceHit(x, y), p = hit && tilePoint(hit), c = p && circleNear(P, p, 0.07);
-      tileHover = c ? c.axis : null;
-      canvas.style.cursor = c ? "grab" : p && tileNear(P, p) !== null ? "pointer" : "";
+      const hit = surfaceHit(x, y), p = hit && tilePoint(hit);
+      if (painting && isCustom()) { // (blacking out: light the kind of piece under the pointer)
+        const piece = p ? pieceNear(P, state, p, tileView.ctx) : null, type = piece === null ? null : P.pieces[piece].type;
+        if (type !== hoverType) setHover(type);
+        tilePointer = p ? { at: p, real: false, cursor: "" } : null;
+        return;
+      }
+      const c = p && circleNear(P, p, 0.07);
+      tileHover = c ? { axis: c.axis, layer: c.layer } : null;
+      canvas.style.cursor = c ? "grab" : p && axisNear(P, p) !== null ? "pointer" : "";
       tilePointer = p ? { at: p, real: false, cursor: canvas.style.cursor } : null; // (its copies show the same)
     }
     function drawTiles() {
@@ -2658,7 +2754,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       plane.hidden = !reg.flat;
       canvas.hidden = !reg.surface;
       const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta } : null;
-      const look = { hover: tdrag ? tdrag.axis : tileHover, lit: algLit, litAlpha: litPulse(), pointer: tilePointer, textures: showTextures };
+      // (lit: blacking out, the kind of piece under the pointer; otherwise an algorithm's pieces)
+      const lit = hoverType !== null ? new Set(P.pieces.flatMap((pc, i) => (pc.type === hoverType ? [i] : []))) : algLit;
+      const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit, litAlpha: hoverType !== null ? 0.34 : litPulse(), pointer: tilePointer, textures: showTextures };
       if (reg.flat) {
         placePlane(reg.flat);
         tileView.layout(P, reg.flat);
@@ -2676,7 +2774,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // and the shader's turn
     function tileSurface(turn, look) {
       // (textures: the shader's, from the picture of which tile is where, redrawn with the state)
-      const key = state.join(",") + "|" + look.hover + "|" + (look.lit ? [...look.lit].join(".") : "");
+      const key = state.join(",") + "|" + JSON.stringify(look.hover) + "|" + (look.lit ? [...look.lit].join(".") : "");
       if (key !== texKey) {
         const moved = texKey.split("|")[0] !== state.join(",");
         texKey = key;
@@ -2686,11 +2784,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       const u = turnUniforms, { Ap, Bp } = P, det = Ap[0] * Bp[1] - Ap[1] * Bp[0];
       u.uTurn.value = turn && turn.theta ? 1 : 0;
-      u.uR.value = P.r;
       u.uA.value.set(...Ap); u.uB.value.set(...Bp);
       u.uS.value.set(Bp[1] / det, -Bp[0] / det); u.uT.value.set(-Ap[1] / det, Ap[0] / det); // (plane → flat coordinates)
       if (turn) {
-        const c = P.tiles[anim.axis].center;
+        // the turning layer: the disk inside its circle, or the ring between two
+        const ax = P.axes[anim.axis], c = ax.center;
+        u.uRin.value = anim.layer ? ax.radii[anim.layer - 1] : 0;
+        u.uR.value = ax.radii[anim.layer];
         u.uC.value.set((c[0] * Bp[1] - c[1] * Bp[0]) / det, (Ap[0] * c[1] - Ap[1] * c[0]) / det);
         u.uTheta.value = turn.theta;
       }
@@ -2723,6 +2823,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointerdown", (e) => {
       if (isTiles()) {
         if (tdrag) return;
+        if (painting && isCustom()) { // (blacking out: a click blacks out, or brings back, a piece's kind)
+          const piece = tileView.pieceAt(e.clientX, e.clientY, state);
+          if (piece !== null && e.button === 0) toggleType(piece);
+          return;
+        }
         const c = e.button === 0 ? tileView.circleAt(e.clientX, e.clientY) : null;
         if (c) {
           try { plane.setPointerCapture(e.pointerId); } catch {}
@@ -2753,8 +2858,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (e.pointerId === tdrag.id) dragTileTo(at);
           return;
         }
+        if (painting && isCustom()) { // (blacking out: light the kind of piece under the pointer)
+          const piece = tileView.pieceAt(e.clientX, e.clientY, state), type = piece === null ? null : P.pieces[piece].type;
+          if (type !== hoverType) setHover(type);
+          plane.style.cursor = piece === null ? "" : "pointer";
+          tilePointer = tileView.shows(e.clientX, e.clientY) ? { at, real: true, cursor: plane.style.cursor } : null;
+          return;
+        }
         const c = tileView.circleAt(e.clientX, e.clientY);
-        tileHover = c ? c.axis : null;
+        tileHover = c ? { axis: c.axis, layer: c.layer } : null;
         plane.style.cursor = c ? "grab" : tileView.tileAt(e.clientX, e.clientY) !== null ? "pointer" : "";
         // its copies show the same (none while it's off the tiles, in the space around them)
         tilePointer = tileView.shows(e.clientX, e.clientY) ? { at, real: true, cursor: plane.style.cursor } : null;
@@ -2792,7 +2904,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     plane.addEventListener("pointerup", endPlanarDrag);
     plane.addEventListener("pointercancel", endPlanarDrag);
-    plane.addEventListener("pointerleave", () => { hoverArrow = null; if (!tdrag) { tileHover = null; tilePointer = null; } });
+    plane.addEventListener("pointerleave", () => {
+      hoverArrow = null;
+      if (!tdrag) { tileHover = null; tilePointer = null; }
+      if (isTiles() && hoverType !== null) setHover(null);
+    });
     plane.addEventListener("contextmenu", (e) => e.preventDefault());
     // the look controls: which fill is on, and which checkboxes apply right now
     function renderLook() {
@@ -2941,13 +3057,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (planarTextures) q.set("textures", "on");
         if (shapeId() !== P.topology) q.set("shape", shapeId());
         if (!viewFlat) q.set("flat", "off");
-        if (!view3D) q.set("3d", "off");
+        if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off"); // (only when it's not the screen's default)
         if (!showLabels) q.set("labels", "off");
         if (!reflectLabels) q.set("mirrored-labels", "off");
       } else if (isTiles()) {
         if (!viewFlat) q.set("flat", "off");
-        if (!view3D) q.set("3d", "off");
-        if (textureChoice !== null && textureChoice !== P.tiles.length >= TEXTURE_MIN_FACES) q.set("textures", textureChoice ? "on" : "off");
+        if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off");
+        if (textureChoice !== null && textureChoice !== P.faces.length >= TEXTURE_MIN_FACES) q.set("textures", textureChoice ? "on" : "off");
       } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
@@ -2985,7 +3101,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       const topo = currentSpec().topology;
       if (topo && (SURFACE_SHAPES[topo] || []).some((s) => s.id === q.get("shape"))) shapeChoice[topo] = q.get("shape");
-      viewFlat = !off("flat"); view3D = !off("3d");
+      // (the 3D view: on by default on a wide screen; a phone shows just the flat view unless the link says otherwise)
+      viewFlat = !off("flat"); view3D = phone.matches ? on("3d") : !off("3d");
       if (!viewFlat && !view3D) viewFlat = true;
       showLabels = !off("labels");
       reflectLabels = !off("mirrored-labels");
@@ -3683,8 +3800,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         return el;
       }
       if (isTiles()) {
-        const q = signedTurn(P, m.q), n = Math.abs(q), suffix = (n > 1 ? String(n) : "") + (q < 0 ? "′" : "");
-        el.append(Object.assign(document.createElement("i"), { style: `background: ${tileColor(P, m.axis)}` }));
+        // a tile's middle: its color; a corner or an edge: a pie of the tiles around it; a ring
+        // past the first circle: its number before the dot
+        const q = signedTurn(P, m.q, m.axis), n = Math.abs(q), suffix = (n > 1 ? String(n) : "") + (q < 0 ? "′" : "");
+        const colors = tilesAround(P.axes[m.axis]).map((f) => faceColor(P, f)), k = colors.length;
+        const dot = document.createElement("i");
+        dot.style.background = k === 1 ? colors[0] : `conic-gradient(${colors.map((c, j) => `${c} ${(j * 360) / k}deg ${((j + 1) * 360) / k}deg`).join(", ")})`;
+        if (m.layer) el.append(Object.assign(document.createElement("sub"), { textContent: m.layer + 1 }));
+        el.append(dot);
         if (suffix) el.append(Object.assign(document.createElement("sup"), { textContent: suffix }));
         return el;
       }
@@ -3696,6 +3819,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       el.append(dot);
       if (l.suffix) el.append(Object.assign(document.createElement("sup"), { textContent: l.suffix.replace("'", "′") }));
       return el;
+    }
+    // the tiles (their faces) a tile-turning axis is in or between, in turn around it
+    function tilesAround(ax) {
+      if (ax.kind === "face") return [P.faceAt(ax.home)];
+      const R = Math.max(...P.tiles[0].corners.map((c) => Math.hypot(c[0] - P.tiles[0].center[0], c[1] - P.tiles[0].center[1])));
+      return P.tiles.map((t, i) => ({ i, n: nearestCopy(P, t.center, ax.center) })).filter(({ n }) => Math.sqrt(n.dd) < R + 1e-6)
+        .sort((a, b) => Math.atan2(a.n.q[1] - ax.center[1], a.n.q[0] - ax.center[0]) - Math.atan2(b.n.q[1] - ax.center[1], b.n.q[0] - ax.center[0]))
+        .map(({ i }) => i);
     }
     // An algorithm as a strip of marks: its own little tape (in the list's hover preview, and
     // inside an algorithm's block on the main tape)
@@ -3806,31 +3937,31 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // the shelf: every puzzle as a picture, by family; clicking one loads it
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
-      if (spec.rule === "tiles") return "tile turning";
+      if (spec.rule === "tiles") return { hex: "hexagon tilings", square: "square tilings", triangle: "triangle tilings" }[spec.tiling];
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
       if (spec.truncate) return "other solids"; // (a truncated solid isn't its base's shape: the soccer ball)
       return { cube: "cubes", tetrahedron: "tetrahedra", octahedron: "octahedra", dodecahedron: "dodecahedra", icosahedron: "icosahedra" }[spec.solid] || "other solids";
     }
     const nxThumbs = {};
     let nxThumbRenderer = null;
-    // a picture of a puzzle, solved, from the start view's sort of angle (rendered once)
+    // A picture of a puzzle, solved (rendered once): a solid from the start view's sort of
+    // angle; a sliding puzzle's surface with its grid on it; a tile-turning puzzle flat.
     function nxThumb(spec) {
       if (nxThumbs[spec.id]) return nxThumbs[spec.id];
       const S = 256, cv = document.createElement("canvas"); // (shown at 96 px: sharp at 2× and up)
       cv.width = cv.height = S;
+      if (spec.rule === "tiles") {
+        // as the flat view draws it: the patch outlined, its copies around it
+        const Q = buildTiles(snapTiles(spec)), v = new TileView(cv);
+        v.layout(Q, { left: 6, top: 6, right: S - 6, bottom: S - 6 });
+        v.draw(solvedTileState(Q), null, { hover: null, lit: null });
+        return (nxThumbs[spec.id] = cv.toDataURL());
+      }
       nxThumbRenderer ??= new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
       nxThumbRenderer.setSize(S, S, false);
       nxThumbRenderer.setClearColor(0x000000, 0);
       const sc = vizScene(), group = new THREE.Group(), trash = [];
       sc.root.add(group);
-      if (spec.rule === "tiles") {
-        // flat, as the flat view draws it: the patch outlined, its copies around it
-        const Q = buildTiles(snapTiles(spec)), v = new TileView(cv);
-        v.layout(Q, { left: 6, top: 6, right: S - 6, bottom: S - 6 });
-        v.draw(solvedTileState(Q), null, { hover: null, lit: null });
-        sc.root.remove(group);
-        return (nxThumbs[spec.id] = cv.toDataURL());
-      }
       if (spec.rule === "planar") {
         // the surface, with the solved grid wrapped on it (as the 3D view draws it)
         const tex = document.createElement("canvas"), topology = spec.topology;
@@ -4036,8 +4167,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
             : isTiles()
-            ? { tiles: P.tiles.length, tiling: P.spec.tiling, a: P.spec.a, b: P.spec.b, pieces: P.n, order: P.order,
-                kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}), views: { flat: viewFlat, surface: view3D }, hover: tileHover }
+            ? { tiles: P.tiles.length, tiling: P.spec.tiling, a: P.spec.a, b: P.spec.b, pieces: P.n, faces: P.faces.length,
+                axes: P.axes.map((a) => ({ kind: a.kind, order: a.order, layers: a.radii.length })),
+                kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}), black: P.pieces.filter((pc) => pc.black).length,
+                views: { flat: viewFlat, surface: view3D }, hover: tileHover && tileHover.axis }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
@@ -4051,18 +4184,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // ---- screen positions, for the pointer-input tests ----
       // tiles: a point on tile `axis`'s circle line at `angle` (radians, clockwise from the
       // right), and its middle, on the flat view, in CSS px (its copy in the outlined patch)
-      tileCircle(axis, angle = 0) {
+      // (layer: which of the axis's circles, 0 the innermost)
+      tileCircle(axis, angle = 0, layer = 0) {
         tileView.layout(P, viewRegions().flat);
-        const c = P.tiles[axis].center;
-        return tileView.toScreen([c[0] + P.r * Math.cos(angle), c[1] + P.r * Math.sin(angle)]);
+        const c = P.axes[axis].center, r = P.axes[axis].radii[layer];
+        return tileView.toScreen([c[0] + r * Math.cos(angle), c[1] + r * Math.sin(angle)]);
       },
-      tileMiddle(axis) { tileView.layout(P, viewRegions().flat); return tileView.toScreen(P.tiles[axis].center); },
+      tileMiddle(axis) { tileView.layout(P, viewRegions().flat); return tileView.toScreen(P.axes[axis].center); },
       // the same point on the 3D torus, in CSS px, or null where it's hidden
       tileCircle3D(axis, angle = 0) {
         placeCamera();
         root.updateMatrixWorld(true);
         camera.updateMatrixWorld();
-        const c = P.tiles[axis].center, p = [c[0] + P.r * Math.cos(angle), c[1] + P.r * Math.sin(angle)], { Ap, Bp } = P, det = Ap[0] * Bp[1] - Ap[1] * Bp[0];
+        const c = P.axes[axis].center, r = P.axes[axis].radii[0], p = [c[0] + r * Math.cos(angle), c[1] + r * Math.sin(angle)], { Ap, Bp } = P, det = Ap[0] * Bp[1] - Ap[1] * Bp[0];
         const s = (((p[0] * Bp[1] - p[1] * Bp[0]) / det) % 1 + 1) % 1, t = (((Ap[0] * p[1] - Ap[1] * p[0]) / det) % 1 + 1) % 1;
         const [x, y] = surfaceToScreen(s, t), hit = surfaceHit(x, y);
         return hit && Math.hypot(hit.s - s, hit.t - t) < 0.01 ? { x, y } : null;

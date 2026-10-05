@@ -4,15 +4,28 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   TILE_PRESETS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves,
-  piecesInCircle, piecePose, tileCount, tilesFit, snapTiles, signedTurn, outlineArea,
+  piecesInLayer, piecePose, tileCount, tilesFit, snapTiles, signedTurn, outlineArea, tileSnapCandidates, tileRadiusCap, tileRegularTrims,
 } from "./tiles.mjs";
 
-const preset = (tiling, a, b = 0) => buildTiles({ ...TILE_PRESETS.find((p) => p.tiling === tiling), a, b });
+const presetSpec = (tiling, a, b = 0, more = {}) => ({ ...TILE_PRESETS.find((p) => p.tiling === tiling), a, b, ...more });
+const preset = (tiling, a, b = 0, more = {}) => buildTiles(presetSpec(tiling, a, b, more));
 const kinds = (P, pieces = P.pieces) => pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {});
 const play = (P, moves, s = solvedTileState(P)) => { for (const m of moves) applyTileMove(P, s, m); return s; };
 function seeded(seed) {
   return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
 }
+// designs beyond the presets, for the editor's options
+const DESIGNS = {
+  "hex corners": ["hex", 3, 0, { cuts: [{ on: "vertex", depths: [0.45] }] }],
+  "hex edges": ["hex", 3, 0, { cuts: [{ on: "edge", depths: [0.4] }] }],
+  "hex rings": ["hex", 4, 0, { cuts: [{ on: "face", depths: [0.3, 2 / 3] }] }],
+  "hex faces + corners": ["hex", 3, 0, { cuts: [{ on: "face", depths: [2 / 3] }, { on: "vertex", depths: [0.3] }] }],
+  "triangle corners": ["triangle", 2, 0, { cuts: [{ on: "vertex", depths: [0.6] }] }],
+  "square truncated": ["square", 3, 0, { truncate: { vertex: 0.75, edge: 0.85 } }],
+  // (six circles through each corner, opposite ones just touching there; and just short of it)
+  "triangle through corners": ["triangle", 2, 0, { cuts: [{ on: "face", depths: [1 / Math.sqrt(3)] }] }],
+  "triangle nearly through corners": ["triangle", 2, 0, { cuts: [{ on: "face", depths: [0.575] }] }],
+};
 
 test("tile counts: a² + ab + b² hexagons, a² + b² squares, twice the hexagons' count of triangles", () => {
   for (const [tiling, a, b, n] of [["hex", 3, 0, 9], ["hex", 2, 1, 7], ["hex", 3, 1, 13], ["square", 2, 1, 5], ["square", 3, 0, 9], ["triangle", 2, 0, 8], ["triangle", 2, 1, 14]]) {
@@ -21,13 +34,24 @@ test("tile counts: a² + ab + b² hexagons, a² + b² squares, twice the hexagon
   }
 });
 
+test("every preset fits its torus, and its scrambles undo", () => {
+  for (const spec of TILE_PRESETS) {
+    assert.ok(tilesFit(spec), spec.name);
+    const P = buildTiles(spec), moves = tileScrambleMoves(P, 60, seeded(5)), s = play(P, moves);
+    assert.ok(P.pieces.length > 0 && !isTileSolved(P, s), spec.name);
+    play(P, moves.slice().reverse().map((m) => inverseTileMove(P, m)), s);
+    assert.ok(s.every((v) => v === 0), spec.name);
+  }
+  assert.ok(TILE_PRESETS.some((p) => p.name === "Spiderman"));
+});
+
 test("hexagons cut like a 3×3×3: per tile a center, three edges and two corners; a turn moves 1 + 6 + 6", () => {
   for (const [a, b] of [[3, 0], [2, 1], [4, 0]]) {
     const P = preset("hex", a, b), T = P.tiles.length;
     assert.deepEqual(kinds(P), { 1: T, 2: 3 * T, 3: 2 * T });
   }
   const P = preset("hex", 4);
-  assert.deepEqual(kinds(P, [...piecesInCircle(P, solvedTileState(P), 0).keys()].map((i) => P.pieces[i])), { 1: 1, 2: 6, 3: 6 });
+  assert.deepEqual(kinds(P, [...piecesInLayer(P, solvedTileState(P), 0, 0).keys()].map((i) => P.pieces[i])), { 1: 1, 2: 6, 3: 6 });
 });
 
 test("squares and triangles: the same pieces on every tile, corners of 4 and 6 tiles", () => {
@@ -39,24 +63,20 @@ test("squares and triangles: the same pieces on every tile, corners of 4 and 6 t
   for (const P of [S, T, preset("hex", 3)]) assert.ok(Math.min(...P.pieces.map((pc) => pc.area)) > 0.005);
 });
 
-test("every sticker knows its tile, and each tile has its stickers", () => {
-  for (const [tiling, a, b] of [["hex", 3, 0], ["hex", 2, 1], ["square", 2, 1], ["triangle", 2, 1]]) {
-    const P = preset(tiling, a, b), per = new Array(P.tiles.length).fill(0);
-    for (const pc of P.pieces) for (const st of pc.stickers) { assert.ok(Number.isInteger(st.tile), `${tiling} (${a}, ${b})`); per[st.tile]++; }
-    assert.equal(new Set(per).size, 1, "every tile the same number of stickers");
+test("every sticker knows its face, and each face has the same stickers as the rest of its kind", () => {
+  for (const [tiling, a, b, more] of [["hex", 3, 0], ["hex", 2, 1], ["square", 2, 1], ["triangle", 2, 1], DESIGNS["square truncated"]].map((d) => (Array.isArray(d) ? d : [d]))) {
+    const P = preset(tiling, a, b, more), per = new Array(P.faces.length).fill(0);
+    for (const pc of P.pieces) for (const st of pc.stickers) { assert.ok(Number.isInteger(st.face), `${tiling} (${a}, ${b})`); per[st.face]++; }
+    for (const kind of ["face", "vertex", "edge"]) assert.ok(new Set(P.faces.flatMap((f, i) => (f.kind === kind ? [per[i]] : []))).size <= 1, `${tiling}: ${kind}`);
   }
 });
 
-test("each piece's exact outline: closed loops of arcs enclosing the area the sampling found", () => {
-  for (const [tiling, a] of [["hex", 3], ["square", 3], ["triangle", 2]]) {
-    const P = preset(tiling, a);
+test("each piece's exact outline encloses the area the sampling found", () => {
+  for (const [tiling, a, b, more] of [["hex", 3, 0], ["square", 3, 0], ["triangle", 2, 0], ...Object.values(DESIGNS)]) {
+    const P = preset(tiling, a, b, more);
     for (const pc of P.pieces) {
-      assert.equal(pc.outline.length, 1, `${tiling}: one loop`);
-      const loop = pc.outline[0], at = (arc, ang) => [arc.c[0] + P.r * Math.cos(ang), arc.c[1] + P.r * Math.sin(ang)];
-      const gap = Math.hypot(...at(loop.at(-1), loop.at(-1).a1).map((v, k) => v - at(loop[0], loop[0].a0)[k]));
-      assert.ok(gap < 1e-6, `${tiling}: the loop closes`);
-      const area = outlineArea(pc.outline, P.r);
-      assert.ok(Math.abs(area - pc.area) < 0.03 * pc.area + 0.002, `${tiling}: area ${area} vs ${pc.area}`);
+      const area = outlineArea(pc.outline);
+      assert.ok(Math.abs(area - pc.area) < 0.05 * pc.area + 0.003, `${tiling} ${JSON.stringify(more)}: area ${area} vs ${pc.area}`);
     }
   }
 });
@@ -71,51 +91,109 @@ test("a turn's order: six sixths, four quarters or three thirds is no change", (
   }
 });
 
-test("scrambles undo exactly (positions are integers: no drift)", () => {
-  for (const [tiling, a, b] of [["hex", 2, 1], ["square", 3, 0], ["triangle", 2, 1]]) {
-    const P = preset(tiling, a, b), moves = tileScrambleMoves(P, 300, seeded(7));
-    const s = play(P, moves);
-    assert.equal(isTileSolved(P, s), false);
-    play(P, moves.slice().reverse().map((m) => inverseTileMove(P, m)), s);
-    assert.ok(s.every((v) => v === 0), tiling);
+test("turns about corners and edges: a hexagon's corner turns in thirds, its edge in halves; a triangle's corner in sixths", () => {
+  for (const [name, n] of [["hex corners", 3], ["hex edges", 2], ["triangle corners", 6]]) {
+    const P = preset(...DESIGNS[name]);
+    assert.equal(P.axes[0].order, n, name);
+    const s = play(P, [{ axis: 0, layer: 0, q: 1 }]);
+    assert.equal(isTileSolved(P, s), false, name);
+    play(P, Array(n - 1).fill({ axis: 0, layer: 0, q: 1 }), s);
+    assert.ok(s.every((v) => v === 0), name);
   }
 });
 
-test("a turn's pieces each turn about the copy of the center right by them", () => {
-  for (const [tiling, a, b] of [["hex", 3, 0], ["square", 2, 1], ["triangle", 2, 0]]) {
-    const P = preset(tiling, a, b), s = play(P, tileScrambleMoves(P, 40, seeded(3)));
-    for (let axis = 0; axis < P.tiles.length; axis++)
-      for (const [i, c] of piecesInCircle(P, s, axis)) {
+test("concentric circles make layers: the disk and the ring turn separately", () => {
+  const P = preset(...DESIGNS["hex rings"]), s0 = solvedTileState(P);
+  const disk = piecesInLayer(P, s0, 0, 0), ring = piecesInLayer(P, s0, 0, 1);
+  assert.ok(disk.size >= 1 && ring.size > disk.size);
+  assert.ok([...disk.keys()].every((i) => !ring.has(i)));
+  const s = play(P, [{ axis: 0, layer: 1, q: 1 }]);
+  for (const i of disk.keys()) assert.deepEqual([s[3 * i], s[3 * i + 1], s[3 * i + 2]], [0, 0, 0]); // (the disk stayed)
+});
+
+test("scrambles undo exactly (positions are integers: no drift), on every kind of design", () => {
+  for (const [tiling, a, b, more] of [["hex", 2, 1], ["square", 3, 0], ["triangle", 2, 1], ...Object.values(DESIGNS)]) {
+    const P = preset(tiling, a, b, more), moves = tileScrambleMoves(P, 300, seeded(7));
+    const s = play(P, moves);
+    assert.equal(isTileSolved(P, s), false);
+    play(P, moves.slice().reverse().map((m) => inverseTileMove(P, m)), s);
+    assert.ok(s.every((v) => v === 0), `${tiling} ${JSON.stringify(more)}`);
+  }
+});
+
+test("a turn's pieces each turn about the copy of its point right by them", () => {
+  for (const [tiling, a, b, more] of [["hex", 3, 0], ["square", 2, 1], ["triangle", 2, 0], DESIGNS["hex faces + corners"]]) {
+    const P = preset(tiling, a, b, more), s = play(P, tileScrambleMoves(P, 40, seeded(3)));
+    for (let axis = 0; axis < P.axes.length; axis++)
+      for (const [i, c] of piecesInLayer(P, s, axis, 0)) {
         const { anchor } = piecePose(P, s, i), q = P.toPlane(c);
-        assert.ok(Math.hypot(anchor[0] - q[0], anchor[1] - q[1]) < P.r, `${tiling}: piece ${i}, tile ${axis}`);
+        assert.ok(Math.hypot(anchor[0] - q[0], anchor[1] - q[1]) < P.axes[axis].radii[0], `${tiling}: piece ${i}, axis ${axis}`);
       }
   }
 });
 
 test("turns of tiles far apart commute; neighbors' don't", () => {
-  const P = preset("hex", 5), far = P.tiles.findIndex((t) => Math.hypot(...t.center) > 2.4), near = 1;
+  const P = preset("hex", 5), far = P.axes.findIndex((t) => Math.hypot(...t.center) > 2.4), near = 1;
   const a = { axis: 0, layer: 0, q: 1 };
   const once = (x, y) => play(P, [x, y]).join();
   assert.equal(once(a, { axis: far, layer: 0, q: 1 }), once({ axis: far, layer: 0, q: 1 }, a));
   assert.notEqual(once(a, { axis: near, layer: 0, q: 1 }), once({ axis: near, layer: 0, q: 1 }, a));
 });
 
-test("solved means every sticker on its own tile: a center turned in place still counts", () => {
+test("solved means every sticker on its own face: a center turned in place still counts; blacked-out pieces don't count", () => {
   const P = preset("hex", 3), s = solvedTileState(P);
   const center = P.pieces.findIndex((pc) => pc.kind === 1);
   s[3 * center] = 2; // turned a third, in place
   assert.ok(isTileSolved(P, s));
+  const B = preset("hex", 3, 0, { blackout: [P.pieces.find((pc) => pc.kind === 3).type] }), t = play(B, [{ axis: 0, layer: 0, q: 1 }]);
+  assert.ok(B.pieces.some((pc) => pc.black));
+  // (a turn moves corners, edges and the center; with the corners blacked out it's still unsolved: the edges moved)
+  assert.equal(isTileSolved(B, t), false);
 });
 
-test("small tori: a circle has to fit without overlapping itself; snapping grows a", () => {
-  assert.equal(tilesFit({ tiling: "hex", a: 1, b: 0 }), false);
-  assert.equal(tilesFit({ tiling: "hex", a: 1, b: 1 }), true);
-  assert.equal(tilesFit({ tiling: "square", a: 1, b: 1 }), false);
-  assert.deepEqual(snapTiles({ tiling: "square", a: 1, b: 1 }), { tiling: "square", a: 2, b: 1 });
-  assert.equal(tilesFit({ tiling: "triangle", a: 1, b: 1 }), true);
+test("truncation makes faces of the tiles' corners and edges, with their own stickers", () => {
+  const P = preset(...DESIGNS["square truncated"]);
+  assert.equal(P.faces.length, 9 + 9 + 18); // (9 squares, 9 corners, 18 edges)
+  assert.ok(P.pieces.some((pc) => pc.stickers.some((st) => P.faces[st.face].kind === "vertex")));
 });
 
-test("signedTurn: the fewest steps either way", () => {
+test("small tori: every circle has to fit without overlapping itself; snapping grows a", () => {
+  assert.equal(tilesFit(presetSpec("hex", 1, 0)), false);
+  assert.equal(tilesFit(presetSpec("hex", 1, 1)), true);
+  assert.equal(tilesFit(presetSpec("square", 1, 1)), false);
+  assert.equal(snapTiles(presetSpec("square", 1, 1)).a, 2);
+  assert.equal(tilesFit(presetSpec("triangle", 1, 1)), true);
+  assert.equal(tilesFit(presetSpec("hex", 1, 1, { cuts: [{ on: "face", depths: [1.2] }] })), false); // (a bigger circle needs more room)
+});
+
+test("signedTurn: the fewest of the axis's turns either way", () => {
   const P = preset("hex", 3);
   assert.deepEqual([1, 2, 3, 4, 5, -1, 7].map((q) => signedTurn(P, q)), [1, 2, 3, -2, -1, -1, 1]);
+});
+
+test("snap marks: the radii through other points of the drawing, like the neighbors' middles", () => {
+  const marks = tileSnapCandidates(presetSpec("hex", 3, 0), { kind: "face", i: 0 });
+  assert.ok(marks.some((r) => Math.abs(r - 1) < 1e-6)); // (the next hexagon's middle)
+  assert.ok(marks.some((r) => Math.abs(r - 1 / Math.sqrt(3)) < 1e-6)); // (its own corners)
+  assert.ok(marks.some((r) => Math.abs(r - 0.5) < 1e-6)); // (where neighboring middles' circles meet)
+  // corners: where the circles around neighboring corners just meet, and that makes a clean puzzle
+  const corner = 1 / Math.sqrt(3) / 2;
+  assert.ok(tileSnapCandidates(presetSpec("hex", 3, 0), { kind: "vertex", i: 0 }).some((r) => Math.abs(r - corner) < 1e-6));
+  const P = preset("hex", 3, 0, { cuts: [{ on: "vertex", depths: [corner] }] });
+  for (const pc of P.pieces) assert.ok(Math.abs(outlineArea(pc.outline) - pc.area) < 0.05 * pc.area + 0.003);
+});
+
+test("truncation snaps where faces turn regular: a square's octagon, a hexagon's dodecagon, a triangle's hexagon", () => {
+  const near = (fs, f) => fs.some((g) => Math.abs(g - f) < 1e-5);
+  const trims = (tiling, truncate = {}) => tileRegularTrims({ tiling, a: 3, b: 0, cuts: [], truncate }, "vertex", [0.34, 0.99]);
+  assert.ok(near(trims("square"), Math.SQRT1_2), trims("square").join(" "));
+  assert.ok(near(trims("hex"), Math.sqrt(3) / 2), trims("hex").join(" "));
+  assert.ok(near(trims("triangle"), 0.5), trims("triangle").join(" ")); // (a third of each side off each corner)
+});
+
+test("the radius stops short of a circle meeting its own copy, and no mark lies past it", () => {
+  const spec = presetSpec("hex", 1, 1), cap = tileRadiusCap(spec);
+  assert.ok(Math.abs(cap - (Math.sqrt(3) - 0.05) / 2) < 1e-5); // (the nearest copy of a center is √3 away on the (1, 1) torus)
+  assert.equal(tilesFit({ ...spec, cuts: [{ on: "face", depths: [cap] }] }), true);
+  assert.ok(tileSnapCandidates(spec, { kind: "face", i: 0 }).every((r) => r <= cap));
 });

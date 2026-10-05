@@ -4,35 +4,40 @@
 //
 // The flat view shows one copy of every tile (the patch around the middle, outlined), and the
 // copies of its neighbors around it, so it's visible how the edges glue: a piece leaving the
-// patch on one side comes back in on the other. A piece is clipped to its outline (arcs of
-// the circles that cut it out), then each of its stickers filled within its tile.
-import { piecePose, nearestCopy } from "./tiles.mjs";
+// patch on one side comes back in on the other. Under the pieces is the solved picture (the
+// faces in their colors), which shows wherever no circle reaches. A piece is clipped to its
+// outline (arcs of the circles that cut it out), then each of its stickers filled: the parts
+// of its face.
+import { piecePose, nearestCopy, partsNear } from "./tiles.mjs";
 import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
 import { faceTextures, colorDistance, PUZZLE_PALETTES } from "./puzzle.mjs";
 
 const MARGIN = 0.75; // how far the copies around reach past the patch, in tile spacings
 const LINE = 0.017; // the lines between stickers, in tile spacings (half that on triangles)
 const BODY = "#0a0b0e";
+const BLACK = "#1c1f27"; // (a blacked-out piece)
 let uid = 0; // (a number per puzzle, for the cache's key)
 
 // A tile's color, from a real twisty puzzle's palette: the cube's and megaminx's 12 up to 12
 // tiles, the icosahedron's 20 up to 20, the rhombic triacontahedron's 30 up to 30 (past that,
 // hues spread by the golden angle). Tiles take colors in turn, outward from the middle, each
 // the one least like its neighbors' (colors near the palette's start win once it's clearly
-// different, so the cube's six come first), so look-alikes don't touch.
+// different, so the cube's six come first), so look-alikes don't touch. A truncation's faces
+// take the solids' truncation colors: light for corners, deeper for edges.
 const colorSets = new WeakMap();
-export function tileColor(P, i) {
-  if (!colorSets.has(P)) colorSets.set(P, tileColors(P));
-  return colorSets.get(P)[i];
+export function faceColor(P, f) {
+  if (!colorSets.has(P)) colorSets.set(P, faceColors(P));
+  return colorSets.get(P)[f];
 }
-function tileColors(P) {
+export const tileColor = faceColor; // (the tiles are the first faces)
+function faceColors(P) {
   const n = P.tiles.length;
   const palette = n <= 12 ? PUZZLE_COLORS : n <= 20 ? PUZZLE_PALETTES[20] : n <= 30 ? PUZZLE_PALETTES[30]
     : Array.from({ length: n }, (_, i) => vividHex((i * 137.508 + 29) % 360));
   // neighbors: tiles sharing an edge or a corner
-  const reach = P.K.order === 4 ? 1.45 : 1.01;
+  const reach = P.spec.tiling === "square" ? 1.45 : 1.01;
   const near = P.tiles.map((t, i) => P.tiles.map((u, j) => j).filter((j) => j !== i && Math.sqrt(nearestCopy(P, P.tiles[j].center, t.center).dd) < reach));
-  const out = new Array(n), used = new Set();
+  const out = new Array(P.faces.length), used = new Set();
   for (let i = 0; i < n; i++) {
     let best = -1, score = -Infinity;
     palette.forEach((c, k) => {
@@ -42,13 +47,22 @@ function tileColors(P) {
     });
     out[i] = palette[best]; used.add(best);
   }
+  for (const kind of ["vertex", "edge"]) {
+    const list = P.faces.map((f, i) => (f.kind === kind ? i : -1)).filter((i) => i >= 0);
+    list.forEach((f, k) => { out[f] = hslHex((k * 360) / list.length + (kind === "vertex" ? 15 : 195), kind === "vertex" ? 45 : 40, kind === "vertex" ? 72 : 48); });
+  }
   return out;
 }
-// each tile's texture (an index into TEXTURES), so tiles of look-alike colors get different
+function hslHex(h, s, l) {
+  s /= 100; l /= 100;
+  const f = (n) => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return `#${[0, 8, 4].map((n) => Math.round(f(n) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+// each face's texture (an index into TEXTURES), so faces of look-alike colors get different
 // ones: the 3D puzzles' assignment (puzzle.mjs), made once per puzzle
 const textureSets = new WeakMap();
 export function tileTextures(P) {
-  if (!textureSets.has(P)) textureSets.set(P, faceTextures(P.tiles.map((_, i) => tileColor(P, i))));
+  if (!textureSets.has(P)) textureSets.set(P, faceTextures(P.faces.map((_, i) => faceColor(P, i))));
   return textureSets.get(P);
 }
 
@@ -85,11 +99,14 @@ export class TileView {
   // ---- hit testing (CSS px) ----
   toPlane(px, py) { return [(px - this.ox) / this.scale, (py - this.oy) / this.scale]; }
   toScreen([x, y]) { return { x: this.ox + x * this.scale, y: this.oy + y * this.scale }; }
-  // the circle whose line passes nearest a point, within tol px: { axis, center (plane, the
-  // copy) }. Only where the tiles are drawn: none in the empty space around them.
+  // the circle whose line passes nearest a point, within tol px: { axis, layer (the one just
+  // inside it), center (plane, the copy) }. Only where the tiles are drawn: none in the empty
+  // space around them.
   circleAt(px, py, tol = 10) { return this.shows(px, py) ? circleNear(this.P, this.toPlane(px, py), tol / this.scale) : null; }
-  // the tile whose middle a point is on (the part a click turns), or null
-  tileAt(px, py) { return this.shows(px, py) ? tileNear(this.P, this.toPlane(px, py)) : null; }
+  // the turning point whose middle a point is on (the part a click turns), or null
+  tileAt(px, py) { return this.shows(px, py) ? axisNear(this.P, this.toPlane(px, py)) : null; }
+  // the piece under a point (state: where everything is now), or null
+  pieceAt(px, py, state) { return this.shows(px, py) ? pieceNear(this.P, state, this.toPlane(px, py), this.ctx) : null; }
   // whether a point (CSS px) is on the drawn tiles
   shows(px, py) {
     const [x, y] = this.toPlane(px, py), v = this.view;
@@ -97,9 +114,9 @@ export class TileView {
   }
 
   // ---- drawing ----
-  // state: the puzzle's state. turn: the circle turning right now, { pieces (Map piece →
-  // center it turns about, internal), theta (radians clockwise) }, or null. look: { hover (a
-  // tile whose circle to light, or null), lit (a Set of pieces to lighten, or null) }.
+  // state: the puzzle's state. turn: the layer turning right now, { pieces (Map piece → point
+  // it turns about, internal), theta (radians clockwise) }, or null. look: { hover ({ axis,
+  // layer }: the circles to light, or null), lit (a Set of pieces to lighten, or null) }.
   draw(state, turn, look) {
     const { ctx, canvas } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -116,7 +133,9 @@ export class TileView {
       cx.clearRect(0, 0, c.width, c.height);
       cx.setTransform(...this.planeToCanvas());
       this.clipToView(cx);
+      this.paintFaces(cx, plain);
       this.paint(cx, state, (i) => !moving || !moving.has(i), null, plain, 1);
+      this.paint(cx, state, (i) => !moving || !moving.has(i), null, plain, 1, "lines");
       this.cache = { key, canvas: c };
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -124,10 +143,13 @@ export class TileView {
     ctx.setTransform(...this.planeToCanvas());
     ctx.save();
     this.clipToView(ctx);
-    if (moving) this.paint(ctx, state, (i) => moving.has(i), turn, plain, 1);
+    if (moving) {
+      this.paint(ctx, state, (i) => moving.has(i), turn, plain, 1);
+      this.paint(ctx, state, (i) => moving.has(i), turn, plain, 1, "lines");
+    }
     if (look.lit) this.paint(ctx, state, (i) => look.lit.has(i), turn, look, look.litAlpha ?? 0.34, "light");
     this.drawOutline(ctx);
-    if (look.hover !== null && look.hover !== undefined) this.drawRings(ctx, look.hover);
+    if (look.hover) this.drawRings(ctx, look.hover);
     if (look.pointer) this.drawPointers(ctx, look.pointer);
     ctx.restore();
   }
@@ -182,8 +204,10 @@ export class TileView {
       const x = s[k] * Ap[0] + t[k] * Bp[0], y = s[k] * Ap[1] + t[k] * Bp[1];
       this.view = { x0: Math.min(this.view.x0, x), y0: Math.min(this.view.y0, y), x1: Math.max(this.view.x1, x), y1: Math.max(this.view.y1, y) };
     }
+    this.paintFaces(ctx, look, ids);
     this.paint(ctx, state, () => true, null, look, 1, ids ? "ids" : "pieces");
-    if (!ids && look.hover !== null && look.hover !== undefined) this.drawRings(ctx, look.hover);
+    if (!ids) this.paint(ctx, state, () => true, null, look, 1, "lines");
+    if (!ids && look.hover) this.drawRings(ctx, look.hover);
   }
 
   // the solved puzzle, filling this (small) canvas: the corner card
@@ -194,15 +218,42 @@ export class TileView {
     this.draw(new Int32Array(3 * P.n), null, { hover: null, lit: null, textures: look.textures });
   }
 
+  // The solved picture, under the pieces: every face's parts in the view in its color (and,
+  // ids, its texture's number), with the lines between them. It shows where no piece is.
+  paintFaces(ctx, look, ids = false) {
+    const { P } = this, v = this.view, mid = [(v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2];
+    const textures = look.textures || ids ? tileTextures(P) : null;
+    ctx.save();
+    ctx.lineWidth = 2 * Math.max(this.lineWidth(), 1 / this.scale);
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = BODY;
+    for (const { face, poly } of partsNear(P, mid, Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2 + 1.2)) {
+      const f = P.faceAt(face);
+      ctx.beginPath();
+      poly.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      if (ids) { ctx.fillStyle = `rgb(${textures[f] * 32 + 16}, 0, 0)`; ctx.fill(); continue; }
+      ctx.fillStyle = faceColor(P, f);
+      ctx.fill();
+      if (textures && textures[f]) this.texture(ctx, poly, textures[f], faceColor(P, f));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  lineWidth() { return (this.P.spec.tiling === "triangle" ? LINE / 2 : LINE) * this.lineScale; }
+
   // Draw the pieces `which` picks, each copy that shows in the view, at strength alpha.
-  // turn: the moving ones' extra turn, or null. light: just a white light over them, alpha
-  // strong (the pieces an algorithm would move).
+  // turn: the moving ones' extra turn, or null. mode: "pieces"; "lines", their outlines, drawn
+  // after every piece's fill (full width on the edge, so every edge has the same line, whether
+  // a piece or the still solved picture is across it); "light", just a white light over them,
+  // alpha strong (the pieces an algorithm would move); "ids", the picture of which texture
+  // shows where.
   paint(ctx, state, which, turn, look, alpha, mode = "pieces") {
-    const { P } = this, v = this.view, n = P.tiles.length;
+    const { P } = this, v = this.view, rmax = Math.max(0, ...P.axes.map((a) => a.radii.at(-1)));
     for (let i = 0; i < P.n; i++) {
       if (!which(i)) continue;
       const pc = P.pieces[i], { k, t, anchor } = piecePose(P, state, i), T = P.toPlane(t), angle = k * P.step;
-      const reach = pc.extent + 0.05 + (turn ? 2 * P.r : 0); // (turning, a copy just outside can swing in)
+      const reach = pc.extent + 0.05 + (turn ? 2 * rmax : 0); // (turning, a copy just outside can swing in)
       // the copies of it that show: start from the one nearest the view's middle
       const mid = [(v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2], base = nearestCopy(P, anchor, mid);
       for (let a = -3; a <= 3; a++)
@@ -217,71 +268,77 @@ export class TileView {
           }
           ctx.translate(T[0] + lam[0], T[1] + lam[1]);
           ctx.rotate(angle);
+          ctx.translate(...pc.offset); // (its outline and stickers: at the cell at the origin)
           if (mode === "light") {
-            const [dx, dy] = pc.offset;
-            ctx.translate(dx, dy);
             ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-            ctx.fill(outlinePath(pc.outline, P.r));
+            ctx.fill(outlinePath(pc.outline), "evenodd");
+          } else if (mode === "lines") {
+            ctx.lineWidth = 2 * Math.max(this.lineWidth(), 1 / this.scale);
+            ctx.lineJoin = "round";
+            ctx.strokeStyle = BODY;
+            ctx.stroke(outlinePath(pc.outline));
           } else if (mode === "ids") this.pieceIds(ctx, pc, tileTextures(P));
-          else this.piece(ctx, pc, alpha, n, look.lit && look.lit.has(i), look.textures ? tileTextures(P) : null);
+          else this.piece(ctx, pc, alpha, look.lit && look.lit.has(i), look.textures ? tileTextures(P) : null);
           ctx.restore();
         }
     }
   }
 
-  // one piece, at its home position in the current transform: clipped to its outline, each
-  // sticker's tile filled in its color, then the outline and the tiles' edges inside it drawn
-  // as lines (stroked twice as wide, so half shows: every piece gets the same border)
-  piece(ctx, pc, alpha, n, lit, textures) {
-    const path = outlinePath(pc.outline, this.P.r), [dx, dy] = pc.offset;
-    ctx.translate(dx, dy); ctx.clip(path); ctx.translate(-dx, -dy);
-    ctx.lineWidth = 2 * Math.max((this.P.K.order === 3 ? LINE / 2 : LINE) * this.lineScale, 1 / this.scale);
+  // one piece, at the cell at the origin in the current transform: clipped to its outline,
+  // each sticker's face parts filled in its color, with the faces' edges inside it as lines
+  // (its own outline comes after, with every other piece's: see paint)
+  piece(ctx, pc, alpha, lit, textures) {
+    const path = outlinePath(pc.outline);
+    ctx.clip(path, "evenodd");
+    ctx.lineWidth = 2 * Math.max(this.lineWidth(), 1 / this.scale);
     ctx.lineJoin = "round";
+    ctx.strokeStyle = BODY;
+    ctx.globalAlpha = alpha;
+    if (pc.black) {
+      ctx.fillStyle = BLACK;
+      ctx.fill(path, "evenodd");
+      if (lit) { ctx.fillStyle = "rgba(255, 255, 255, 0.34)"; ctx.fill(path, "evenodd"); }
+      return;
+    }
     for (const st of pc.stickers) {
-      ctx.save();
-      ctx.beginPath();
-      st.corners.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = tileColor(this.P, st.tile);
-      ctx.fill();
-      if (textures && textures[st.tile]) {
-        // the tile's texture, fixed to the screen (the sticker a window onto it, like the 3D
-        // puzzles'): over the sticker's box in canvas pixels
-        const m = ctx.getTransform(), pts = st.corners.map(([x, y]) => m.transformPoint({ x, y }));
-        const x0 = Math.min(...pts.map((p) => p.x)), y0 = Math.min(...pts.map((p) => p.y));
-        const x1 = Math.max(...pts.map((p) => p.x)), y1 = Math.max(...pts.map((p) => p.y));
-        ctx.save();
-        ctx.clip();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = inkPattern(ctx, textures[st.tile], tileColor(this.P, st.tile),this.canvas.width / (this.canvas.clientWidth || this.canvas.width));
-        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-        ctx.restore();
+      const color = faceColor(this.P, st.face);
+      for (const poly of st.parts) {
         ctx.beginPath();
-        st.corners.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        poly.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
         ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        if (textures && textures[st.face]) this.texture(ctx, poly, textures[st.face], color);
+        if (lit) { ctx.fillStyle = "rgba(255, 255, 255, 0.34)"; ctx.fill(); }
+        ctx.stroke(); // (the face's edges)
       }
-      if (lit) { ctx.fillStyle = "rgba(255, 255, 255, 0.34)"; ctx.fill(); }
-      // its lines: the tile's edge, and the piece's (inside the tile)
-      ctx.strokeStyle = BODY;
-      if (pc.stickers.length > 1) ctx.stroke();
-      ctx.clip();
-      ctx.translate(dx, dy); ctx.stroke(path);
-      ctx.restore();
     }
   }
+  // A face's texture over a polygon (the current path), fixed to the screen (the sticker a
+  // window onto it, like the 3D puzzles'): over the polygon's box in canvas pixels
+  texture(ctx, poly, t, color) {
+    const m = ctx.getTransform(), pts = poly.map(([x, y]) => m.transformPoint({ x, y }));
+    const x0 = Math.min(...pts.map((p) => p.x)), y0 = Math.min(...pts.map((p) => p.y));
+    const x1 = Math.max(...pts.map((p) => p.x)), y1 = Math.max(...pts.map((p) => p.y));
+    ctx.save();
+    ctx.clip();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = inkPattern(ctx, t, color, this.canvas.clientWidth ? this.canvas.width / this.canvas.clientWidth : 1);
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
+  }
 
-  // one piece in the picture of which texture shows where: each sticker's tile's, as its red
+  // one piece in the picture of which texture shows where: each sticker's face's, as its red
   pieceIds(ctx, pc, textures) {
-    const [dx, dy] = pc.offset;
-    ctx.translate(dx, dy); ctx.clip(outlinePath(pc.outline, this.P.r)); ctx.translate(-dx, -dy);
-    for (const st of pc.stickers) {
-      ctx.beginPath();
-      st.corners.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
-      ctx.fillStyle = `rgb(${textures[st.tile] * 32 + 16}, 0, 0)`;
-      ctx.fill();
-    }
+    ctx.clip(outlinePath(pc.outline), "evenodd");
+    for (const st of pc.stickers)
+      for (const poly of st.parts) {
+        ctx.beginPath();
+        poly.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+        ctx.fillStyle = pc.black ? "#000" : `rgb(${textures[st.face] * 32 + 16}, 0, 0)`;
+        ctx.fill();
+      }
   }
 
   // the outline around the patch: tile edges between a patch tile and one that isn't
@@ -295,7 +352,7 @@ export class TileView {
       for (const t of P.tiles)
         t.corners.forEach((a, j) => {
           const b = t.corners[(j + 1) % t.corners.length], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-          const across = P.fromPlane([2 * mid[0] - t.center[0], 2 * mid[1] - t.center[1]]).map(Math.round); // (the neighbor's center: the middle mirrored)
+          const across = P.fromPlane([2 * mid[0] - t.center[0], 2 * mid[1] - t.center[1]]).map(Math.round); // (the neighbor's middle: this one's mirrored)
           if (!homes.has(across.join())) segs.push([a, b]);
         });
       this.outline = new Map([[P, segs]]);
@@ -310,16 +367,19 @@ export class TileView {
     ctx.restore();
   }
 
-  // a tile's circle, lit, at every copy in view (in plane coordinates: the current transform)
-  drawRings(ctx, axis) {
-    const { P } = this, v = this.view, c0 = P.tiles[axis].center, r = P.r;
+  // a layer's circles (a disk's, or a ring's two), lit, at every copy in view (in plane
+  // coordinates: the current transform)
+  drawRings(ctx, { axis, layer }) {
+    const { P } = this, v = this.view, ax = P.axes[axis];
+    if (!ax) return;
+    const c0 = ax.center, radii = [ax.radii[layer], ...(layer ? [ax.radii[layer - 1]] : [])], r = radii[0];
     ctx.save();
     for (let a = -4; a <= 4; a++)
       for (let b = -4; b <= 4; b++) {
         const x = c0[0] + a * P.Ap[0] + b * P.Bp[0], y = c0[1] + a * P.Ap[1] + b * P.Bp[1];
         if (x < v.x0 - r || x > v.x1 + r || y < v.y0 - r || y > v.y1 + r) continue;
         ctx.beginPath();
-        ctx.arc(x, y, r, 0, 2 * Math.PI);
+        for (const rr of radii) { ctx.moveTo(x + rr, y); ctx.arc(x, y, rr, 0, 2 * Math.PI); }
         ctx.lineWidth = Math.max(0.07, 5 / this.scale); ctx.strokeStyle = BODY; ctx.stroke();
         ctx.lineWidth = Math.max(0.035, 2.6 / this.scale); ctx.strokeStyle = "#f5c518"; ctx.stroke();
       }
@@ -346,7 +406,6 @@ const HANDS = {
   // pointing: the index finger up, the others curled
   pointer: { palm: [6.5, 11, 13, 10.5, 4.5], fingers: [[8.6, 1.7, 8.6, 12, 3.4], [12, 10, 12, 12, 3.4], [15.3, 10.2, 15.3, 12, 3.4], [18.2, 10.8, 18.2, 12.5, 3]], thumb: [8, 16.5, 4, 13.5, 3.4], hot: [8.6, 0.3] },
 };
-// draw one, in the current transform (its 24-unit box at the origin)
 // a shape's whole silhouette (outline and all) in white, k canvas px per unit, made once per
 // shape and size: one layer, so the "difference" blend inverts each pixel once
 const MASK_PAD = 2; // (units around the 24-unit box, for the outline)
@@ -367,6 +426,7 @@ function handMask(h, k) {
   }
   return masks.get(id);
 }
+// draw one, in the current transform (its 24-unit box at the origin)
 function drawHand(ctx, h) {
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   if (h.arrow) {
@@ -392,7 +452,7 @@ function drawHand(ctx, h) {
 // from the canvas's corner. Each pattern's tile is a whole number of its repeats (a wavy line
 // and the honeycomb repeat at odd lengths, so theirs is stretched a hair to fit).
 const TEXTURE_PX = 8;
-const REPEAT = [null, [1, 1], [1, 1], [1, 1], [4, 4],[(2 * Math.PI) / 1.6, 1.25], [1.4, 1.4 * Math.sqrt(3)]]; // (in periods)
+const REPEAT = [null, [1, 1], [1, 1], [1, 1], [4, 4], [(2 * Math.PI) / 1.6, 1.25], [1.4, 1.4 * Math.sqrt(3)]]; // (in periods)
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const cover = (d, hw, w) => 1 - smooth(hw - 0.5 * w, hw + 0.5 * w, d);
 const fract = (x) => x - Math.floor(x);
@@ -439,14 +499,15 @@ function inkPattern(ctx, t, color, dpr) {
   return cache.get(key);
 }
 
-// a piece outline (tiles.mjs's outline: loops of arcs) as a path, made once per outline
+// a piece outline (tiles.mjs's outline: loops of arcs) as a path, made once per outline; fill
+// and clip it "evenodd", so a ring's inner circle is a hole
 const paths = new WeakMap();
-function outlinePath(loops, r) {
+function outlinePath(loops) {
   let p = paths.get(loops);
   if (p) return p;
   p = new Path2D();
   for (const loop of loops) {
-    loop.forEach(({ c, a0, a1 }, j) => {
+    loop.forEach(({ c, r, a0, a1 }, j) => {
       if (!j) p.moveTo(c[0] + r * Math.cos(a0), c[1] + r * Math.sin(a0));
       p.arc(c[0], c[1], r, a0, a1, a1 < a0);
     });
@@ -457,22 +518,44 @@ function outlinePath(loops, r) {
 }
 
 // ---- hit testing in plane coordinates (the 3D view uses these too) ----
-// the circle whose line passes nearest p, within tol: { axis, center (plane, the copy nearest p) }
+// the circle whose line passes nearest p, within tol: { axis, layer (the layer just inside
+// that circle), center (plane, the copy nearest p) }
 export function circleNear(P, p, tol) {
   let best = null;
-  P.tiles.forEach((t, axis) => {
-    const n = nearestCopy(P, t.center, p), d = Math.abs(Math.sqrt(n.dd) - P.r);
-    if (d < tol && (!best || d < best.d)) best = { axis, center: n.q, d };
+  P.axes.forEach((ax, axis) => {
+    const n = nearestCopy(P, ax.center, p), d0 = Math.sqrt(n.dd);
+    ax.radii.forEach((r, layer) => {
+      const d = Math.abs(d0 - r);
+      if (d < tol && (!best || d < best.d)) best = { axis, layer, center: n.q, d };
+    });
   });
   return best;
 }
-// the tile whose middle p is on (clear of every circle line: the part a click turns), or null
-export function tileNear(P, p) {
-  const zone = Math.max(0.12, P.K.order === 3 ? 0.12 : 0.9 * (1 - P.r));
+// the turning point whose middle p is on (well inside its first circle: the part a click
+// turns), or null
+export function axisNear(P, p) {
   let best = null;
-  P.tiles.forEach((t, axis) => {
-    const d = Math.sqrt(nearestCopy(P, t.center, p).dd);
+  P.axes.forEach((ax, axis) => {
+    const d = Math.sqrt(nearestCopy(P, ax.center, p).dd), zone = Math.min(0.25, 0.55 * ax.radii[0]);
     if (d < zone && (!best || d < best.d)) best = { axis, d };
   });
   return best ? best.axis : null;
+}
+export const tileNear = axisNear;
+// the piece under p (state: where everything is now), or null; ctx: any 2D context, for
+// testing a point against a piece's outline
+export function pieceNear(P, state, p, ctx) {
+  for (let i = 0; i < P.n; i++) {
+    const pc = P.pieces[i], { k, t, anchor } = piecePose(P, state, i), n = nearestCopy(P, p, anchor);
+    if (Math.sqrt(n.dd) > pc.extent + 0.02) continue;
+    // back to its home: undo its turn and shift, then into the cell at the origin
+    const T = P.toPlane(t), d = [n.q[0] - T[0], n.q[1] - T[1]], a = -k * P.step, c = Math.cos(a), s = Math.sin(a);
+    const h = [c * d[0] - s * d[1] - pc.offset[0], s * d[0] + c * d[1] - pc.offset[1]];
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const inside = ctx.isPointInPath(outlinePath(pc.outline), h[0], h[1], "evenodd");
+    ctx.restore();
+    if (inside) return i;
+  }
+  return null;
 }

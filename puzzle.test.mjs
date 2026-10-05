@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PRESETS, buildPuzzle, solvedState, applyMove, inverseMove, isSolved, randomMoves, moveLabel,
-  piecesInLayer, closestOrientation, puzzleTitle, snapSize, scrambleMoves, scrambleLayers, puzzleStats, snapDepths, toCustom, pieceFinder, faceTextures, colorDistance, dot, sub, cross, len, rotMat,
+  piecesInLayer, closestOrientation, puzzleTitle, snapSize, scrambleMoves, scrambleLayers, puzzleStats, snapDepths, regularTrims, toCustom, pieceFinder, faceTextures, colorDistance, dot, sub, cross, len, rotMat,
 } from "./puzzle.mjs";
 
 const family = (id) => PRESETS.find((p) => p.id === id);
@@ -204,6 +204,17 @@ test("truncation snaps: a cube's corners truncated to the edge midpoints is a cu
   const spec = { name: "t", rule: "custom", size: 2, solid: "cube", truncate: { vertex: 0.8 }, cuts: [] };
   const snaps = snapDepths(spec, { trim: "vertex" });
   assert.ok(snaps.some((f) => Math.abs(f - 2 / 3) < 1e-6), snaps.join(" "));
+});
+
+test("truncation snaps where faces turn regular: the soccer ball, the truncated cube", () => {
+  const ico = { name: "t", rule: "custom", size: 2, solid: "icosahedron", truncate: {}, cuts: [] };
+  const ball = PRESETS.find((p) => p.solid === "icosahedron" && p.truncate && p.truncate.vertex).truncate.vertex;
+  assert.ok(snapDepths(ico, { trim: "vertex" }).some((f) => Math.abs(f - ball) < 1e-6));
+  // a cube's corners cut so each square is a regular octagon: 1 − x = x√2 along an edge
+  const cube = { ...ico, solid: "cube" }, x = 1 / (2 + Math.SQRT2);
+  assert.ok(regularTrims(cube, "vertex").some((f) => Math.abs(f - (1 - (2 / 3) * x)) < 1e-5), regularTrims(cube, "vertex").join(" "));
+  // (and nothing for faces regular all along: the cube's triangles under any corner cut)
+  assert.equal(regularTrims(cube, "vertex").length, 2);
 });
 
 test("piece types: pieces the solid's rotations carry onto each other", () => {

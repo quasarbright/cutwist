@@ -9,6 +9,8 @@
 // into the solid's rotation group (12, 24 or 60 rotations for the Platonic solids),
 // so the whole puzzle state is an integer array and moves are table lookups: no drift.
 
+import { regularDepths } from "./regular.mjs";
+
 export const EPS = 1e-6;
 export const PHI = (1 + Math.sqrt(5)) / 2;
 const TAU = Math.PI * 2;
@@ -1037,24 +1039,43 @@ function solve4(rows) {
   return M.map((r, k) => r[4] / r[k]);
 }
 
-// A candidate is worth snapping to when the near miss's leftover is clearly bigger at the
-// exact depth than just to either side (it vanishes there). For a cut that's the smallest
-// sticker; for a truncation, the shortest edge of the solid (a near miss leaves a sliver of
-// an edge). maxPieces skips candidates too big to build quickly. One candidate per call, so
-// a page can spread the work out.
+// A candidate is worth snapping to wherever the pieces change there: the near miss's leftover
+// is clearly bigger at the exact depth than just to either side (it vanishes there), or there
+// are more pieces on one side than the other (one appears or goes). For a cut the leftover is
+// the smallest sticker; for a truncation, the shortest edge of the solid (a near miss leaves a
+// sliver of an edge), and the count is the solid's faces. maxPieces skips candidates too big
+// to build quickly. One candidate per call, so a page can spread the work out.
 export function isGoodSnap(spec, target, f, maxPieces = 6000) {
   const at = (v) => {
-    if (target.trim) return shortestEdge(customSolid({ ...spec, truncate: { ...(spec.truncate || {}), [target.trim]: v } }).solid);
+    if (target.trim) {
+      const solid = customSolid({ ...spec, truncate: { ...(spec.truncate || {}), [target.trim]: v } }).solid;
+      return { left: shortestEdge(solid), count: solid.polys.length };
+    }
     const cuts = cutSets(spec).map((set, si) => (si === target.s ? { ...set, depths: set.depths.map((d, j) => (j === target.i ? v : d)) } : set));
     const P = buildPuzzle({ ...spec, cuts, blackout: [] });
-    return P.pieces.length > maxPieces ? null : puzzleStats(P).smallest;
+    return P.pieces.length > maxPieces ? null : { left: puzzleStats(P).smallest, count: P.pieces.length };
   };
   const here = at(f);
-  if (here === null || here <= 0) return false;
+  if (here === null || here.left <= 0) return false;
   const lo = at(f - 0.002), hi = at(f + 0.002);
-  return lo !== null && hi !== null && here > 1.3 * Math.min(lo, hi);
+  if (lo === null || hi === null) return false;
+  return here.left > 1.3 * Math.min(lo.left, hi.left) || lo.count !== hi.count;
 }
-export const snapDepths = (spec, target, maxPieces) => alignedDepthCandidates(spec, target).filter((f) => isGoodSnap(spec, target, f, maxPieces));
+export const snapDepths = (spec, target, maxPieces) => [
+  ...alignedDepthCandidates(spec, target).filter((f) => isGoodSnap(spec, target, f, maxPieces)),
+  ...(target.trim ? regularTrims(spec, target.trim) : []),
+].sort((a, b) => a - b);
+
+// The truncations that make some face of the solid regular (the icosahedron's corners cut
+// to the soccer ball, where its hexagons' sides all match), with the other truncation kept.
+// (These are snaps on their own: nothing vanishes there, so isGoodSnap wouldn't see them.)
+export function regularTrims(spec, kind) {
+  const facesAt = (f) => {
+    const { solid } = customSolid({ ...spec, truncate: { ...(spec.truncate || {}), [kind]: f } });
+    return new Map(solid.polys.map((p) => [p.normal.map((x) => Math.round(x * 1e5)).join(), p.verts]));
+  };
+  return regularDepths(facesAt, TRIM_RANGE[0], TRIM_RANGE[1]);
+}
 
 function shortestEdge(solid) {
   let m = Infinity;

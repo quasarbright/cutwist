@@ -128,6 +128,74 @@ test("textures: off up to 12 tiles, on from 13; the button toggles them and goes
   expect((await info(page)).textures).toBe(true);
 });
 
+// ---- customizing: the solids' editor, on a tiling ----
+const block = (page, group, name) => page.locator(`#${group} .tw-rblock`).filter({ has: page.locator(".tw-rname", { hasText: new RegExp(`^${name}$`) }) });
+
+test("customize opens the editor on the tiling: tilings for solids, the same rulers, the torus's steppers", async ({ page }) => {
+  await load(page, "hex", { a: 3, b: 0 });
+  await page.click(".nx-custombtn");
+  const s = await info(page);
+  expect(s).toMatchObject({ id: "custom", tiling: "hex", pieces: 54 });
+  await expect(page.locator("#bSolidLabel")).toHaveText("tiling");
+  await expect(page.locator("#bSolid").getByRole("radio", { name: "hexagons" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#bStats")).toContainText("54 pieces");
+  await expect(page.locator("#paramControls .control")).toHaveCount(2); // (size and skew)
+  // another tiling, then undo
+  await page.locator("#bSolid").getByRole("radio", { name: "squares" }).click();
+  expect((await info(page)).tiling).toBe("square");
+  await page.click("#bUndo");
+  expect((await info(page)).tiling).toBe("hex");
+});
+
+test("cuts around corners and edges, rings of circles, and truncation", async ({ page }) => {
+  await load(page, "hex", { a: 3, b: 0 });
+  await page.click(".nx-custombtn");
+  await block(page, "bSets", "corners").getByRole("button", { name: "+ cut" }).click();
+  let s = await info(page);
+  expect(s.axes.filter((a) => a.kind === "vertex").map((a) => a.order)).toEqual(Array(18).fill(3)); // (a hexagon's corners turn in thirds)
+  await block(page, "bSets", "faces").getByRole("button", { name: "+ cut" }).click();
+  s = await info(page);
+  expect(s.axes.find((a) => a.kind === "face").layers).toBe(2); // (two circles around each middle: a disk and a ring)
+  await block(page, "bTrim", "edges").getByRole("button", { name: "+ truncate" }).click();
+  s = await info(page);
+  expect(s.faces).toBe(9 + 27); // (the edges' faces)
+  // still a puzzle: scramble, undo the scramble's turns, solved
+  const moves = await page.evaluate(() => { const m = window.cutwist.scramble(); window.cutwist.finish(); return m; });
+  await page.evaluate((moves) => { for (const m of window.cutwist.invert(moves)) window.cutwist.turn(m.axis, m.layer, m.q); window.cutwist.finish(); }, moves);
+  expect((await info(page)).solved).toBe(true);
+});
+
+test("black out pieces: a click on a piece blacks out every piece like it", async ({ page }) => {
+  await load(page, "hex", { a: 3, b: 0 });
+  await page.click(".nx-custombtn");
+  await page.click("#bPaint");
+  const m = await page.evaluate(() => window.cutwist.tileMiddle(0));
+  await page.mouse.click(m.x, m.y); // (a center)
+  expect((await info(page)).black).toBe(9);
+  await page.click("#bRestore");
+  expect((await info(page)).black).toBe(0);
+});
+
+test("a tile design's share link opens the same design", async ({ page }) => {
+  await load(page, "triangle", { a: 2, b: 0 });
+  await page.click(".nx-custombtn");
+  await block(page, "bTrim", "corners").getByRole("button", { name: "+ truncate" }).click();
+  const before = await info(page), link = await page.evaluate(() => window.cutwist.shareLink());
+  const errors2 = await open(page, new URL(link).search);
+  const after = await info(page);
+  expect(after).toMatchObject({ id: "custom", tiling: "triangle", pieces: before.pieces, faces: before.faces });
+  await noErrors(errors2);
+});
+
+test("on a phone, a flat puzzle shows just the flat view", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await open(page, "?puzzle=tiles-hex");
+  expect((await info(page)).views).toEqual({ flat: true, surface: false });
+  await expect(page.locator("#c")).toBeHidden();
+  await open(page, "?puzzle=sliding-torus&3d=on");
+  expect((await info(page)).views).toEqual({ flat: true, surface: true });
+});
+
 test("algorithms light the pieces they'd move", async ({ page }) => {
   await load(page);
   await page.click(".nx-rec");
