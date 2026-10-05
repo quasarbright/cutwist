@@ -92,6 +92,8 @@ const FLOWER = { hex: 1 / SQ3, square: Math.SQRT1_2, triangle: 1 / SQ3 };
 const same = (tiling) => CRYSTAL[tiling] === FLOWER[tiling];
 export const TILE_PRESETS = ["hex", "square", "triangle"].flatMap((tiling) => [
   tilePreset(`tiles-${tiling}`, `Face-Turning ${NAMES[tiling]}`, tiling, [{ on: "face", depths: [TILINGS[tiling].r] }]),
+  // (shallower: the circles of triangles a step apart just touch)
+  ...(tiling === "triangle" ? [tilePreset("tiles-triangle-shallow", "Shallow Face-Turning Triangle Tiling", tiling, [{ on: "face", depths: [0.5] }])] : []),
   tilePreset(`tiles-${tiling}-corner`, `Corner-Turning ${NAMES[tiling]}`, tiling, [{ on: "vertex", depths: [CORNER[tiling]] }]),
   tilePreset(`tiles-${tiling}-crystal`, `${NAMES[tiling]} ${same(tiling) ? "Crystal/Flower" : "Crystal"}`, tiling, [{ on: "face", depths: [CRYSTAL[tiling]] }]),
   ...(same(tiling) ? [] : [tilePreset(`tiles-${tiling}-flower`, `${NAMES[tiling]} Flower`, tiling, [{ on: "face", depths: [FLOWER[tiling]] }])]),
