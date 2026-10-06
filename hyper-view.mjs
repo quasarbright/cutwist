@@ -34,6 +34,16 @@ function hyperColors(P) {
   // neighbors: across each edge (the dart turned about its corner: x·S)
   const near = Array.from({ length: n }, () => new Set());
   for (let x = 0; x < H.n; x++) { const a = face.of[x], b = face.of[H.right[1][x]]; if (a !== b) { near[a].add(b); near[b].add(a); } }
+  // (six tiles, each touching all but one, like a cube's faces: a cube's colors, opposite pairs
+  // white–yellow, red–orange, blue–green)
+  if (n === 6 && near.every((s) => s.size === 4)) {
+    const out = new Array(6), opposite = (i) => [0, 1, 2, 3, 4, 5].find((j) => j !== i && !near[i].has(j));
+    [[0, 3], [1, 5], [2, 4]].forEach(([a, b]) => {
+      const i = [...out.keys()].find((k) => out[k] === undefined);
+      out[i] = PUZZLE_COLORS[a]; out[opposite(i)] = PUZZLE_COLORS[b];
+    });
+    return out;
+  }
   const out = new Array(n), used = new Set();
   for (let i = 0; i < n; i++) {
     let best = -1, score = -Infinity;
