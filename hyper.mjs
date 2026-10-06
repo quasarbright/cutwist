@@ -155,8 +155,8 @@ const hyperPreset = (id, name, N, M_, cuts) => ({
 // (a circle around each tile's middle, a bit past its corners: like the flat puzzles' default)
 const faceDefault = (N, M_) => 1.15 * geometry(N, M_).Rv;
 export const HYPER_PRESETS = [
-  hyperPreset("hyper-klein", "Klein Quartic", 7, 3, [{ on: "face", depths: [faceDefault(7, 3)] }]),
   hyperPreset("hyper-octagons", "Octagon Surface", 8, 3, [{ on: "face", depths: [faceDefault(8, 3)] }]),
+  hyperPreset("hyper-klein", "Klein Quartic", 7, 3, [{ on: "face", depths: [faceDefault(7, 3)] }]),
   hyperPreset("hyper-pentagons", "Pentagon Surface", 5, 4, [{ on: "face", depths: [faceDefault(5, 4)] }]),
   hyperPreset("hyper-squares", "Square Surface", 4, 5, [{ on: "face", depths: [faceDefault(4, 5)] }]),
 ];
