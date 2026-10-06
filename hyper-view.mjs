@@ -16,7 +16,7 @@ import { colorDistance, PUZZLE_PALETTES } from "./puzzle.mjs";
 
 const BODY = "#0a0b0e";
 const BLACK = "#1c1f27";
-const MIN_PX = 1.2; // (tiles smaller than this aren't drawn)
+const MIN_PX = 5; // (tiles smaller than this aren't drawn: the rim has thousands of them, slow to draw and too small to see)
 const PIECE_PX = 4; // (nor pieces on tiles smaller than this: just the tile's color)
 const abs = (z) => Math.hypot(z[0], z[1]);
 
@@ -43,6 +43,45 @@ function hyperColors(P) {
       if (d - 0.002 * k > score) { score = d - 0.002 * k; best = k; }
     });
     out[i] = palette[best]; used.add(best);
+  }
+  return out;
+}
+
+// Each region's stickers cut to their tiles, once per puzzle: for region r and its j-th sticker,
+// the loops (disk points, home frame) of the region's outline inside that tile, to fill even-odd.
+// Cut in the Klein model, where a tile is a convex polygon with straight edges (its sampled
+// geodesic edges stay on those lines), so Sutherland–Hodgman against each edge does it; a region's
+// arcs are sampled points either way.
+const stickerCache = new WeakMap();
+const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [s * x, s * y]; };
+const toPoincare = ([x, y]) => { const s = 1 / (1 + Math.sqrt(Math.max(0, 1 - x * x - y * y))); return [s * x, s * y]; };
+function stickerShapes(P) {
+  if (stickerCache.has(P)) return stickerCache.get(P);
+  const near = new Map(P.near.map((t) => [t.e, t.poly.map(toKlein)]));
+  const out = P.regions.map((region) => {
+    const loops = region.poly.map((poly) => poly.map(toKlein));
+    return region.stickers.map((se) => loops.map((loop) => clipConvex(loop, near.get(se))).filter((l) => l.length >= 3).map((l) => l.map(toPoincare)));
+  });
+  stickerCache.set(P, out);
+  return out;
+}
+// a polygon (any shape) cut to a convex one
+function clipConvex(subject, clip) {
+  let area = 0;
+  for (let i = 0, j = clip.length - 1; i < clip.length; j = i++) area += clip[j][0] * clip[i][1] - clip[i][0] * clip[j][1];
+  const sign = Math.sign(area);
+  let out = subject;
+  for (let i = 0, j = clip.length - 1; i < clip.length && out.length; j = i++) {
+    const a = clip[j], b = clip[i], dx = b[0] - a[0], dy = b[1] - a[1];
+    if (dx * dx + dy * dy < 1e-24) continue; // (a repeated point)
+    const side = (p) => sign * (dx * (p[1] - a[1]) - dy * (p[0] - a[0]));
+    const next = [];
+    for (let k = 0; k < out.length; k++) {
+      const p = out[k], q = out[(k + 1) % out.length], sp = side(p), sq = side(q);
+      if (sp >= 0) next.push(p);
+      if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); next.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
+    }
+    out = next;
   }
   return out;
 }
@@ -99,18 +138,25 @@ export class HyperView {
 
   // ---- hit testing (CSS px) ----
   // every visible copy of each axis point: { axis (index), at (disk) }, for one kind
+  // (kept with the visible list: every pointer move asks for them)
   axisCopies(kind) {
-    const { P } = this, { G, H } = P, seen = [], out = [];
-    for (const [e, ms] of this.listVisible().byElement) {
+    const vis = this.listVisible();
+    vis.copies ||= {};
+    if (vis.copies[kind]) return vis.copies[kind];
+    const { P } = this, { G, H } = P, seen = new Set(), out = [];
+    for (const [e, ms] of vis.byElement) {
       const c = H.coset[kind].of[e], axis = P.axisIndex.get(`${kind}:${c}`);
       if (axis === undefined) continue;
       for (const m of ms) {
         const at = Mb.apply(m, kind === "face" ? [0, 0] : kind === "vertex" ? G.corners[0] : G.mids[G.edge]);
-        if (seen.some((q) => abs([q[0] - at[0], q[1] - at[1]]) < 1e-9)) continue;
-        seen.push(at); out.push({ axis, at });
+        // (the same point reached from several darts: one copy. Copies drawn are far further apart
+        // than this grid, and float error far under it)
+        const key = `${axis}:${Math.round(at[0] * 1e6)}:${Math.round(at[1] * 1e6)}`;
+        if (seen.has(key)) continue;
+        seen.add(key); out.push({ axis, at });
       }
     }
-    return out;
+    return (vis.copies[kind] = out);
   }
   // the circle whose line passes nearest a point, within tol px: { axis, layer, center (disk) }
   circleAt(px, py, tol = 10) {
@@ -187,7 +233,7 @@ export class HyperView {
     const key = [this.viewKey(), state.join(), moving ? [...moving.keys()].join(".") : "", this.cx, this.cy, this.origin.x, this.origin.y, canvas.width, canvas.height, P.n, steady ? [...steady].join(".") : ""].join("|");
     if (!this.cache || this.cache.key !== key) {
       const c = this.cache?.canvas || document.createElement("canvas");
-      c.width = canvas.width; c.height = canvas.height;
+      if (c.width !== canvas.width || c.height !== canvas.height) { c.width = canvas.width; c.height = canvas.height; }
       const cx = c.getContext("2d");
       cx.setTransform(1, 0, 0, 1, 0, 0);
       cx.clearRect(0, 0, c.width, c.height);
@@ -242,8 +288,7 @@ export class HyperView {
   // mode: "pieces" (filled), "lines" (outlines, after every fill, so each edge gets one line),
   // "light" (a white light, alpha strong)
   paint(ctx, state, which, turn, mode = "pieces", alpha = 1) {
-    const { P } = this, { H } = P, vis = this.listVisible();
-    const near = new Map(P.near.map((t) => [t.e, t.poly]));
+    const { P } = this, { H } = P, vis = this.listVisible(), cut = stickerShapes(P);
     for (let i = 0; i < P.n; i++) {
       if (!which(i)) continue;
       const pc = P.pieces[i], region = P.regions[pc.region], e = H.mul(state[i], pc.home);
@@ -256,15 +301,14 @@ export class HyperView {
         for (const poly of region.poly) this.trace(ctx, poly, m, step);
         if (mode === "lines") { ctx.lineJoin = "round"; ctx.strokeStyle = BODY; ctx.lineWidth = this.lineFor(m0); ctx.stroke(); continue; }
         if (mode === "light") { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = "#fff"; ctx.fill("evenodd"); ctx.restore(); continue; }
-        ctx.save();
-        ctx.clip("evenodd");
-        if (pc.black) { ctx.fillStyle = BLACK; ctx.fill("evenodd"); }
-        else region.stickers.forEach((se, j) => {
-          ctx.beginPath(); this.trace(ctx, near.get(se), m, step);
-          ctx.fillStyle = hyperColor(P, pc.faces[j]); ctx.fill();
+        if (pc.black) { ctx.fillStyle = BLACK; ctx.fill("evenodd"); continue; }
+        // (each sticker already cut to its tile: no clip, which is most of the drawing's time)
+        cut[pc.region].forEach((loops, j) => {
+          ctx.beginPath();
+          for (const poly of loops) this.trace(ctx, poly, m, step);
+          ctx.fillStyle = hyperColor(P, pc.faces[j]); ctx.fill("evenodd");
           ctx.strokeStyle = BODY; ctx.lineWidth = 0.6 * this.lineFor(m0); ctx.stroke();
         });
-        ctx.restore();
       }
     }
   }
