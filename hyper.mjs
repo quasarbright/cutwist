@@ -178,8 +178,14 @@ export function buildHyper(spec, file) {
   const H = turnGroup(file, surface);
   const P = { kind: "hyper", spec, G, H, surface, N, M: M_, tiles: H.coset.face.reps.length };
   P.cap = radiusCaps(P);
-  const radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k).filter((r) => r < P.cap[k])]));
-  P.radii = radii;
+  P.radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k).filter((r) => r < P.cap[k])]));
+  // (a radius within 1e-5 of a snap mark is that mark exactly: a hair off leaves slivers too
+  // thin to work out reliably, the lesson of the flat tiles' color popping)
+  for (const kind of KINDS) P.radii[kind].forEach((r, i) => {
+    const m = hyperSnapCandidates(P, kind, i).find((m) => Math.abs(m - r) < 1e-5);
+    if (m !== undefined) P.radii[kind][i] = m;
+  });
+  const radii = P.radii;
   // the axes: every tile, corner or edge of the surface with circles around it
   const order = { face: N, vertex: M_, edge: 2 }, step = { face: H.R, vertex: H.S, edge: H.RS };
   P.axes = KINDS.flatMap((kind) => radii[kind].length ? H.coset[kind].reps.map((h, coset) => {
@@ -190,6 +196,68 @@ export function buildHyper(spec, file) {
   P.axisIndex = new Map(P.axes.map((a, i) => [`${a.kind}:${a.coset}`, i]));
   findPieces(P);
   return P;
+}
+
+// ---- snap marks: the radii where the drawing changes (as on the flat torus): a circle passing
+// through another tile's middle, corner or edge's middle; touching one of its copies or another
+// circle; passing through where two other circles cross; through the point as far from three of
+// its copies; or where two of its copies meet on another circle. Worked out in the hyperboloid
+// model, where a point is a vector X with ⟨X, X⟩ = 1 and the distance d has cosh d = ⟨X, Y⟩
+// (⟨a, b⟩ = a₀b₀ − a₁b₁ − a₂b₂), so "as far from p as from q" is the plane ⟨X, p − q⟩ = 0.
+const toHyp = ([x, y]) => { const s = 1 - x * x - y * y; return [(1 + x * x + y * y) / s, (2 * x) / s, (2 * y) / s]; };
+const mink = (a, b) => a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+const flipJ = (a) => [a[0], -a[1], -a[2]];
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const hypDist = (X, Y) => Math.acosh(Math.max(1, mink(X, Y)));
+// the points X on the hyperboloid with ⟨X, u⟩ = a and ⟨X, w⟩ = b (two planes and the sheet)
+function onTwoPlanes(u, a, w, b) {
+  const U = flipJ(u), W = flipJ(w); // (⟨X, u⟩ = X·Ju: ordinary dot products)
+  const uu = U[0] * U[0] + U[1] * U[1] + U[2] * U[2], ww = W[0] * W[0] + W[1] * W[1] + W[2] * W[2], uw = U[0] * W[0] + U[1] * W[1] + U[2] * W[2];
+  const det = uu * ww - uw * uw;
+  if (Math.abs(det) < 1e-14) return [];
+  const s = (a * ww - b * uw) / det, t = (b * uu - a * uw) / det, X0 = [s * U[0] + t * W[0], s * U[1] + t * W[1], s * U[2] + t * W[2]];
+  const k = cross3(U, W), A = mink(k, k), Bq = 2 * mink(X0, k), C = mink(X0, X0) - 1, disc = Bq * Bq - 4 * A * C;
+  if (Math.abs(A) < 1e-14 || disc < 0) return [];
+  return [(-Bq - Math.sqrt(disc)) / (2 * A), (-Bq + Math.sqrt(disc)) / (2 * A)].map((t) => [X0[0] + t * k[0], X0[1] + t * k[1], X0[2] + t * k[2]]).filter((X) => X[0] > 0);
+}
+// the radii a kind's circle number i can snap to (P: built as far as its caps and radii)
+export function hyperSnapCandidates(P, kind, i) {
+  const { G, H } = P, cap = P.cap[kind], own = P.radii[kind].filter((_, j) => j !== i);
+  const rmax = Math.max(cap, ...KINDS.flatMap((k) => P.radii[k]));
+  const p0 = kind === "face" ? cx(0) : kind === "vertex" ? G.corners[0] : G.mids[G.edge], P0 = toHyp(p0);
+  // every axis point near it, once
+  const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, p0) < 2 * cap + rmax + 2 * G.Rv), seen = new PointSet(1e-9), pts = [];
+  for (const d of near) for (const a of axisPoints(G, H, d)) {
+    if (seen.has(a.p) || hdist(a.p, p0) > 2 * cap + rmax) continue;
+    seen.add(a.p); pts.push({ kind: a.kind, p: a.p, X: toHyp(a.p), d: hdist(a.p, p0) });
+  }
+  const copies = pts.filter((a) => a.kind === kind && a.d > 1e-9 && a.d < 2 * cap);
+  // the other circles (every radius but this one), near enough to matter
+  const fixed = pts.flatMap((a) => P.radii[a.kind].flatMap((r, j) => (a.kind === kind && j === i ? [] : a.d - r < cap ? [{ ...a, r }] : [])));
+  const out = [], add = (d) => { if (d > 0.05 + 1e-6 && d < cap - 1e-6 && !own.some((r) => Math.abs(r - d) < 1e-6) && !out.some((e) => Math.abs(e - d) < 1e-9)) out.push(d); };
+  for (const a of pts) add(a.d); // (through a point)
+  for (const q of copies) add(q.d / 2); // (touching a copy)
+  for (const f of fixed) if (f.d > 1e-9) { add(f.d - f.r); add(f.d + f.r); add(f.r - f.d); } // (touching another circle)
+  // (through where two other circles cross: as the disk draws them, ordinary circles)
+  const discs = fixed.map((f) => diskCircle(f.p, f.r));
+  for (let a = 0; a < discs.length; a++) for (let b = a + 1; b < discs.length; b++) {
+    const c1 = discs[a], c2 = discs[b], dx = c2.c[0] - c1.c[0], dy = c2.c[1] - c1.c[1], dd = Math.hypot(dx, dy);
+    if (dd < 1e-12 || dd > c1.r + c2.r || dd < Math.abs(c1.r - c2.r)) continue;
+    const along = (c1.r * c1.r - c2.r * c2.r + dd * dd) / (2 * dd), h = Math.sqrt(Math.max(0, c1.r * c1.r - along * along));
+    for (const s of [-1, 1]) add(hdist(p0, [c1.c[0] + (along * dx - s * h * dy) / dd, c1.c[1] + (along * dy + s * h * dx) / dd]));
+  }
+  // The events among its copies, for its nearest ring of them (the hyperbolic plane's copies
+  // multiply outward fast, and far ones' crowd the ruler with marks nobody wants):
+  const closest = Math.min(Infinity, ...copies.map((q) => q.d)), ring = copies.filter((q) => q.d < 1.5 * closest);
+  // (through the point as far from three of its copies, itself one of them)
+  for (let a = 0; a < ring.length; a++) for (let b = a + 1; b < ring.length; b++) {
+    const X = cross3(flipJ(sub3(P0, ring[a].X)), flipJ(sub3(P0, ring[b].X))), n = mink(X, X);
+    if (n > 1e-12) { const s = (X[0] < 0 ? -1 : 1) / Math.sqrt(n); add(hypDist([X[0] * s, X[1] * s, X[2] * s], P0)); }
+  }
+  // (where two copies meet on another circle: as far from it as from a copy, on that circle)
+  for (const q of ring) for (const f of fixed) for (const X of onTwoPlanes(sub3(P0, q.X), 0, f.X, Math.cosh(f.r))) add(hypDist(X, P0));
+  return out.sort((a, b) => a - b);
 }
 
 // how big each kind's circles can be: less than halfway to the nearest other copy of the same
@@ -268,6 +336,20 @@ function findPieces(P) {
     for (let k = 0; k < G.N; k++) { if (!nearBy.has(e)) nearBy.set(e, []); nearBy.get(e).push(m); m = M.mul(m, G.A); e = H.right[0][e]; }
   }
   P.circles = circles; P.nearBy = nearBy;
+  // A region's type (for blacking out every piece like one): regions a symmetry of the tiling
+  // carries onto each other are alike. The arrangement is the same seen from anywhere, so if a
+  // symmetry carries a point of one into the other, it carries the whole region.
+  const typeOf = P.regions.map((_, i) => i), root = (i) => (typeOf[i] === i ? i : (typeOf[i] = root(typeOf[i])));
+  const maps = [...nearBy.values()].flat();
+  P.regions.forEach((b, j) => {
+    for (let i = 0; i < j; i++) {
+      if (root(i) === root(j) || P.regions[i].stickers.length !== b.stickers.length) continue;
+      if (maps.some((m) => faceHas(P.regions[i].face, M.apply(m, b.anchor)))) { typeOf[root(j)] = root(i); break; }
+    }
+  });
+  const typeIds = new Map();
+  P.regions.forEach((r, i) => { const t = root(i); if (!typeIds.has(t)) typeIds.set(t, typeIds.size); r.type = typeIds.get(t); });
+  const blackout = new Set(P.spec.blackout || []);
   // Carried onto every tile of the surface (tile f's rep h_f · region), one piece per spot. Two of
   // them are the same piece when they're inside the same circles AND one's anchor, carried to the
   // other's frame, is inside the other: on a small surface two different regions can be inside the
@@ -286,7 +368,7 @@ function findPieces(P) {
     const name = new Map(region.name.map(([kind, e, ring]) => [`${kind}:${H.coset[kind].of[H.mul(h, e)]}`, ring]));
     // its stickers: the surface tiles under it at home, as elements (for telling where they are now)
     const stickers = region.stickers.map((e) => H.mul(h, e));
-    P.pieces.push({ region: ri, home: h, name, stickers, faces: stickers.map((x) => H.coset.face.of[x]), kind: new Set(stickers.map((x) => H.coset.face.of[x])).size });
+    P.pieces.push({ region: ri, home: h, name, stickers, faces: stickers.map((x) => H.coset.face.of[x]), kind: new Set(stickers.map((x) => H.coset.face.of[x])).size, type: region.type, black: blackout.has(region.type) });
   });
   P.n = P.pieces.length;
 }

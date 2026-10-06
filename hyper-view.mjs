@@ -137,10 +137,17 @@ export class HyperView {
   // the piece under a point, and where that copy is ({ i, m }), or null
   pieceAt(px, py, state) {
     if (!this.shows(px, py)) return null;
-    const { P } = this, { H } = P, z = this.toDisk(px, py), where = this.whereIs(state);
-    for (const [e, ms] of this.listVisible().byElement) for (const m of ms) {
-      const local = Mb.apply(Mb.inv(m), z);
-      for (const i of where.get(e) || []) if (faceHas(P.regions[P.pieces[i].region].face, local)) return i;
+    const { P } = this, { G, H } = P, z = this.toDisk(px, py), where = this.whereIs(state);
+    // (just the tiles near the point: a piece reaches at most its circles' size past its tile)
+    const reach = G.Rv + 2 * Math.max(0, ...["face", "vertex", "edge"].flatMap((k) => P.radii[k])) + G.Rv;
+    for (const d of this.listVisible().tiles) {
+      if (hdist(Mb.apply(d.m, [0, 0]), z) > reach) continue;
+      let m = d.m, e = d.e;
+      for (let k = 0; k < G.N; k++) {
+        const local = Mb.apply(Mb.inv(m), z);
+        for (const i of where.get(e) || []) if (faceHas(P.regions[P.pieces[i].region].face, local)) return i;
+        m = Mb.mul(m, G.A); e = H.right[0][e];
+      }
     }
     return null;
   }
@@ -174,7 +181,10 @@ export class HyperView {
   draw(state, turn, look) {
     const { ctx, canvas, P } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
     const moving = turn ? turn.pieces : null;
-    const key = [this.viewKey(), state.join(), moving ? [...moving.keys()].join(".") : "", this.cx, this.cy, this.origin.x, this.origin.y, canvas.width, canvas.height, P.n].join("|");
+    // (a steady light, like blacking out's hovered kind, goes in the cached layer; a pulsing one,
+    // an algorithm's, is drawn each frame)
+    const steady = look.lit && look.litSteady ? look.lit : null;
+    const key = [this.viewKey(), state.join(), moving ? [...moving.keys()].join(".") : "", this.cx, this.cy, this.origin.x, this.origin.y, canvas.width, canvas.height, P.n, steady ? [...steady].join(".") : ""].join("|");
     if (!this.cache || this.cache.key !== key) {
       const c = this.cache?.canvas || document.createElement("canvas");
       c.width = canvas.width; c.height = canvas.height;
@@ -186,6 +196,7 @@ export class HyperView {
       this.paintTiles(cx);
       this.paint(cx, state, (i) => !moving || !moving.has(i), null);
       this.paint(cx, state, (i) => !moving || !moving.has(i), null, "lines");
+      if (steady) this.paint(cx, state, (i) => steady.has(i) && (!moving || !moving.has(i)), null, "light", look.litAlpha ?? 0.34);
       this.cache = { key, canvas: c };
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -195,7 +206,7 @@ export class HyperView {
     ctx.save();
     this.clipDisk(ctx);
     if (moving) { this.paint(ctx, state, (i) => moving.has(i), turn); this.paint(ctx, state, (i) => moving.has(i), turn, "lines"); }
-    if (look.lit) this.paint(ctx, state, (i) => look.lit.has(i), turn, "light", look.litAlpha ?? 0.34);
+    if (look.lit && !steady) this.paint(ctx, state, (i) => look.lit.has(i), turn, "light", look.litAlpha ?? 0.34);
     if (look.hover) this.drawRings(ctx, look.hover);
     if (look.pointer) this.drawPointers(ctx, look.pointer);
     ctx.restore();

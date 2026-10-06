@@ -4,6 +4,9 @@
 import { test, expect } from "@playwright/test";
 import { open, info, turn, noErrors, pick } from "./helpers.mjs";
 
+// (each test builds a surface or several, which takes a few times longer under the full parallel run)
+test.describe.configure({ timeout: 60_000 });
+
 let errors;
 test.beforeEach(async ({ page }) => { errors = await open(page); });
 test.afterEach(async () => { await noErrors(errors); });
@@ -68,6 +71,39 @@ test("dragging away from the circles slides the plane, and turns nothing", async
   await fire(page, "pointerup", { x: from.x + 64, y: from.y });
   const s = await info(page);
   expect(s).toMatchObject({ panned: true, moves: 0, solved: true });
+});
+
+test("customize: the circles' rulers (no solid, no truncation), a corner circle, a share link back, blacking out", async ({ page }) => {
+  // (on the 6 octagons: a corner circle on the Klein quartic makes 668 pieces, slow to build and
+  // reload under a loaded run)
+  await pick(page, "hyper-octagons");
+  await settled(page);
+  await page.click("#customize");
+  let s = await settled(page);
+  expect(s).toMatchObject({ id: "custom", hyper: true, pieces: 46 });
+  await expect(page.locator("#bSolid")).toBeHidden();
+  await expect(page.locator("#bTrim")).toBeHidden();
+  await expect(page.locator("#bStats")).toContainText("46 pieces");
+  // (+ cut on the corners' ruler: more pieces, and the corners turn in thirds)
+  await page.locator("#bSets button", { hasText: "+ cut" }).nth(1).click();
+  s = await settled(page);
+  expect(s.pieces).toBeGreaterThan(46);
+  expect(s.axes.some((a) => a.kind === "vertex" && a.order === 3)).toBe(true);
+  // (the share link opens the same design)
+  const link = await page.evaluate(() => window.cutwist.shareLink());
+  const pieces = s.pieces;
+  // (the page's routes and listeners are already set up: just go there)
+  await page.goto(`/index.html${new URL(link).search}`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!window.cutwist);
+  s = await settled(page);
+  expect(s).toMatchObject({ id: "custom", hyper: true, pieces });
+  // (blacking out: a click on a piece blacks out its kind; the puzzle's still solved)
+  await page.click("#bPaint");
+  const mid = await page.evaluate(() => window.cutwist.hyperMiddle(0));
+  await page.mouse.click(mid.x, mid.y);
+  s = await info(page);
+  expect(s.solved).toBe(true);
+  expect(await page.evaluate(() => JSON.parse(atob(new URLSearchParams(location.search).get("design").replace(/-/g, "+").replace(/_/g, "/"))).blackout.length)).toBe(1);
 });
 
 test("sides and tiles at a corner: the other one follows to a hyperbolic tiling; the size menu lists its surfaces", async ({ page }) => {

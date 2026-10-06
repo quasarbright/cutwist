@@ -105,7 +105,7 @@
       color: var(--text); font: .85rem var(--font-mono); -moz-appearance: textfield;
     }
     .nx-sizes .tw-size input::-webkit-inner-spin-button, .nx-sizes .tw-size input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-    .nx-sizes .tw-select { height: 28px; font-size: .8rem; }
+    .nx-sizes .tw-select { height: 28px; font-size: .8rem; padding-block: 0; } /* (the height centers it: padding too would clip the text) */
     #nx-toggles { position: fixed; top: 16px; right: 16px; z-index: 5; display: flex; gap: 6px; align-items: center; font-family: var(--font-mono); }
     #nx-toggles .btn { padding: 6px 10px; }
     body:not(.nx-planar) .nx-viewbtn { display: none; }
@@ -795,6 +795,7 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
+      hyperSnapCandidates,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
 
@@ -1355,9 +1356,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // A tile-turning design is the same, on a tiling instead of a solid, with its torus's size
     // and skew, and cuts' depths as circles' radii (in tile spacings)
     const isTileDesign = () => custom.rule === "tiles";
+    // (and a hyperbolic one: its tiling (M N-gons at a corner) and surface, and circles' radii,
+    // hyperbolic; no truncation yet)
+    const isHyperDesign = () => custom.rule === "hyper";
+    const isCircleDesign = () => isTileDesign() || isHyperDesign(); // (its cuts are circles, with radii)
     const design = () => (isTileDesign()
       ? { rule: "tiles", tiling: custom.tiling, a: custom.a, b: custom.b, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout }
+      : isHyperDesign() ? { rule: "hyper", N: custom.N, M: custom.M, surface: custom.surface, cuts: custom.cuts, blackout: custom.blackout }
       : { solid: custom.solid, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout });
+    const hyperCustom = (d) => ({ name: "Custom", size: 2, fixed: true, params: HYPER_PARAMS, truncate: {}, ...d, cuts: threeSets(d.cuts) });
     // a tile-turning design as a puzzle spec: the design, with the steppers for its torus
     const tileCustom = (d) => ({
       name: "Custom", size: 2, fixed: true, params: TILE_PARAMS, ...d, cuts: threeSets(d.cuts),
@@ -1370,6 +1377,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (!p) return null;
         const c = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
         if (c.rule === "tiles") return readTileDesign(c);
+        if (c.rule === "hyper") return readHyperDesign(c);
         if (!SOLID_NAMES[c.solid]) return null;
         const clampDepths = (ds) => (Array.isArray(ds) ? ds : []).map(Number).filter(Number.isFinite).map((d) => Math.max(-0.95, Math.min(0.99, d)));
         // older links carried one set as on/depths
@@ -1399,6 +1407,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
       return tileCustom({ rule: "tiles", tiling: c.tiling, a: int(c.a, 1, 8, 3), b: int(c.b, 0, 8, 0), truncate, cuts, blackout });
     }
+    // a hyperbolic design from a link, its numbers kept in range (radii past a circle's cap are
+    // dropped when it's built)
+    function readHyperDesign(c) {
+      const int = (v, lo, hi, d) => (Number.isInteger(v) ? Math.max(lo, Math.min(hi, v)) : d);
+      const N = int(c.N, 3, 12, 7), M = int(c.M, 3, 12, 3);
+      if (!isHyperbolic(N, M)) return null;
+      const cuts = (Array.isArray(c.cuts) ? c.cuts : []).filter((s) => ON_NAMES[s.on])
+        .map((s) => ({ on: s.on, depths: (Array.isArray(s.depths) ? s.depths : []).map(Number).filter((d) => Number.isFinite(d) && d > 0.05 && d < 5) }));
+      const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
+      return hyperCustom({ rule: "hyper", N, M, surface: int(c.surface, 0, 999, 0), cuts, blackout });
+    }
     // a custom design as URL-safe base64 JSON
     const designCode = () => btoa(JSON.stringify(design())).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     function shareLink() { return `${location.origin}${location.pathname}?puzzle=custom&design=${designCode()}`; }
@@ -1418,7 +1437,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let hoverType = null;
     function setHover(type) {
       hoverType = type;
-      if (isTiles()) return; // (a tile puzzle lights them as it draws each frame: see drawTiles)
+      if (isTiles() || isHyper()) return; // (a tile puzzle lights them as it draws each frame: see drawTiles)
       lightPieces(type === null ? null : new Set(P.types.flatMap((t, i) => (t === type ? [i] : []))));
     }
     function restoreAll() {
@@ -1429,7 +1448,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     function toggleType(piece) {
       pushUndo();
-      const t = isTiles() ? P.pieces[piece].type : P.types[piece], list = custom.blackout;
+      const t = isTiles() || isHyper() ? P.pieces[piece].type : P.types[piece], list = custom.blackout;
       custom.blackout = list.includes(t) ? list.filter((x) => x !== t) : [...list, t];
       load(false);
     }
@@ -1502,11 +1521,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           else snaps[r][i] = tileSnapCandidates(spec, { kind: CUT_KINDS[t.s], i: t.i });
           return;
         }
+        if (isHyperDesign()) {
+          // (the same, worked out hyperbolically on the built surface; its radii sorted, so a
+          // handle's index there is where its value is)
+          if (!t.trim && isHyper()) snaps[r][i] = hyperSnapCandidates(P, CUT_KINDS[t.s], P.radii[CUT_KINDS[t.s]].findIndex((x) => Math.abs(x - v) < 1e-5));
+          return;
+        }
         if (t.trim) work.push([r, i, null]);
         const near = alignedDepthCandidates(spec, t).sort((a, b) => Math.abs(a - R.depth(v)) - Math.abs(b - R.depth(v))).slice(0, SNAP_NEAREST);
         for (const f of near) work.push([r, i, f]);
       }));
-      if (isTileDesign()) showSnaps();
+      if (isCircleDesign()) showSnaps();
       work.sort((a, b) => (b[0] === sel.r && b[1] === sel.i) - (a[0] === sel.r && a[1] === sel.i));
       const step = () => {
         if (job !== snapJob || !work.length) return;
@@ -1533,12 +1558,16 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (on a tiling, a cut set's depths are circles' radii, from nothing out: no center mark)
     const cutRuler = (on) => ({
       group: "bSets", label: ON_SHORT[on], max: Infinity, noun: "cut",
-      // (a tiling's radii stop where a circle would reach around the torus to overlap itself)
-      get range() { return isTileDesign() ? [TILE_CUT_RANGE[0], Math.min(TILE_CUT_RANGE[1], tileRadiusCap(custom))] : CUT_RANGE; },
-      get center() { return !isTileDesign(); },
+      // (a tiling's radii stop where a circle would reach around the torus to overlap itself; a
+      // hyperbolic one's, around its surface: the built puzzle knows how far that is)
+      get range() {
+        if (isHyperDesign()) return [0.05, isHyper() ? P.cap[on] : 2];
+        return isTileDesign() ? [TILE_CUT_RANGE[0], Math.min(TILE_CUT_RANGE[1], tileRadiusCap(custom))] : CUT_RANGE;
+      },
+      get center() { return !isCircleDesign(); },
       get title() {
         const one = ON_NAMES[on].replace("around ", "").replace(/s$/, "");
-        return isTileDesign() ? `circles around every ${on === "face" ? "tile's middle" : on === "vertex" ? "corner" : "edge's middle"}: each radius cuts all of them the same way; the circles around one point make layers that turn on their own`
+        return isCircleDesign() ? `circles around every ${on === "face" ? "tile's middle" : on === "vertex" ? "corner" : "edge's middle"}: each radius cuts all of them the same way; the circles around one point make layers that turn on their own`
           : `cuts around every ${one}: each depth cuts all of them the same way`;
       },
       depth: (v) => v,
@@ -1633,7 +1662,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const R = RULERS[r];
       let v = 0.15;
       if (R.max !== 1) {
-        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : [0, 0.95]; // (a tiling's: out to the next tile's middle, or the cap)
+        // (a tiling's: out to the next tile's middle, or the cap; a hyperbolic one's, a tile's corners or the cap)
+        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(R.range[1], 1.2 * (isHyper() ? P.G.Rv : 1))] : [0, 0.95];
         const pts = [lo, ...R.values().filter((d) => d > lo && d < hi), hi].sort((a, b) => a - b);
         let gap = -1;
         for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1] - pts[k] > gap) { gap = pts[k + 1] - pts[k]; v = (pts[k] + pts[k + 1]) / 2; }
@@ -1751,6 +1781,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function renderBuilder() {
       // a solid, or a tile-turning design's tiling
       const tiles = isTileDesign();
+      // (a hyperbolic design's tiling is set by its steppers; and there's no truncating it yet)
+      // (by style: the builder's sections are flex boxes, which the hidden attribute doesn't beat)
+      $("bSolid").closest("section").style.display = isHyperDesign() ? "none" : "";
+      $("bTrim").closest("section").style.display = isHyperDesign() ? "none" : "";
       $("bSolidLabel").textContent = tiles ? "tiling" : "solid";
       $("bSolidLabel").title = tiles ? "the tiles on the torus before it's cut" : "the shape before it's cut";
       if (tiles) radio($("bSolid"), Object.keys(TILINGS).map((k) => [k, TILINGS[k].name + "s", `${TILINGS[k].name}s on a torus`]), custom.tiling,
@@ -1768,7 +1802,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     function showStats(n, tooMany) {
-      if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isTileDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
+      if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isCircleDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
+      if (isHyper()) {
+        $("bStats").title = "how many pieces, and the surface";
+        $("bStats").innerHTML = `${P.n} pieces<br>${P.tiles} tiles · genus ${P.surface.genus}`;
+        return;
+      }
       if (isTiles()) {
         const st = tileStats(P), pct = st.smallest * 100;
         $("bStats").title = "how many pieces, and the smallest one as a share of a tile (red: slivers)";
@@ -1891,7 +1930,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); }).catch((err) => console.error(err));
         return;
       }
-      const next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
+      let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
+      if (spec.rule === "hyper" && isCustom() && custom.cuts.some((c) => c.depths.some((d) => d >= next.cap[c.on]))) {
+        // (a design's circles too big for this surface come in to just under its limit)
+        custom.cuts = custom.cuts.map((c) => ({ ...c, depths: [...new Set(c.depths.map((d) => Math.min(d, Math.round((next.cap[c.on] - 0.005) * 1000) / 1000)))] }));
+        spec = currentSpec();
+        next = buildHyper(spec, hyperFileFor(spec));
+      }
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
@@ -1979,6 +2024,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function customizePreset() {
       resetEdits();
       if (isTiles()) custom = tileCustom(tileDesign(currentSpec()));
+      else if (isHyper()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: s.cuts, blackout: [] }); }
       else {
         custom = toCustom(P);
         custom.cuts = threeSets(custom.cuts);
@@ -2884,7 +2930,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       plane.hidden = false;
       canvas.hidden = true;
       const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta } : null;
-      const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit: algLit, litAlpha: litPulse(), pointer: tilePointer };
+      // (lit: blacking out, the kind of piece under the pointer; otherwise an algorithm's pieces)
+      const lit = hoverType !== null ? new Set(P.pieces.flatMap((pc, i) => (pc.type === hoverType ? [i] : []))) : algLit;
+      const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit, litAlpha: hoverType !== null ? 0.34 : litPulse(), litSteady: hoverType !== null, pointer: tilePointer };
       placePlane(reg.flat);
       hyperView.layout(P, reg.flat);
       hyperView.draw(state, turn, look);
@@ -2896,6 +2944,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isHyper() || tdrag || hpan) return;
+      if (painting && isCustom()) { // (blacking out: a click blacks out, or brings back, a piece's kind)
+        const piece = hyperView.pieceAt(e.clientX, e.clientY, state);
+        if (piece !== null && e.button === 0) toggleType(piece);
+        return;
+      }
       const z = hyperView.toDisk(e.clientX, e.clientY);
       const c = e.button === 0 ? hyperView.circleAt(e.clientX, e.clientY) : null;
       try { plane.setPointerCapture(e.pointerId); } catch {}
@@ -2920,6 +2973,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         hyperView.pan(hpan.last, z);
         hpan.last = z;
         tilePointer = null;
+        return;
+      }
+      if (painting && isCustom()) { // (blacking out: light the kind of piece under the pointer)
+        const piece = hyperView.pieceAt(e.clientX, e.clientY, state), type = piece === null ? null : P.pieces[piece].type;
+        if (type !== hoverType) setHover(type);
+        plane.style.cursor = piece === null ? "" : "pointer";
         return;
       }
       const c = hyperView.circleAt(e.clientX, e.clientY);
