@@ -7,7 +7,7 @@ import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyp
 import { faceHas, inPolygon } from "./tiles.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
-const preset = (id, more = {}) => { const p = HYPER_PRESETS.find((q) => q.id === id); return buildHyper({ ...p, size: 0, ...more }, file(p.N, p.M)); };
+const preset = (id, more = {}) => { const p = HYPER_PRESETS.find((q) => q.id === id); return buildHyper({ ...p, ...more }, file(p.N, p.M)); };
 function seeded(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32); }
 const kinds = (P) => P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {});
 const play = (P, moves, s = solvedHyperState(P)) => { for (const m of moves) applyHyperMove(P, s, m); return s; };

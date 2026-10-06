@@ -145,11 +145,12 @@ function axisPoints(G, H, d) {
 export const HYPER_PARAMS = [
   { key: "N", label: "sides", min: 3, max: 12, title: "how many sides each tile has" },
   { key: "M", label: "at a corner", min: 3, max: 12, title: "how many tiles meet at each corner" },
-  { key: "size", label: "size", min: 0, title: "which closed surface the tiling wraps onto: they come in a few sizes (fewest tiles first)" },
+  { key: "surface", label: "size", min: 0, title: "which closed surface the tiling wraps onto: a tiling has only a few, fewest tiles first" },
 ];
+// (surface: an index into the tiling's two-sided surfaces, fewest tiles first)
 const hyperPreset = (id, name, N, M_, cuts) => ({
-  id, name, rule: "hyper", size: 2, fixed: true, N, M: M_, size_: 0, surface: 0, cuts, truncate: {}, params: HYPER_PARAMS,
-  title: (n, s) => `${s.tiles ?? "?"} ${N}-gons, ${M_} at a corner`,
+  id, name, rule: "hyper", size: 2, fixed: true, N, M: M_, surface: 0, cuts, truncate: {}, blackout: [], params: HYPER_PARAMS,
+  title: () => name,
 });
 // (a circle around each tile's middle, a bit past its corners: like the flat puzzles' default)
 const faceDefault = (N, M_) => 1.15 * geometry(N, M_).Rv;
@@ -161,13 +162,19 @@ export const HYPER_PRESETS = [
 ];
 // the surfaces a tiling's file offers (two-sided ones), fewest tiles first
 export const hyperSurfaces = (file) => file.surfaces.filter((s) => s.orientable);
+// a surface's name in the size menu: "24 tiles · genus 3", and which of a mirror pair
+export function surfaceLabel(list, i) {
+  const s = list[i], twins = list.filter((t) => t.tiles === s.tiles);
+  const k = twins.indexOf(s), mirror = s.chiral ? (s.from.includes("mirror") ? " (mirrored)" : "") : "";
+  return `${s.tiles} tiles · genus ${s.genus}${twins.length > 1 ? ` · ${String.fromCharCode(97 + k)}` : ""}${mirror}`;
+}
 export const isHyperbolic = (N, M_) => N >= 3 && M_ >= 3 && 1 / N + 1 / M_ < 1 / 2;
 const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on === kind).flatMap((c) => c.depths).filter((r) => r > 0))].sort((a, b) => a - b);
 
-// ---- building a puzzle: spec { N, M, size, cuts, blackout }, file: regular-maps/N-M.json
+// ---- building a puzzle: spec { N, M, surface, cuts, blackout }, file: regular-maps/N-M.json
 export function buildHyper(spec, file) {
   const { N } = spec, M_ = spec.M, G = geometry(N, M_);
-  const list = hyperSurfaces(file), surface = list[Math.max(0, Math.min(list.length - 1, spec.size | 0))];
+  const list = hyperSurfaces(file), surface = list[Math.max(0, Math.min(list.length - 1, spec.surface | 0))];
   const H = turnGroup(file, surface);
   const P = { kind: "hyper", spec, G, H, surface, N, M: M_, tiles: H.coset.face.reps.length };
   P.cap = radiusCaps(P);
