@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry } from "./hyper.mjs";
 import { faceHas, inPolygon } from "./tiles.mjs";
+import { pieceShapes } from "./hyper-view.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
 const preset = (id, more = {}) => { const p = HYPER_PRESETS.find((q) => q.id === id); return buildHyper({ ...p, ...more }, file(p.N, p.M)); };
@@ -89,6 +90,22 @@ test("no color drawn where it isn't: every covered spot of the surface in exactl
   for (const p of HYPER_PRESETS) checkCover(preset(p.id), rand);
   checkCover(preset("hyper-klein", { cuts: [{ on: "face", depths: [0.714] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [0.4] }] }), rand);
   checkCover(preset("hyper-octagons", { cuts: [{ on: "face", depths: [0.5, 1.2] }, { on: "vertex", depths: [0.7] }] }), rand);
+});
+
+// Drawing: a piece's stickers, each cut to its tile, fill its outline and nothing else, at every
+// level of detail. (On the 6 octagons, tiles near tile 0 repeat: cut to the wrong copy, every
+// sticker came out empty and turns showed no color moving.)
+test("drawn stickers fill their piece, on every preset and level of detail", () => {
+  const area = (l) => { let a = 0; for (let i = 0, j = l.length - 1; i < l.length; j = i++) a += l[j][0] * l[i][1] - l[i][0] * l[j][1]; return a / 2; };
+  const loopsArea = (ls) => Math.abs(ls.reduce((s, l) => s + area(l), 0));
+  for (const p of HYPER_PRESETS) {
+    const P = preset(p.id), shapes = pieceShapes(P);
+    P.regions.forEach((region, r) => shapes[r].forEach(({ loops, stickers }, lod) => {
+      const whole = loopsArea(loops), parts = stickers.map(loopsArea);
+      assert.ok(parts.every((a) => a > 0), `${p.id} region ${r} level ${lod}: an empty sticker`);
+      assert.ok(Math.abs(parts.reduce((s, a) => s + a, 0) - whole) < 0.02 * whole, `${p.id} region ${r} level ${lod}: stickers ${parts} vs piece ${whole}`);
+    }));
+  }
 });
 
 test("a circle stops short of its own copy: the cap is under half the way to it", () => {

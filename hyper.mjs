@@ -321,11 +321,13 @@ function findPieces(P) {
       if (faceHas(f, z) && depth(z) > best) { best = depth(z); anchor = z; }
     }
     // the tiles it covers some of (its stickers), by the exact test in the Klein model, where a
-    // tile is a convex polygon
-    const stickers = P.near.filter((t) => overlap(f, t.poly) > 1e-9).map((t) => t.e);
+    // tile is a convex polygon. tiles: those tiles' polygons, for drawing (on a small surface
+    // several tiles near tile 0 are copies of one, with the same element: the element alone
+    // doesn't say which copy)
+    const under = P.near.filter((t) => overlap(f, t.poly) > 1e-9), stickers = under.map((t) => t.e), tiles = under.map((t) => t.poly);
     // the axes near it: where each of its circles' middles is, for turning it about the right one
     const around = [...name.values()].map(({ ring, axis }) => ({ ring, kind: axes[axis].kind, e: axes[axis].e, p: axes[axis].p }));
-    P.regions.push({ face: f, outline: [f.outer, ...f.holes], poly: [f.poly(), ...f.holePolys()], anchor, name: [...name.entries()].map(([k, v]) => [axes[v.axis].kind, axes[v.axis].e, v.ring]), around, stickers });
+    P.regions.push({ face: f, outline: [f.outer, ...f.holes], poly: [f.poly(), ...f.holePolys()], anchor, name: [...name.entries()].map(([k, v]) => [axes[v.axis].kind, axes[v.axis].e, v.ring]), around, stickers, tiles });
   }
   // the darts near tile 0, by element: where each element of H shows up near tile 0 (more than
   // once on a small surface)

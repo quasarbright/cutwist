@@ -47,22 +47,29 @@ function hyperColors(P) {
   return out;
 }
 
-// Each region's stickers cut to their tiles, once per puzzle: for region r and its j-th sticker,
-// the loops (disk points, home frame) of the region's outline inside that tile, to fill even-odd.
-// Cut in the Klein model, where a tile is a convex polygon with straight edges (its sampled
-// geodesic edges stay on those lines), so Sutherland–Hodgman against each edge does it; a region's
-// arcs are sampled points either way.
-const stickerCache = new WeakMap();
+// Each region's outline and its stickers cut to their tiles, once per puzzle, at a few levels of
+// detail (a small copy needs fewer points): shapes[r][lod] = { loops, stickers }, where loops are
+// the outline's (disk points, home frame) and stickers[j] the loops of its part on its j-th tile,
+// to fill even-odd. Each level samples every arc on its own, so the points where arcs meet (the
+// piece's corners) are always kept: skipping points of the whole outline cut corners off.
+// The cutting is in the Klein model, where a tile is a convex polygon with straight edges (its
+// sampled geodesic edges stay on those lines), so Sutherland–Hodgman against each edge does it.
+const STEPS = [1, 2, 4, 8]; // (as stepFor gives)
+const shapeCache = new WeakMap();
 const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [s * x, s * y]; };
 const toPoincare = ([x, y]) => { const s = 1 / (1 + Math.sqrt(Math.max(0, 1 - x * x - y * y))); return [s * x, s * y]; };
-function stickerShapes(P) {
-  if (stickerCache.has(P)) return stickerCache.get(P);
-  const near = new Map(P.near.map((t) => [t.e, t.poly.map(toKlein)]));
-  const out = P.regions.map((region) => {
-    const loops = region.poly.map((poly) => poly.map(toKlein));
-    return region.stickers.map((se) => loops.map((loop) => clipConvex(loop, near.get(se))).filter((l) => l.length >= 3).map((l) => l.map(toPoincare)));
-  });
-  stickerCache.set(P, out);
+const arcLoop = (loop, step) => loop.flatMap(({ c, r, a0, a1 }) => {
+  const k = Math.max(step > 1 ? 2 : 6, Math.ceil((Math.abs(a1 - a0) * r) / (0.004 * step)));
+  return Array.from({ length: k }, (_, i) => { const a = a0 + ((a1 - a0) * i) / k; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
+});
+export function pieceShapes(P) {
+  if (shapeCache.has(P)) return shapeCache.get(P);
+  const out = P.regions.map((region) => STEPS.map((step) => {
+    const loops = region.outline.map((loop) => arcLoop(loop, step)), klein = loops.map((l) => l.map(toKlein));
+    const stickers = region.tiles.map((tile) => { const k = tile.map(toKlein); return klein.map((l) => clipConvex(l, k)).filter((l) => l.length >= 3).map((l) => l.map(toPoincare)); });
+    return { loops, stickers };
+  }));
+  shapeCache.set(P, out);
   return out;
 }
 // a polygon (any shape) cut to a convex one
@@ -161,7 +168,7 @@ export class HyperView {
   // the circle whose line passes nearest a point, within tol px: { axis, layer, center (disk) }
   circleAt(px, py, tol = 10) {
     if (!this.shows(px, py)) return null;
-    const { P } = this, z = this.toDisk(px, py), k = (2 / (1 - (z[0] ** 2 + z[1] ** 2))) * this.R; // (px per hyperbolic unit there)
+    const { P } = this, z = this.toDisk(px, py), k = ((1 - (z[0] ** 2 + z[1] ** 2)) / 2) * this.R; // (px per hyperbolic unit there: a disk step dz is 2·dz/(1 − |z|²) hyperbolic)
     let best = null, bestD = tol / k;
     for (const kind of ["face", "vertex", "edge"]) {
       if (!P.radii[kind].length) continue;
@@ -288,24 +295,24 @@ export class HyperView {
   // mode: "pieces" (filled), "lines" (outlines, after every fill, so each edge gets one line),
   // "light" (a white light, alpha strong)
   paint(ctx, state, which, turn, mode = "pieces", alpha = 1) {
-    const { P } = this, { H } = P, vis = this.listVisible(), cut = stickerShapes(P);
+    const { P } = this, { H } = P, vis = this.listVisible(), shapes = pieceShapes(P);
     for (let i = 0; i < P.n; i++) {
       if (!which(i)) continue;
-      const pc = P.pieces[i], region = P.regions[pc.region], e = H.mul(state[i], pc.home);
+      const pc = P.pieces[i], e = H.mul(state[i], pc.home);
       const pivot = turn && turn.pieces.get(i), spin = pivot ? Mb.about(pivot, turn.theta) : null;
       for (const m0 of vis.byElement.get(e) || []) {
         const px = this.pxSize(m0);
         if (px < PIECE_PX) continue; // (too small to see: the solved picture under it shows)
-        const m = spin ? Mb.mul(m0, spin) : m0, step = this.stepFor(px);
+        const m = spin ? Mb.mul(m0, spin) : m0, shape = shapes[pc.region][STEPS.indexOf(this.stepFor(px))];
         ctx.beginPath();
-        for (const poly of region.poly) this.trace(ctx, poly, m, step);
+        for (const poly of shape.loops) this.trace(ctx, poly, m);
         if (mode === "lines") { ctx.lineJoin = "round"; ctx.strokeStyle = BODY; ctx.lineWidth = this.lineFor(m0); ctx.stroke(); continue; }
         if (mode === "light") { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = "#fff"; ctx.fill("evenodd"); ctx.restore(); continue; }
         if (pc.black) { ctx.fillStyle = BLACK; ctx.fill("evenodd"); continue; }
         // (each sticker already cut to its tile: no clip, which is most of the drawing's time)
-        cut[pc.region].forEach((loops, j) => {
+        shape.stickers.forEach((loops, j) => {
           ctx.beginPath();
-          for (const poly of loops) this.trace(ctx, poly, m, step);
+          for (const poly of loops) this.trace(ctx, poly, m);
           ctx.fillStyle = hyperColor(P, pc.faces[j]); ctx.fill("evenodd");
           ctx.strokeStyle = BODY; ctx.lineWidth = 0.6 * this.lineFor(m0); ctx.stroke();
         });

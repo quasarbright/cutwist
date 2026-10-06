@@ -64,8 +64,15 @@ test("dragging away from the circles slides the plane, and turns nothing", async
   await pick(page, "hyper-klein");
   await settled(page);
   expect((await info(page)).panned).toBe(false);
-  // (a spot inside the middle tile's circle, well off its line and off the tile's middle)
-  const from = await page.evaluate(() => window.cutwist.hyperCircle(0, 1, 0, 0.35));
+  // (a spot inside the middle tile's circle, off every line and off the tile's middle: where the
+  // pointer shows it'll slide)
+  let from = null;
+  for (const r of [0.3, 0.35, 0.4, 0.45, 0.5, 0.25]) {
+    const p = await page.evaluate((r) => window.cutwist.hyperCircle(0, 1, 0, r), r);
+    await page.mouse.move(p.x, p.y);
+    if ((await page.evaluate(() => document.getElementById("plane").style.cursor)) === "move") { from = p; break; }
+  }
+  expect(from).not.toBeNull();
   await fire(page, "pointerdown", from);
   for (let i = 1; i <= 8; i++) await fire(page, "pointermove", { x: from.x + 8 * i, y: from.y });
   await fire(page, "pointerup", { x: from.x + 64, y: from.y });
