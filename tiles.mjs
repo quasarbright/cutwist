@@ -95,8 +95,9 @@ export const TILE_PRESETS = ["hex", "square", "triangle"].flatMap((tiling) => [
   // (shallower: the circles of triangles a step apart just touch)
   ...(tiling === "triangle" ? [tilePreset("tiles-triangle-shallow", "Shallow Face-Turning Triangle Tiling", tiling, [{ on: "face", depths: [0.5] }])] : []),
   tilePreset(`tiles-${tiling}-crystal`, `${NAMES[tiling]} ${same(tiling) ? "Crystal/Flower" : "Crystal"}`, tiling, [{ on: "face", depths: [CRYSTAL[tiling]] }]),
-  tilePreset(`tiles-${tiling}-corner`, `Corner-Turning ${NAMES[tiling]}`, tiling, [{ on: "vertex", depths: [CORNER[tiling]] }]),
   ...(same(tiling) ? [] : [tilePreset(`tiles-${tiling}-flower`, `${NAMES[tiling]} Flower`, tiling, [{ on: "face", depths: [FLOWER[tiling]] }])]),
+  // (face turners first, then corner turners)
+  tilePreset(`tiles-${tiling}-corner`, `Corner-Turning ${NAMES[tiling]}`, tiling, [{ on: "vertex", depths: [CORNER[tiling]] }]),
   ...(tiling === "triangle" ? [tilePreset("tiles-spiderman", "Spiderman", tiling, [{ on: "face", depths: [1 / (2 * SQ3)] }, { on: "vertex", depths: [0.5] }])] : []),
 ]);
 export const TILE_PARAMS = PARAMS;
