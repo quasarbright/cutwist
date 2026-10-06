@@ -466,7 +466,7 @@ const TAU = 2 * Math.PI;
 // two circles touch, the crossing's angle is the arc cosine of nearly 1, which turns that
 // into about 1e-8.)
 const SAME = 1e-7;
-function arrangement(circles) {
+export function arrangement(circles) {
   const pt = (k, a) => [k.c[0] + k.r * Math.cos(a), k.c[1] + k.r * Math.sin(a)];
   // (which circles can meet which: buckets as wide as the widest circle)
   // (neighboring buckets by index: adding a bucket's width to a coordinate rounds, and a
@@ -583,7 +583,7 @@ function arrangement(circles) {
 }
 // a point inside a region, for telling which circles it's in: just off the middle of its
 // longest edge, less than half as far in as any other circle comes near there
-function faceInner(f, circles) {
+export function faceInner(f, circles) {
   const e = f.outer.reduce((b, a) => (Math.abs(a.a1 - a.a0) * a.r > Math.abs(b.a1 - b.a0) * b.r ? a : b));
   const t = (e.a0 + e.a1) / 2, m = [e.c[0] + e.r * Math.cos(t), e.c[1] + e.r * Math.sin(t)];
   let clear = 1e-3;
@@ -640,13 +640,13 @@ function overlapArea(f, convex) {
   if (Math.max(...xs) < u0 || Math.min(...xs) > u1 || Math.max(...ys) < v0 || Math.min(...ys) > v1) return 0;
   return clipTo(f.poly()) - f.holePolys().reduce((a, h) => a + clipTo(h), 0);
 }
-const faceHas = (f, p) => inPolygon(f.poly(), p) && !f.holePolys().some((h) => inPolygon(h, p));
+export const faceHas = (f, p) => inPolygon(f.poly(), p) && !f.holePolys().some((h) => inPolygon(h, p));
 // a loop of arcs as a polygon, finely (a point every 0.004 or so)
 const loopPolygon = (loop) => loop.flatMap(({ c, r, a0, a1 }) => {
   const k = Math.max(6, Math.ceil((Math.abs(a1 - a0) * r) / 0.004));
   return Array.from({ length: k }, (_, i) => { const a = a0 + ((a1 - a0) * i) / k; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
 });
-function inPolygon(poly, p) {
+export function inPolygon(poly, p) {
   let w = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const a = poly[i], b = poly[j];
