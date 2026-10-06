@@ -2,3 +2,5 @@
 node_modules/
 test-results/
 playwright-report/
+# Conder's list (5.5 MB, his data): download it to rebuild regular-maps/, see data/build-regular-maps.mjs
+data/RotaryMapsWithUpTo1000Edges.txt
