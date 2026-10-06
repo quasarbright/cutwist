@@ -345,6 +345,9 @@ export const PRESETS = [
   // Skewb family: N evenly spaced layers per corner, so each face is a grid of squares
   // (see cutDepths).
   { id: "skewb", name: "Skewb", solid: "cube", on: "vertex", rule: "skewb", size: 2, names: { 2: "Skewb", 3: "Master Skewb", 4: "Professor Skewb" } },
+  // Corner turning that keeps the face centers: cuts from the edges' middles in toward the
+  // centers, spaced so each face is squares between them (see cutDepths).
+  { id: "corner-cube", name: "Corner-Turning Cube", solid: "cube", on: "vertex", rule: "corner-squares", size: 3 },
   // Deep corner cuts, through the corners next to each one: only edge pieces show.
   { id: "dino", name: "Dino Cube", solid: "cube", on: "vertex", rule: "neighbor-corners", size: 2, names: { 2: "Dino Cube" } },
   // Edge turning, cuts through the centers of the two faces at each edge. The real puzzle
@@ -464,6 +467,16 @@ function cutDepths(spec, solid, normals, n, N) {
     // the professor (N = 4) is 5.
     const w = 2 / (N - 1);
     for (let j = 0; j < N - 1; j++) out.push((w * (j - (N - 2) / 2)) / Math.sqrt(3));
+  } else if (spec.rule === "corner-squares") {
+    // Corner turning that keeps the face centers: N − 1 cuts per corner, the first through
+    // the edges' middles (2/3 of the way out to the corner), the rest between there and the
+    // face centers (1/3). On the face z = 1, the cut at depth f of the corner (1, 1, 1) draws
+    // the line x + y = 3f − 1, and the opposite corner on that face draws its mirror, so the
+    // lines sit at ±c with c = 3f − 1 from 1 (the edges' middles) toward 0 (the center).
+    // Spaced evenly, gap between ±c included: c = 1 − 2j/(2N − 3), so the face is squares
+    // between the cuts. Size 2 is the one cut 2/3, size 3 adds 4/9, size 4 is 2/3, 8/15, 2/5.
+    const hi = Math.max(...solid.polys.flatMap((p) => p.verts.map((v) => dot(n, v))));
+    for (let j = 0; j < N - 1; j++) out.push((hi * (2 - (2 * j) / (2 * N - 3))) / 3);
   } else if (spec.rule === "neighbor-corners") {
     // N − 1 cuts per corner, evenly spaced from the plane through the corners next to it (the
     // dino cube's and chopasaurus's one cut) out toward the corner: size 3 on a cube is 1/3
