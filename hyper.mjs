@@ -117,16 +117,26 @@ export function darts(G, H, start, keep) {
 }
 // points as keys, matched to within a tolerance (neighboring buckets by index, not by adding a
 // width to a coordinate: that rounds)
+// (buckets by column, then row: number keys, not strings, as this is in every search's inner loop)
 class PointSet {
-  constructor(tol) { this.tol = tol; this.map = new Map(); }
-  key([x, y], dx = 0, dy = 0) { return `${Math.floor(x / this.tol) + dx},${Math.floor(y / this.tol) + dy}`; }
+  constructor(tol) { this.tol = tol; this.cols = new Map(); }
   find(p) {
-    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
-      for (const [q, v] of this.map.get(this.key(p, dx, dy)) || []) if (Math.abs(q[0] - p[0]) < this.tol && Math.abs(q[1] - p[1]) < this.tol) return v ?? true;
+    const i = Math.floor(p[0] / this.tol), j = Math.floor(p[1] / this.tol);
+    for (let dx = -1; dx <= 1; dx++) {
+      const col = this.cols.get(i + dx);
+      if (col) for (let dy = -1; dy <= 1; dy++)
+        for (const [q, v] of col.get(j + dy) || []) if (Math.abs(q[0] - p[0]) < this.tol && Math.abs(q[1] - p[1]) < this.tol) return v ?? true;
+    }
     return undefined;
   }
   has(p) { return this.find(p) !== undefined; }
-  add(p, v = true) { const k = this.key(p); if (!this.map.has(k)) this.map.set(k, []); this.map.get(k).push([p, v]); }
+  add(p, v = true) {
+    const i = Math.floor(p[0] / this.tol), j = Math.floor(p[1] / this.tol);
+    if (!this.cols.has(i)) this.cols.set(i, new Map());
+    const col = this.cols.get(i);
+    if (!col.has(j)) col.set(j, []);
+    col.get(j).push([p, v]);
+  }
 }
 // a tile's axis points: its middle, corners and edges' middles, each with its element (the dart
 // turned so that point is its own: tile k's corner j is dart·R^j's corner 0)
@@ -172,17 +182,22 @@ export const isHyperbolic = (N, M_) => N >= 3 && M_ >= 3 && 1 / N + 1 / M_ < 1 /
 const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on === kind).flatMap((c) => c.depths).filter((r) => r > 0))].sort((a, b) => a - b);
 
 // ---- building a puzzle: spec { N, M, surface, cuts, blackout }, file: regular-maps/N-M.json
+const surfaceCache = new WeakMap();
 export function buildHyper(spec, file) {
   const { N } = spec, M_ = spec.M, G = geometry(N, M_);
   const list = hyperSurfaces(file), surface = list[Math.max(0, Math.min(list.length - 1, spec.surface | 0))];
-  const H = turnGroup(file, surface);
+  // (the surface's group and circle limits don't change with the cuts: worked out once, for
+  // rebuilding while a cut is dragged)
+  const kept = surfaceCache.get(surface) || {};
+  surfaceCache.set(surface, kept);
+  const H = (kept.H ??= turnGroup(file, surface));
   const P = { kind: "hyper", spec, G, H, surface, N, M: M_, tiles: H.coset.face.reps.length };
-  P.cap = radiusCaps(P);
+  P.cap = { ...(kept.cap ??= radiusCaps(P)) };
   P.radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k).filter((r) => r < P.cap[k])]));
   // (a radius within 1e-5 of a snap mark is that mark exactly: a hair off leaves slivers too
   // thin to work out reliably, the lesson of the flat tiles' color popping)
   for (const kind of KINDS) P.radii[kind].forEach((r, i) => {
-    const m = hyperSnapCandidates(P, kind, i).find((m) => Math.abs(m - r) < 1e-5);
+    const m = hyperSnapCandidates(P, kind, i, r + 1e-4).find((m) => Math.abs(m - r) < 1e-5);
     if (m !== undefined) P.radii[kind][i] = m;
   });
   const radii = P.radii;
@@ -221,15 +236,23 @@ function onTwoPlanes(u, a, w, b) {
   if (Math.abs(A) < 1e-14 || disc < 0) return [];
   return [(-Bq - Math.sqrt(disc)) / (2 * A), (-Bq + Math.sqrt(disc)) / (2 * A)].map((t) => [X0[0] + t * k[0], X0[1] + t * k[1], X0[2] + t * k[2]]).filter((X) => X[0] > 0);
 }
-// the radii a kind's circle number i can snap to (P: built as far as its caps and radii)
-export function hyperSnapCandidates(P, kind, i) {
-  const { G, H } = P, cap = P.cap[kind], own = P.radii[kind].filter((_, j) => j !== i);
-  const rmax = Math.max(cap, ...KINDS.flatMap((k) => P.radii[k]));
+// the radii a kind's circle number i can snap to, up to upTo (P: built as far as its caps and
+// radii). The hyperbolic plane's tiles multiply outward fast, so it looks only as far as a mark
+// under upTo can come from: a point within upTo, a same-kind circle within 2·upTo (touching it),
+// its nearest ring of those (within 1.5 times the nearest, which is under 2 corner radii away),
+// and a circle that reaches within upTo.
+export function hyperSnapCandidates(P, kind, i, upTo = P.cap[kind]) {
+  const { G, H } = P, cap = Math.min(P.cap[kind], upTo), own = P.radii[kind].filter((_, j) => j !== i);
+  const rmax = Math.max(0, ...KINDS.flatMap((k) => P.radii[k]));
   const p0 = kind === "face" ? cx(0) : kind === "vertex" ? G.corners[0] : G.mids[G.edge], P0 = toHyp(p0);
+  // (marks from same-kind circles, touching one or meeting among its ring, are at least half the
+  // way to the nearest one: a tile's neighbor's middle, along an edge, or two edges round a corner)
+  const nearest = kind === "face" ? 2 * G.Ri : kind === "vertex" ? hdist(G.corners[0], G.corners[1]) : hdist(G.mids[0], G.mids[1]);
+  const reach = Math.max(cap + rmax, cap < nearest / 2 ? 0 : Math.max(2 * cap, 1.5 * nearest));
   // every axis point near it, once
-  const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, p0) < 2 * cap + rmax + 2 * G.Rv), seen = new PointSet(1e-9), pts = [];
+  const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, p0) < reach + G.Rv), seen = new PointSet(1e-9), pts = [];
   for (const d of near) for (const a of axisPoints(G, H, d)) {
-    if (seen.has(a.p) || hdist(a.p, p0) > 2 * cap + rmax) continue;
+    if (seen.has(a.p) || hdist(a.p, p0) > reach) continue;
     seen.add(a.p); pts.push({ kind: a.kind, p: a.p, X: toHyp(a.p), d: hdist(a.p, p0) });
   }
   const copies = pts.filter((a) => a.kind === kind && a.d > 1e-9 && a.d < 2 * cap);
@@ -262,28 +285,63 @@ export function hyperSnapCandidates(P, kind, i) {
 
 // how big each kind's circles can be: less than halfway to the nearest other copy of the same
 // tile (corner, edge) in the disk, or they'd reach around the surface and overlap themselves
+// The tiles are visited nearest first, stopping once every kind has a copy nearer than the next
+// tile's middle less a corner radius (a nearer copy would be on a nearer tile). It depends only
+// on the surface, so it's kept with it.
 function radiusCaps(P) {
-  const { G, H } = P, at0 = axisPoints(G, H, { m: M.I, e: 0 }), cap = {};
-  const homes = { face: at0[0], vertex: at0[1], edge: at0[2] };
-  let reach = 2;
-  for (;;) {
-    const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, cx(0)) < reach);
-    for (const kind of KINDS) {
-      const home = homes[kind], c0 = H.coset[kind].of[home.e];
-      let best = Infinity;
-      for (const d of near) for (const a of axisPoints(G, H, d))
-        if (a.kind === kind && H.coset[kind].of[a.e] === c0 && hdist(a.p, home.p) > 1e-6) best = Math.min(best, hdist(a.p, home.p));
-      cap[kind] = best / 2 - 0.02;
+  const { G, H } = P, at0 = axisPoints(G, H, { m: M.I, e: 0 }), best = { face: Infinity, vertex: Infinity, edge: Infinity };
+  const homes = { face: at0[0], vertex: at0[1], edge: at0[2] }, c0 = Object.fromEntries(KINDS.map((k) => [k, H.coset[k].of[homes[k].e]]));
+  const heap = new MinHeap(), seen = new PointSet(1e-9);
+  // (a tile is queued once: its distance is the same whichever neighbor reaches it)
+  heap.push(0, { m: M.I, e: 0 }); seen.add(cx(0));
+  while (heap.size) {
+    const [dist, d] = heap.pop();
+    if (dist > 12 || KINDS.every((k) => best[k] + G.Rv < dist)) break;
+    for (const a of axisPoints(G, H, d)) {
+      if (H.coset[a.kind].of[a.e] !== c0[a.kind]) continue;
+      const r = hdist(a.p, homes[a.kind].p);
+      if (r > 1e-6 && r < best[a.kind]) best[a.kind] = r;
     }
-    if (KINDS.every((k) => Number.isFinite(cap[k]) && 2 * (cap[k] + 0.02) + G.Rv < reach) || reach > 12) break;
-    reach += 1.5;
+    let m = d.m, e = d.e;
+    for (let k = 0; k < G.N; k++) {
+      for (const next of [{ m: M.norm(M.mul(m, G.B)), e: H.right[1][e] }, { m: M.norm(M.mul(m, G.Bi)), e: H.rightInv[1][e] }]) {
+        const p = M.apply(next.m, cx(0));
+        if (abs(p) < 1 && !seen.has(p)) { seen.add(p); heap.push(hdist(p, cx(0)), next); }
+      }
+      m = M.mul(m, G.A); e = H.right[0][e];
+    }
   }
-  return cap;
+  return Object.fromEntries(KINDS.map((k) => [k, best[k] / 2 - 0.02]));
+}
+// (a binary heap of [key, value], smallest key first)
+class MinHeap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(k, v) {
+    const a = this.a; a.push([k, v]);
+    for (let i = a.length - 1; i > 0;) { const p = (i - 1) >> 1; if (a[p][0] <= a[i][0]) break; [a[p], a[i]] = [a[i], a[p]]; i = p; }
+  }
+  pop() {
+    const a = this.a, top = a[0], last = a.pop();
+    if (a.length) {
+      a[0] = last;
+      for (let i = 0; ;) {
+        const l = 2 * i + 1, r = l + 1;
+        let s = i;
+        if (l < a.length && a[l][0] < a[s][0]) s = l;
+        if (r < a.length && a[r][0] < a[s][0]) s = r;
+        if (s === i) break;
+        [a[s], a[i]] = [a[i], a[s]]; i = s;
+      }
+    }
+    return top;
+  }
 }
 
 // The pieces: the arrangement of every circle near tile 0, its regions touching tile 0, each named
 // by the circles it's inside; then those regions carried onto every tile of the surface, one piece
 // per name.
+const MAX_CIRCLES = 1200;
 function findPieces(P) {
   const { G, H, radii } = P;
   const rmax = Math.max(0, ...KINDS.flatMap((k) => radii[k]));
@@ -300,22 +358,32 @@ function findPieces(P) {
     axes.push({ ...a, coset: H.coset[a.kind].of[a.e] });
   }
   const circles = axes.flatMap((a, ai) => radii[a.kind].map((r, ring) => ({ ...diskCircle(a.p, r), axis: ai, ring })));
+  // (big circles meet exponentially many others: past this many, working out the pieces takes
+  // seconds to minutes, so it's refused, P.tooBig, and the page says to use smaller circles)
+  if (circles.length > MAX_CIRCLES) { P.tooBig = circles.length; P.circles = circles; P.nearBy = new Map(); return; }
   // tile 0, and the tiles near it (for the stickers), as polygons in the disk
   const tile0 = G.poly;
-  P.near = near.filter((d) => hdist(M.apply(d.m, cx(0)), cx(0)) < G.Rv + 2 * rmax + 2 * G.Rv).map((d) => ({ e: d.e, poly: G.poly.map((z) => M.apply(d.m, z)) }));
+  P.near = near.filter((d) => hdist(M.apply(d.m, cx(0)), cx(0)) < G.Rv + 2 * rmax + 2 * G.Rv).map((d) => ({ e: d.e, poly: G.poly.map((z) => M.apply(d.m, z)), klein: kleinTile(G.corners.map((z) => M.apply(d.m, z))) }));
+  const box0 = [Math.min(...tile0.map((z) => z[0])), Math.min(...tile0.map((z) => z[1])), Math.max(...tile0.map((z) => z[0])), Math.max(...tile0.map((z) => z[1]))];
   for (const f of arrangement(circles)) {
+    // touching tile 0: its edge passes through it, or it covers tile 0's middle or a corner (and
+    // not if their boxes miss each other)
+    const [x0, y0, x1, y1] = f.box;
+    if (x0 > box0[2] || box0[0] > x1 || y0 > box0[3] || box0[1] > y1) continue;
+    const touches = f.poly().some((z) => inPolygon(tile0, z)) || faceHas(f, cx(0)) || G.corners.some((z) => faceHas(f, z));
+    if (!touches) continue;
     const inner = faceInner(f, circles);
     // its name: for each axis whose circles it's inside, the smallest (its ring)
     const name = new Map();
     for (const c of circles) if (abs(sub(inner, c.c)) < c.r) { const a = axes[c.axis], k = `${a.kind}:${a.coset}`; if (!name.has(k) || name.get(k).ring > c.ring) name.set(k, { ring: c.ring, axis: c.axis }); }
     if (!name.size) continue; // (outside every circle: it doesn't move)
-    // touching tile 0: its edge passes through it, or it covers tile 0's middle or a corner
-    const touches = f.poly().some((z) => inPolygon(tile0, z)) || faceHas(f, cx(0)) || G.corners.some((z) => faceHas(f, z));
-    if (!touches) continue;
-    // the anchor: of points spread over it, the one farthest (hyperbolically) from every circle
-    const depth = (z) => Math.min(...circles.map((c) => Math.abs(abs(sub(z, c.c)) - c.r) / (1 - (z[0] * z[0] + z[1] * z[1]))));
+    // the anchor: of points spread over it, the one farthest (hyperbolically) from every circle.
+    // (Only circles within the box's diagonal of it can be a point's nearest: its own edges are.
+    // The hyperbolic weight is the same for every circle at a point, so it doesn't change which.)
+    const mid = [(x0 + x1) / 2, (y0 + y1) / 2], h = Math.hypot(x1 - x0, y1 - y0) / 2;
+    const close = circles.filter((c) => { const dc = abs(sub(mid, c.c)); return Math.max(0, dc - h - c.r, c.r - dc - h) <= 2 * h; });
+    const depth = (z) => { let m = Infinity; for (const c of close) m = Math.min(m, Math.abs(abs(sub(z, c.c)) - c.r)); return m / (1 - (z[0] * z[0] + z[1] * z[1])); };
     let anchor = inner, best = depth(inner);
-    const [x0, y0, x1, y1] = f.box;
     for (let i = 1; i < 12; i++) for (let j = 1; j < 12; j++) {
       const z = [x0 + ((x1 - x0) * i) / 12, y0 + ((y1 - y0) * j) / 12];
       if (faceHas(f, z) && depth(z) > best) { best = depth(z); anchor = z; }
@@ -324,7 +392,7 @@ function findPieces(P) {
     // tile is a convex polygon. tiles: those tiles' polygons, for drawing (on a small surface
     // several tiles near tile 0 are copies of one, with the same element: the element alone
     // doesn't say which copy)
-    const under = P.near.filter((t) => overlap(f, t.poly) > 1e-9), stickers = under.map((t) => t.e), tiles = under.map((t) => t.poly);
+    const fk = kleinRegion(f), under = P.near.filter((t) => overlap(fk, t.klein) > 1e-9), stickers = under.map((t) => t.e), tiles = under.map((t) => t.poly);
     // the axes near it: where each of its circles' middles is, for turning it about the right one
     const around = [...name.values()].map(({ ring, axis }) => ({ ring, kind: axes[axis].kind, e: axes[axis].e, p: axes[axis].p }));
     P.regions.push({ face: f, outline: [f.outer, ...f.holes], poly: [f.poly(), ...f.holePolys()], anchor, name: [...name.entries()].map(([k, v]) => [axes[v.axis].kind, axes[v.axis].e, v.ring]), around, stickers, tiles });
@@ -343,10 +411,14 @@ function findPieces(P) {
   // symmetry carries a point of one into the other, it carries the whole region.
   const typeOf = P.regions.map((_, i) => i), root = (i) => (typeOf[i] === i ? i : (typeOf[i] = root(typeOf[i])));
   const maps = [...nearBy.values()].flat();
+  const inBox = ([x0, y0, x1, y1], [x, y]) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
   P.regions.forEach((b, j) => {
+    let images = null; // (b's anchor carried by every symmetry: worked out once, when first needed)
     for (let i = 0; i < j; i++) {
       if (root(i) === root(j) || P.regions[i].stickers.length !== b.stickers.length) continue;
-      if (maps.some((m) => faceHas(P.regions[i].face, M.apply(m, b.anchor)))) { typeOf[root(j)] = root(i); break; }
+      images ??= maps.map((m) => M.apply(m, b.anchor));
+      const a = P.regions[i].face;
+      if (images.some((z) => inBox(a.box, z) && faceHas(a, z))) { typeOf[root(j)] = root(i); break; }
     }
   });
   const typeIds = new Map();
@@ -375,13 +447,19 @@ function findPieces(P) {
   P.n = P.pieces.length;
 }
 // (how much of a region a tile covers: both mapped to the Klein model, where the tile's edges are
-// straight and it's convex, then the region's polygons clipped to it)
+// straight and it's convex, so its corners alone outline it, then the region's polygons clipped
+// to it. Each is mapped once, with a bounding box to skip the tiles nowhere near)
 const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [x * s, y * s]; };
-function overlap(f, tilePoly) {
-  const tile = tilePoly.map(toKlein), cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+const boxOf = (pts) => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const [x, y] of pts) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; };
+const kleinTile = (corners) => { const pts = corners.map(toKlein); return { pts, box: boxOf(pts) }; };
+const kleinRegion = (f) => { const outer = f.poly().map(toKlein); return { outer, holes: f.holePolys().map((h) => h.map(toKlein)), box: boxOf(outer) }; };
+function overlap(region, kt) {
+  const tile = kt.pts, b = kt.box, rb = region.box;
+  if (b[0] > rb[2] || rb[0] > b[2] || b[1] > rb[3] || rb[1] > b[3]) return 0;
+  const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
   const sgn = Math.sign(tile.reduce((s, p, i) => s + cross(p, tile[(i + 1) % tile.length]), 0));
   const clip = (poly) => {
-    let out = poly.map(toKlein);
+    let out = poly;
     tile.forEach((a, i) => {
       const b = tile[(i + 1) % tile.length], side = (p) => sgn * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]));
       const next = [];
@@ -394,7 +472,7 @@ function overlap(f, tilePoly) {
     });
     return Math.abs(out.reduce((s, p, i) => s + cross(p, out[(i + 1) % out.length]), 0)) / 2;
   };
-  return clip(f.poly()) - f.holePolys().reduce((s, h) => s + clip(h), 0);
+  return clip(region.outer) - region.holes.reduce((s, h) => s + clip(h), 0);
 }
 
 // ---- state and moves: each piece's position, an element of H (0: home)
