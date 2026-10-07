@@ -1616,8 +1616,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           zero.style.left = pctIn(R.range, 0) + "%";
           el.marks.append(zero);
         }
+        // (marks past the ruler's ends aren't reachable: the range can end before the snaps' search)
+        const [lo, hi] = R.range;
         if (snapping && sel.r === r)
-          for (const f of (snaps[r] || [])[sel.i] || []) {
+          for (const f of ((snaps[r] || [])[sel.i] || []).filter((f) => f >= lo && f <= hi)) {
             const m = document.createElement("span");
             m.style.left = pctIn(R.range, f) + "%";
             el.marks.append(m);
@@ -1647,7 +1649,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const R = RULERS[r], [lo, hi] = R.range;
       v = Math.max(lo, Math.min(hi, v));
       if (snap && snapping) {
-        const near = ((snaps[r] || [])[i] || []).reduce((b, f) => (Math.abs(f - v) < Math.abs(b - v) ? f : b), Infinity);
+        const near = ((snaps[r] || [])[i] || []).filter((f) => f >= lo && f <= hi).reduce((b, f) => (Math.abs(f - v) < Math.abs(b - v) ? f : b), Infinity);
         const perPx = (hi - lo) / Math.max(1, rulerEls[r].handles.clientWidth);
         if (Math.abs(near - v) < SNAP_PX * perPx) v = near;
       }
