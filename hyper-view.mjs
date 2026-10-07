@@ -76,10 +76,22 @@ export function pieceShapes(P) {
   if (shapeCache.has(P)) return shapeCache.get(P);
   const out = P.regions.map((region) => STEPS.map((step) => {
     const loops = region.outline.map((loop) => arcLoop(loop, step)), klein = loops.map((l) => l.map(toKlein));
-    const stickers = region.tiles.map((tile) => { const k = tile.map(toKlein); return klein.map((l) => clipConvex(l, k)).filter((l) => l.length >= 3).map((l) => l.map(toPoincare)); });
+    const stickers = region.tiles.map((tile) => { const k = tile.map(toKlein); return klein.map((l) => clipConvex(l, k)).filter((l) => l.length >= 3).map((l) => densify(l, 0.004 * step).map(toPoincare)); });
     return { loops, stickers };
   }));
   shapeCache.set(P, out);
+  return out;
+}
+// A Klein-model polygon with points added along its sides, no further apart than gap: a straight
+// side there (where it runs along a tile's edge) is an arc in the disk, and mapped as just its two
+// ends it would be drawn as a chord, cutting across the arc. Big tiles' long edges made stickers
+// overlap or leave gaps that way.
+function densify(loop, gap) {
+  const out = [];
+  loop.forEach((p, i) => {
+    const q = loop[(i + 1) % loop.length], n = Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / gap);
+    for (let k = 0; k < n; k++) out.push([p[0] + ((q[0] - p[0]) * k) / n, p[1] + ((q[1] - p[1]) * k) / n]);
+  });
   return out;
 }
 // a polygon (any shape) cut to a convex one

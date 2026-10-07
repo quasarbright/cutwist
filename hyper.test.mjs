@@ -99,8 +99,11 @@ test("no color drawn where it isn't: every covered spot of the surface in exactl
 test("drawn stickers fill their piece, on every preset and level of detail", () => {
   const area = (l) => { let a = 0; for (let i = 0, j = l.length - 1; i < l.length; j = i++) a += l[j][0] * l[i][1] - l[i][0] * l[j][1]; return a / 2; };
   const loopsArea = (ls) => Math.abs(ls.reduce((s, l) => s + area(l), 0));
-  for (const p of HYPER_PRESETS) {
-    const P = preset(p.id), shapes = pieceShapes(P);
+  // (and big tiles, whose long edges a sticker can run along: cut as one straight Klein segment
+  // and drawn as a chord, it missed the arc by 8% of the piece)
+  const big = (N, M, cuts) => buildHyper({ rule: "hyper", N, M, surface: 0, cuts, blackout: [] }, file(N, M));
+  for (const P of [...HYPER_PRESETS.map((p) => preset(p.id)), big(12, 4, [{ on: "face", depths: [1.7912512496328927] }]), big(10, 5, [{ on: "face", depths: [1.5] }, { on: "vertex", depths: [0.5] }])]) {
+    const p = { id: `{${P.N},${P.M}}` }, shapes = pieceShapes(P);
     P.regions.forEach((region, r) => shapes[r].forEach(({ loops, stickers }, lod) => {
       const whole = loopsArea(loops), parts = stickers.map(loopsArea);
       assert.ok(parts.every((a) => a > 0), `${p.id} region ${r} level ${lod}: an empty sticker`);
