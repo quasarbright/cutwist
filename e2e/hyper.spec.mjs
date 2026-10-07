@@ -113,6 +113,24 @@ test("customize: the circles' rulers (no solid, no truncation), a corner circle,
   expect(await page.evaluate(() => JSON.parse(atob(new URLSearchParams(location.search).get("design").replace(/-/g, "+").replace(/_/g, "/"))).blackout.length)).toBe(1);
 });
 
+test("nudging a cut redraws it, even when the pieces count stays the same", async ({ page }) => {
+  await pick(page, "hyper-klein");
+  await settled(page);
+  await page.click("#customize");
+  await settled(page);
+  await page.mouse.move(5, 5);
+  // (the disk's picture, a frame or two after a change)
+  const picture = async () => {
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    return page.evaluate(() => document.getElementById("plane").toDataURL());
+  };
+  await page.locator(".tw-handle").first().focus();
+  const before = await picture(), n = (await info(page)).pieces;
+  await page.keyboard.press("ArrowRight");
+  expect((await info(page)).pieces).toBe(n);
+  expect(await picture()).not.toBe(before);
+});
+
 test("sides and tiles at a corner: the other one follows to a hyperbolic tiling; the size menu lists its surfaces", async ({ page }) => {
   await pick(page, "hyper-klein");
   await settled(page);

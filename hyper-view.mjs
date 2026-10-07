@@ -115,7 +115,10 @@ export class HyperView {
   }
   heightFor(P, w) { return w; }
   layout(P, safe) {
-    if (this.P !== P) { this.P = P; this.start = { m: Mb.I, e: 0 }; this.visible = null; }
+    // (a new puzzle, even one with the same pieces count and view, is a new picture: the cached one
+    // is keyed by view and state, so it goes)
+    // (the same surface rebuilt, as while a cut is dragged, keeps where the view is)
+    if (this.P !== P) { if (!this.P || this.P.H !== P.H) this.start = { m: Mb.I, e: 0 }; this.P = P; this.visible = null; this.cache = null; }
     const w = Math.max(40, safe.right - safe.left), h = Math.max(40, safe.bottom - safe.top);
     this.R = Math.min(w, h) / 2 - 2;
     this.cx = safe.left + w / 2; this.cy = safe.top + h / 2;
@@ -255,10 +258,17 @@ export class HyperView {
       cx.setTransform(1, 0, 0, 1, 0, 0);
       cx.clearRect(0, 0, c.width, c.height);
       cx.setTransform(dpr, 0, 0, dpr, -this.origin.x * dpr, -this.origin.y * dpr); // (page px → this canvas)
+      // (Pieces at rest sit on the tiling: every way they turn maps it onto itself. So the tiles'
+      // edges inside them can go on in one pass over the tiles, and their outlines, which are all
+      // arcs of the circles, as the circles: rather than each piece stroking its own, every line
+      // twice. Blacked-out pieces go over the tiles' edges; a turning piece draws its own.)
+      const still = (i) => !moving || !moving.has(i);
       this.disk(cx);
       this.paintTiles(cx);
-      this.paint(cx, state, (i) => !moving || !moving.has(i), null);
-      this.paint(cx, state, (i) => !moving || !moving.has(i), null, "lines");
+      this.paint(cx, state, (i) => still(i) && !P.pieces[i].black, null, "fill");
+      this.tileEdges(cx);
+      this.paint(cx, state, (i) => still(i) && P.pieces[i].black, null, "fill");
+      this.circleLines(cx);
       if (steady) this.paint(cx, state, (i) => steady.has(i) && (!moving || !moving.has(i)), null, "light", look.litAlpha ?? 0.34);
       this.cache = { key, canvas: c };
     }
@@ -301,9 +311,38 @@ export class HyperView {
       ctx.lineWidth = this.lineFor(d.m); ctx.stroke();
     }
   }
+  // the tiles' edges again, thin, over the pieces (where a sticker meets the next one)
+  tileEdges(ctx) {
+    const { P } = this;
+    ctx.lineJoin = "round"; ctx.strokeStyle = BODY;
+    for (const d of this.listVisible().tiles) {
+      const px = this.pxSize(d.m);
+      if (px < PIECE_PX) continue;
+      ctx.beginPath();
+      if (px < 12) this.trace(ctx, P.G.corners, d.m); else this.trace(ctx, P.G.poly, d.m, this.stepFor(px));
+      ctx.lineWidth = 0.6 * this.lineFor(d.m); ctx.stroke();
+    }
+  }
+  // every circle at every visible copy of its middle: the pieces' outlines
+  circleLines(ctx) {
+    const { P } = this;
+    ctx.strokeStyle = BODY;
+    for (const kind of ["face", "vertex", "edge"]) {
+      if (!P.radii[kind].length) continue;
+      for (const { at } of this.axisCopies(kind)) {
+        const px = diskCircle(at, P.G.Rv).r * this.R; // (a tile's size there, as pxSize)
+        if (px < PIECE_PX) continue;
+        ctx.lineWidth = Math.max(0.35, Math.min(2, 0.035 * px));
+        for (const r of P.radii[kind]) {
+          const { c, r: er } = diskCircle(at, r), p = this.toScreen(c);
+          ctx.beginPath(); ctx.arc(p.x, p.y, er * this.R, 0, 2 * Math.PI); ctx.stroke();
+        }
+      }
+    }
+  }
   // Draw the pieces `which` picks, at every visible copy. turn: the moving ones' turn, or null.
-  // mode: "pieces" (filled), "lines" (outlines, after every fill, so each edge gets one line),
-  // "light" (a white light, alpha strong)
+  // mode: "pieces" (filled, with the tiles' edges across them), "fill" (just filled), "lines"
+  // (outlines, after every fill, so each edge gets one line), "light" (a white light, alpha strong)
   paint(ctx, state, which, turn, mode = "pieces", alpha = 1) {
     const { P } = this, { H } = P, vis = this.listVisible(), shapes = pieceShapes(P);
     for (let i = 0; i < P.n; i++) {
@@ -324,7 +363,7 @@ export class HyperView {
           ctx.beginPath();
           for (const poly of loops) this.trace(ctx, poly, m);
           ctx.fillStyle = hyperColor(P, pc.faces[j]); ctx.fill("evenodd");
-          ctx.strokeStyle = BODY; ctx.lineWidth = 0.6 * this.lineFor(m0); ctx.stroke();
+          if (mode === "pieces") { ctx.strokeStyle = BODY; ctx.lineWidth = 0.6 * this.lineFor(m0); ctx.stroke(); }
         });
       }
     }

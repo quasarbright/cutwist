@@ -1500,11 +1500,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // truncated design can have thousands), and the selected handle's go first, since its
     // marks are the ones showing.
     let snapping = true, snaps = [], snapJob = 0;
+    let loadFrame = 0; // (a dragged handle's rebuild, waiting for the next frame: see loadSoon)
     const SNAP_PX = 7; // how close (on screen) a handle has to come to a mark to snap
     const SNAP_NEAREST = 16;
     // keep: [r, i] of a handle whose snaps are still right (the one just dragged: its snaps
     // depend only on the others)
     function computeSnaps(keep = null) {
+      loadNow(); // (a handle's last move, built: the snaps are worked out on it)
       const job = ++snapJob;
       const spec = JSON.parse(JSON.stringify({ ...custom }));
       const kept = (r, i) => keep && keep[0] === r && keep[1] === i;
@@ -1645,9 +1647,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const h = rulerEls[r].handles.children[i];
       h.style.left = pctIn(R.range, v) + "%";
       h.setAttribute("aria-valuenow", v.toFixed(3));
-      changed(false);
+      custom.blackout = [];
+      loadSoon();
       showSnaps();
     }
+    // A dragged handle rebuilds the puzzle at most once a frame (pointer moves come faster than a
+    // big design builds, and each one waiting its turn made the drag lag behind). loadNow: the
+    // last one, at once (before anything reads the built puzzle, like the snaps)
+    function loadSoon() { if (!loadFrame) loadFrame = requestAnimationFrame(() => { loadFrame = 0; load(false); }); }
+    function loadNow() { if (loadFrame) { cancelAnimationFrame(loadFrame); loadFrame = 0; load(false); } }
     function removeValue(r, i) {
       pushUndo();
       RULERS[r].remove(i);
@@ -1937,6 +1945,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         spec = currentSpec();
         next = buildHyper(spec, hyperFileFor(spec));
       }
+      if (isCustom() && next.tooBig) { $("bStats").innerHTML = `<span class="warn">circles this big cross too many others to work out. Use smaller ones.</span>`; return; }
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
