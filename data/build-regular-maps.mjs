@@ -17,6 +17,7 @@
 // says, and its tile count, genus and sidedness are read off the group, not taken on trust.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { parseRelator, enumerate, permOrder, wordPerm, generatedSize } from "../todd-coxeter.mjs";
+import { addCaps } from "./add-caps.mjs";
 
 // the surfaces worth a puzzle: hyperbolic, tiles and corners up to MAX, and not too many tiles
 const MAX = 12, MAX_TILES = 400;
@@ -124,3 +125,5 @@ for (const [key, list] of Object.entries(surfaces)) {
   index[key] = list.map((s) => s.tiles);
 }
 writeFileSync(new URL("index.json", dir), JSON.stringify({ source: SOURCE, limits: { maxPolygon: MAX, maxPerCorner: MAX, maxTiles: MAX_TILES }, tilings: index }));
+// (and each two-sided surface's circle limits, so the page needn't search for them)
+console.log(`caps for ${addCaps(dir)} surfaces`);
