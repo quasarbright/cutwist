@@ -57,61 +57,32 @@ function hyperColors(P) {
   return out;
 }
 
-// Each region's outline and its stickers cut to their tiles, once per puzzle, at a few levels of
-// detail (a small copy needs fewer points): shapes[r][lod] = { loops, stickers }, where loops are
-// the outline's (disk points, home frame) and stickers[j] the loops of its part on its j-th tile,
-// to fill even-odd. Each level samples every arc on its own, so the points where arcs meet (the
-// piece's corners) are always kept: skipping points of the whole outline cut corners off.
-// The cutting is in the Klein model, where a tile is a convex polygon with straight edges (its
-// sampled geodesic edges stay on those lines), so Sutherland–Hodgman against each edge does it.
+// Each fragment of tile 0 (hyper.mjs's P.regions: a piece is some of them, on its tiles) as
+// polygons, once per puzzle, at a few levels of detail (a small copy needs fewer points):
+// shapes[f][lod] = { loops (its outline, to fill even-odd), cuts: [{ pts, p }] (its stretches along
+// circles it's inside: each circle line drawn from one side only; p, the circle's middle, sets the
+// line's width as the circle's), edges: [{ pts, k }] (its stretches along tile 0's edge k) }. Each
+// level samples every arc on its own, so the points where arcs meet (the fragment's corners) are
+// always kept: skipping points of the whole outline cut corners off.
 const STEPS = [1, 2, 4, 8]; // (as stepFor gives)
 const shapeCache = new WeakMap();
-const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [s * x, s * y]; };
-const toPoincare = ([x, y]) => { const s = 1 / (1 + Math.sqrt(Math.max(0, 1 - x * x - y * y))); return [s * x, s * y]; };
-const arcLoop = (loop, step) => loop.flatMap(({ c, r, a0, a1 }) => {
+const arcPoints = ({ c, r, a0, a1 }, step, end) => {
   const k = Math.max(step > 1 ? 2 : 6, Math.ceil((Math.abs(a1 - a0) * r) / (0.004 * step)));
-  return Array.from({ length: k }, (_, i) => { const a = a0 + ((a1 - a0) * i) / k; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
-});
-export function pieceShapes(P) {
+  return Array.from({ length: k + (end ? 1 : 0) }, (_, i) => { const a = a0 + ((a1 - a0) * i) / k; return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
+};
+export function fragmentShapes(P) {
   if (shapeCache.has(P)) return shapeCache.get(P);
+  const circleOf = new Map(P.circles.map((c) => [c.c, c])), edgeOf = new Map((P.edges || []).map((e) => [e.c, e]));
   const out = P.regions.map((region) => STEPS.map((step) => {
-    const loops = region.outline.map((loop) => arcLoop(loop, step)), klein = loops.map((l) => l.map(toKlein));
-    const stickers = region.tiles.map((tile) => { const k = tile.map(toKlein); return klein.map((l) => clipConvex(l, k)).filter((l) => l.length >= 3).map((l) => densify(l, 0.004 * step).map(toPoincare)); });
-    return { loops, stickers };
+    const loops = region.outline.map((loop) => loop.flatMap((arc) => arcPoints(arc, step, false))), cuts = [], edges = [];
+    for (const loop of region.outline) for (const arc of loop) {
+      const e = edgeOf.get(arc.c), c = circleOf.get(arc.c);
+      if (e) edges.push({ pts: arcPoints(arc, step, true), k: e.edge });
+      else if (c && abs([region.anchor[0] - c.c[0], region.anchor[1] - c.c[1]]) < c.r) cuts.push({ pts: arcPoints(arc, step, true), p: c.p });
+    }
+    return { loops, cuts, edges };
   }));
   shapeCache.set(P, out);
-  return out;
-}
-// A Klein-model polygon with points added along its sides, no further apart than gap: a straight
-// side there (where it runs along a tile's edge) is an arc in the disk, and mapped as just its two
-// ends it would be drawn as a chord, cutting across the arc. Big tiles' long edges made stickers
-// overlap or leave gaps that way.
-function densify(loop, gap) {
-  const out = [];
-  loop.forEach((p, i) => {
-    const q = loop[(i + 1) % loop.length], n = Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / gap);
-    for (let k = 0; k < n; k++) out.push([p[0] + ((q[0] - p[0]) * k) / n, p[1] + ((q[1] - p[1]) * k) / n]);
-  });
-  return out;
-}
-// a polygon (any shape) cut to a convex one
-function clipConvex(subject, clip) {
-  let area = 0;
-  for (let i = 0, j = clip.length - 1; i < clip.length; j = i++) area += clip[j][0] * clip[i][1] - clip[i][0] * clip[j][1];
-  const sign = Math.sign(area);
-  let out = subject;
-  for (let i = 0, j = clip.length - 1; i < clip.length && out.length; j = i++) {
-    const a = clip[j], b = clip[i], dx = b[0] - a[0], dy = b[1] - a[1];
-    if (dx * dx + dy * dy < 1e-24) continue; // (a repeated point)
-    const side = (p) => sign * (dx * (p[1] - a[1]) - dy * (p[0] - a[0]));
-    const next = [];
-    for (let k = 0; k < out.length; k++) {
-      const p = out[k], q = out[(k + 1) % out.length], sp = side(p), sq = side(q);
-      if (sp >= 0) next.push(p);
-      if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); next.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
-    }
-    out = next;
-  }
   return out;
 }
 
@@ -130,7 +101,7 @@ export class HyperView {
     // (a new puzzle, even one with the same pieces count and view, is a new picture: the cached one
     // is keyed by view and state, so it goes)
     // (the same surface rebuilt, as while a cut is dragged, keeps where the view is)
-    if (this.P !== P) { if (!this.P || this.P.H !== P.H) this.start = { m: Mb.I, e: 0 }; this.P = P; this.visible = null; this.cache = null; }
+    if (this.P !== P) { if (!this.P || this.P.H !== P.H) this.start = { m: Mb.I, e: 0 }; this.P = P; this.visible = null; this.cache = null; this.lines = null; }
     const w = Math.max(40, safe.right - safe.left), h = Math.max(40, safe.bottom - safe.top);
     this.R = Math.min(w, h) / 2 - 2;
     this.cx = safe.left + w / 2; this.cy = safe.top + h / 2;
@@ -216,23 +187,24 @@ export class HyperView {
   pieceAt(px, py, state) {
     if (!this.shows(px, py)) return null;
     const { P } = this, { G, H } = P, z = this.toDisk(px, py), where = this.whereIs(state);
-    // (just the tiles near the point: a piece reaches at most its circles' size past its tile)
-    const reach = G.Rv + 2 * Math.max(0, ...["face", "vertex", "edge"].flatMap((k) => P.radii[k])) + G.Rv;
+    // (the tile it's on, then the fragments there, seen from each of its darts)
     for (const d of this.listVisible().tiles) {
-      if (hdist(Mb.apply(d.m, [0, 0]), z) > reach) continue;
+      if (!this.inTile(Mb.apply(Mb.inv(d.m), z))) continue;
       let m = d.m, e = d.e;
       for (let k = 0; k < G.N; k++) {
         const local = Mb.apply(Mb.inv(m), z);
-        for (const i of where.get(e) || []) if (faceHas(P.regions[P.pieces[i].region].face, local)) return i;
+        for (const [i, f] of where.get(e) || []) if (faceHas(P.regions[f].face, local)) return i;
         m = Mb.mul(m, G.A); e = H.right[0][e];
       }
+      return null;
     }
     return null;
   }
-  // which pieces are at each element now (a piece at g sits at g·home)
+  // which pieces' fragments are at each element now ([piece, fragment]: a piece at g has its
+  // fragment (x, f) at g·x)
   whereIs(state) {
     const { P } = this, out = new Map();
-    for (let i = 0; i < P.n; i++) { const e = P.H.mul(state[i], P.pieces[i].home); if (!out.has(e)) out.set(e, []); out.get(e).push(i); }
+    P.pieces.forEach((pc, i) => { for (const { x, f } of pc.frags) { const e = P.H.mul(state[i], x); if (!out.has(e)) out.set(e, []); out.get(e).push([i, f]); } });
     return out;
   }
   // the spot under a point, as (element of the tile it's on, point in that dart's frame), and every
@@ -253,36 +225,41 @@ export class HyperView {
   inTile(local) { const p = this.P.G.poly; let w = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > local[1]) !== (p[j][1] > local[1]) && local[0] < p[i][0] + ((local[1] - p[i][1]) * (p[j][0] - p[i][0])) / (p[j][1] - p[i][1])) w = !w; return w; }
 
   // ---- drawing ----
-  // state: the puzzle's state. turn: { pieces (Map piece → the point, in its region's frame, it
-  // turns about), theta (radians, counterclockwise) } or null. look: { hover ({ axis, layer }),
-  // lit (Set of pieces), litAlpha, pointer ({ at (disk), cursor, real }) }
+  // state: the puzzle's state. turn: { pieces (Map piece → for each of its fragments, the point in
+  // tile 0's frame it turns about), theta (radians, counterclockwise), axis, layer } or null.
+  // look: { hover ({ axis, layer }), lit (Set of pieces), litAlpha, pointer ({ at (disk), cursor,
+  // real }) }
+  //
+  // Two cached layers: the colors (tiles, the still fragments, the tiles' edges, blacked-out pieces
+  // over those) and the circles' lines. Every line is drawn once, at a width set by where it is,
+  // the same still or turning: so a turn neither thickens nor thins one. While a ring turns, its
+  // fragments are drawn over the colors, and the cached lines are kept out of the ring, where the
+  // turning fragments draw their own (each circle's from the fragment inside it; the ring's inner
+  // circle, which has still fragments inside it, from the ring).
   draw(state, turn, look) {
     const { ctx, canvas, P } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
     const moving = turn ? turn.pieces : null;
     // (a steady light, like blacking out's hovered kind, goes in the cached layer; a pulsing one,
     // an algorithm's, is drawn each frame)
     const steady = look.lit && look.litSteady ? look.lit : null;
-    const key = [this.viewKey(), state.join(), moving ? [...moving.keys()].join(".") : "", this.cx, this.cy, this.origin.x, this.origin.y, canvas.width, canvas.height, P.n, steady ? [...steady].join(".") : ""].join("|");
+    const place = [this.viewKey(), this.cx, this.cy, this.origin.x, this.origin.y, canvas.width, canvas.height].join("|");
+    const key = [place, state.join(), moving ? [...moving.keys()].join(".") : "", steady ? [...steady].join(".") : ""].join("|");
     if (!this.cache || this.cache.key !== key) {
-      const c = this.cache?.canvas || document.createElement("canvas");
-      if (c.width !== canvas.width || c.height !== canvas.height) { c.width = canvas.width; c.height = canvas.height; }
-      const cx = c.getContext("2d");
-      cx.setTransform(1, 0, 0, 1, 0, 0);
-      cx.clearRect(0, 0, c.width, c.height);
-      cx.setTransform(dpr, 0, 0, dpr, -this.origin.x * dpr, -this.origin.y * dpr); // (page px → this canvas)
-      // (Pieces at rest sit on the tiling: every way they turn maps it onto itself. So the tiles'
-      // edges inside them can go on in one pass over the tiles, and their outlines, which are all
-      // arcs of the circles, as the circles: rather than each piece stroking its own, every line
-      // twice. Blacked-out pieces go over the tiles' edges; a turning piece draws its own.)
+      const cx = this.layer("cache");
       const still = (i) => !moving || !moving.has(i);
       this.disk(cx);
       this.paintTiles(cx);
       this.paint(cx, state, (i) => still(i) && !P.pieces[i].black, null, "fill");
       this.tileEdges(cx);
       this.paint(cx, state, (i) => still(i) && P.pieces[i].black, null, "fill");
+      if (steady) this.paint(cx, state, (i) => steady.has(i) && still(i), null, "light", look.litAlpha ?? 0.34);
+      this.cache.key = key;
+    }
+    if (!this.lines || this.lines.key !== place) {
+      const cx = this.layer("lines");
+      this.clipDisk(cx);
       this.circleLines(cx);
-      if (steady) this.paint(cx, state, (i) => steady.has(i) && (!moving || !moving.has(i)), null, "light", look.litAlpha ?? 0.34);
-      this.cache = { key, canvas: c };
+      this.lines.key = place;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -290,15 +267,78 @@ export class HyperView {
     ctx.setTransform(dpr, 0, 0, dpr, -this.origin.x * dpr, -this.origin.y * dpr);
     ctx.save();
     this.clipDisk(ctx);
-    if (moving) { this.paint(ctx, state, (i) => moving.has(i), turn); this.paint(ctx, state, (i) => moving.has(i), turn, "lines"); }
+    const blit = (c) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, 0, 0); ctx.restore(); };
+    if (moving) {
+      this.paint(ctx, state, (i) => moving.has(i), turn, "fill");
+      this.paint(ctx, state, (i) => moving.has(i) && !P.pieces[i].black, turn, "edges");
+      ctx.save(); this.ringPath(ctx, turn, true); ctx.clip("evenodd"); blit(this.lines.canvas); ctx.restore();
+      ctx.save(); this.ringPath(ctx, turn, false); ctx.clip("evenodd");
+      this.paint(ctx, state, (i) => moving.has(i), turn, "cuts");
+      this.innerRing(ctx, turn);
+      ctx.restore();
+    } else blit(this.lines.canvas);
     if (look.lit && !steady) this.paint(ctx, state, (i) => look.lit.has(i), turn, "light", look.litAlpha ?? 0.34);
     if (look.hover) this.drawRings(ctx, look.hover);
     if (look.pointer) this.drawPointers(ctx, look.pointer);
     ctx.restore();
   }
+  // a cached layer (this[name]: { canvas, key }), cleared, with no clip left from last time, set up
+  // to draw in page px
+  layer(name) {
+    const { canvas } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
+    const L = (this[name] ||= { canvas: document.createElement("canvas"), key: null, saved: false });
+    if (L.canvas.width !== canvas.width || L.canvas.height !== canvas.height) { L.canvas.width = canvas.width; L.canvas.height = canvas.height; L.saved = false; }
+    const cx = L.canvas.getContext("2d");
+    if (L.saved) cx.restore();
+    cx.save(); L.saved = true;
+    cx.setTransform(1, 0, 0, 1, 0, 0);
+    cx.clearRect(0, 0, L.canvas.width, L.canvas.height);
+    cx.setTransform(dpr, 0, 0, dpr, -this.origin.x * dpr, -this.origin.y * dpr); // (page px → this canvas)
+    return cx;
+  }
   disk(ctx) {
     ctx.beginPath(); ctx.arc(this.cx, this.cy, this.R, 0, 2 * Math.PI); ctx.fillStyle = BODY; ctx.fill();
     this.clipDisk(ctx);
+  }
+  // A turning ring at every visible copy of its axis (its outer circle, and inner one if it has
+  // one), as a path to clip to even-odd: withDisk, the disk outside them (the rest of the picture)
+  ringPath(ctx, { axis, layer }, withDisk) {
+    const { P } = this, ax = P.axes[axis];
+    ctx.beginPath();
+    if (withDisk) { ctx.moveTo(this.cx + this.R, this.cy); ctx.arc(this.cx, this.cy, this.R, 0, 2 * Math.PI); }
+    for (const { axis: a, at } of this.axisCopies(ax.kind)) {
+      if (a !== axis) continue;
+      for (const r of layer > 0 ? [ax.radii[layer], ax.radii[layer - 1]] : [ax.radii[layer]]) {
+        const { c, r: er } = diskCircle(at, r), p = this.toScreen(c);
+        ctx.moveTo(p.x + er * this.R, p.y); ctx.arc(p.x, p.y, er * this.R, 0, 2 * Math.PI);
+      }
+    }
+  }
+  // a turning ring's inner circle (still fragments are inside it, so none of the turning ones draws it)
+  innerRing(ctx, { axis, layer }) {
+    const { P } = this, ax = P.axes[axis];
+    if (!layer) return;
+    ctx.strokeStyle = BODY;
+    for (const { axis: a, at } of this.axisCopies(ax.kind)) {
+      if (a !== axis) continue;
+      const { c, r: er } = diskCircle(at, ax.radii[layer - 1]), p = this.toScreen(c);
+      ctx.lineWidth = this.circleWidth(at);
+      ctx.beginPath(); ctx.arc(p.x, p.y, er * this.R, 0, 2 * Math.PI); ctx.stroke();
+    }
+  }
+  // Lines' widths, from how big a tile is where they are: a circle's from its middle, a tile edge's
+  // from its tile (thinner: the circles are the cuts, the edges where colors meet)
+  circleWidth(at) { return Math.max(0.35, Math.min(2, 0.035 * diskCircle(at, this.P.G.Rv).r * this.R)); }
+  edgeWidth(m) { return 0.6 * this.lineFor(m); }
+  // Each tile edge is drawn from one of its two tiles only: the one whose middle comes first (by x,
+  // then y) of the two, seen with dart m. (The tile across edge k of tile 0 has its middle at the
+  // reflection of 0 in that edge's circle: c/|c|².)
+  firstSide(m, k) {
+    const e = this.P.edges[k], n = e.c[0] ** 2 + e.c[1] ** 2, a = Mb.apply(m, [0, 0]), b = Mb.apply(m, [e.c[0] / n, e.c[1] / n]);
+    return Math.abs(a[0] - b[0]) > 1e-9 ? a[0] < b[0] : a[1] < b[1];
+  }
+  polyline(ctx, pts, m) {
+    pts.forEach((q, j) => { const p = this.toScreen(Mb.apply(m, q)); j ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
   }
   clipDisk(ctx) { ctx.beginPath(); ctx.arc(this.cx, this.cy, this.R, 0, 2 * Math.PI); ctx.clip(); }
   // a polygon (disk points) as a path on ctx, every step-th point (a small copy needs few)
@@ -313,26 +353,32 @@ export class HyperView {
   // the solved picture: every visible tile in its color
   paintTiles(ctx) {
     const { P } = this;
-    ctx.lineJoin = "round"; ctx.strokeStyle = BODY;
     for (const d of this.listVisible().tiles) {
       const px = this.pxSize(d.m);
       ctx.beginPath();
       // (small ones: their corners will do, the edges' bend is under a pixel)
       if (px < 12) this.trace(ctx, P.G.corners, d.m); else this.trace(ctx, P.G.poly, d.m, this.stepFor(px));
       ctx.fillStyle = hyperColor(P, P.H.coset.face.of[d.e]); ctx.fill();
-      ctx.lineWidth = this.lineFor(d.m); ctx.stroke();
     }
   }
-  // the tiles' edges again, thin, over the pieces (where a sticker meets the next one)
+  // the tiles' edges, each once (see firstSide), over the colors
   tileEdges(ctx) {
-    const { P } = this;
-    ctx.lineJoin = "round"; ctx.strokeStyle = BODY;
+    const { P } = this, { G } = P, per = G.poly.length / G.N;
+    ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.strokeStyle = BODY;
     for (const d of this.listVisible().tiles) {
       const px = this.pxSize(d.m);
-      if (px < PIECE_PX) continue;
+      if (px < MIN_PX) continue;
+      const step = px < 12 ? per : this.stepFor(px);
+      ctx.lineWidth = this.edgeWidth(d.m);
       ctx.beginPath();
-      if (px < 12) this.trace(ctx, P.G.corners, d.m); else this.trace(ctx, P.G.poly, d.m, this.stepFor(px));
-      ctx.lineWidth = 0.6 * this.lineFor(d.m); ctx.stroke();
+      for (let k = 0; k < G.N; k++) {
+        if (!this.firstSide(d.m, k)) continue;
+        const pts = [];
+        for (let j = 0; j < per; j += step) pts.push(G.poly[k * per + j]);
+        pts.push(G.corners[(k + 1) % G.N]);
+        this.polyline(ctx, pts, d.m);
+      }
+      ctx.stroke();
     }
   }
   // every circle at every visible copy of its middle: the pieces' outlines
@@ -342,9 +388,8 @@ export class HyperView {
     for (const kind of ["face", "vertex", "edge"]) {
       if (!P.radii[kind].length) continue;
       for (const { at } of this.axisCopies(kind)) {
-        const px = diskCircle(at, P.G.Rv).r * this.R; // (a tile's size there, as pxSize)
-        if (px < PIECE_PX) continue;
-        ctx.lineWidth = Math.max(0.35, Math.min(2, 0.035 * px));
+        if (diskCircle(at, P.G.Rv).r * this.R < PIECE_PX) continue;
+        ctx.lineWidth = this.circleWidth(at);
         for (const r of P.radii[kind]) {
           const { c, r: er } = diskCircle(at, r), p = this.toScreen(c);
           ctx.beginPath(); ctx.arc(p.x, p.y, er * this.R, 0, 2 * Math.PI); ctx.stroke();
@@ -352,32 +397,37 @@ export class HyperView {
       }
     }
   }
-  // Draw the pieces `which` picks, at every visible copy. turn: the moving ones' turn, or null.
-  // mode: "pieces" (filled, with the tiles' edges across them), "fill" (just filled), "lines"
-  // (outlines, after every fill, so each edge gets one line), "light" (a white light, alpha strong)
-  paint(ctx, state, which, turn, mode = "pieces", alpha = 1) {
-    const { P } = this, { H } = P, vis = this.listVisible(), shapes = pieceShapes(P);
+  // Draw the pieces `which` picks, at every visible copy of each of their fragments. turn: the
+  // moving ones' turn, or null. mode: "fill" (each fragment in its tile's color, or black),
+  // "light" (a white light, alpha strong), "edges" (the tiles' edges across them), "cuts" (the
+  // circles' lines along them, each from the fragment inside it)
+  paint(ctx, state, which, turn, mode = "fill", alpha = 1) {
+    const { P } = this, { H } = P, vis = this.listVisible(), shapes = fragmentShapes(P);
+    ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.strokeStyle = BODY;
     for (let i = 0; i < P.n; i++) {
       if (!which(i)) continue;
-      const pc = P.pieces[i], e = H.mul(state[i], pc.home);
-      const pivot = turn && turn.pieces.get(i), spin = pivot ? Mb.about(pivot, turn.theta) : null;
-      for (const m0 of vis.byElement.get(e) || []) {
-        const px = this.pxSize(m0);
-        if (px < PIECE_PX) continue; // (too small to see: the solved picture under it shows)
-        const m = spin ? Mb.mul(m0, spin) : m0, shape = shapes[pc.region][STEPS.indexOf(this.stepFor(px))];
-        ctx.beginPath();
-        for (const poly of shape.loops) this.trace(ctx, poly, m);
-        if (mode === "lines") { ctx.lineJoin = "round"; ctx.strokeStyle = BODY; ctx.lineWidth = this.lineFor(m0); ctx.stroke(); continue; }
-        if (mode === "light") { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = "#fff"; ctx.fill("evenodd"); ctx.restore(); continue; }
-        if (pc.black) { ctx.fillStyle = BLACK; ctx.fill("evenodd"); continue; }
-        // (each sticker already cut to its tile: no clip, which is most of the drawing's time)
-        shape.stickers.forEach((loops, j) => {
+      const pc = P.pieces[i], pivots = turn && turn.pieces.get(i);
+      pc.frags.forEach(({ x, f }, k) => {
+        const spin = pivots ? Mb.about(pivots[k], turn.theta) : null;
+        for (const m0 of vis.byElement.get(H.mul(state[i], x)) || []) {
+          const px = this.pxSize(m0);
+          if (px < PIECE_PX) continue; // (too small to see: the solved picture under it shows)
+          const m = spin ? Mb.mul(m0, spin) : m0, shape = shapes[f][STEPS.indexOf(this.stepFor(px))];
+          if (mode === "edges") {
+            ctx.lineWidth = this.edgeWidth(m);
+            for (const { pts, k: e } of shape.edges) if (this.firstSide(m, e)) { ctx.beginPath(); this.polyline(ctx, pts, m); ctx.stroke(); }
+            continue;
+          }
+          if (mode === "cuts") {
+            for (const { pts, p } of shape.cuts) { ctx.lineWidth = this.circleWidth(Mb.apply(m, p)); ctx.beginPath(); this.polyline(ctx, pts, m); ctx.stroke(); }
+            continue;
+          }
           ctx.beginPath();
-          for (const poly of loops) this.trace(ctx, poly, m);
-          ctx.fillStyle = hyperColor(P, pc.faces[j]); ctx.fill("evenodd");
-          if (mode === "pieces") { ctx.strokeStyle = BODY; ctx.lineWidth = 0.6 * this.lineFor(m0); ctx.stroke(); }
-        });
-      }
+          for (const poly of shape.loops) this.trace(ctx, poly, m);
+          if (mode === "light") { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = "#fff"; ctx.fill("evenodd"); ctx.restore(); continue; }
+          ctx.fillStyle = pc.black ? BLACK : hyperColor(P, pc.faces[k]); ctx.fill("evenodd");
+        }
+      });
     }
   }
   // the rings of an axis's layer (hover), at every visible copy of it

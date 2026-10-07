@@ -3,9 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps } from "./hyper.mjs";
+import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount } from "./hyper.mjs";
 import { faceHas, inPolygon } from "./tiles.mjs";
-import { pieceShapes } from "./hyper-view.mjs";
+import { fragmentShapes } from "./hyper-view.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
 // (cuts given: those, not the preset's circle worked out for its tiling)
@@ -67,48 +67,49 @@ test("rings: circles around one tile at two radii make a disk and a ring that tu
   for (const i of disk.keys()) assert.equal(s[i], 0);
 });
 
-// Every point of the surface inside some circle is in exactly one piece, with a sticker for the
-// tile under it; a point outside every circle is in none. (A spot in two pieces, or none, is a color
-// drawn where it isn't.) Points: random spots of tile 0, carried onto random tiles of the surface.
-function checkCover(P, rand, count = 300) {
-  const { H, G } = P;
-  for (let t = 0; t < count; t++) {
-    // (a random point of tile 0, by its corners' fan)
-    const k = Math.floor(rand() * G.N), u = rand(), v = rand() * (1 - u), a = G.corners[k], b = G.corners[(k + 1) % G.N];
-    const z = [u * a[0] + v * b[0], u * a[1] + v * b[1]];
-    if (!inPolygon(G.poly, z)) continue;
-    if (P.circles.some((c) => Math.abs(Math.hypot(z[0] - c.c[0], z[1] - c.c[1]) - c.r) < 1e-6)) continue; // (on an edge)
-    const covered = P.circles.some((c) => Math.hypot(z[0] - c.c[0], z[1] - c.c[1]) < c.r);
-    const h = H.coset.face.reps[Math.floor(rand() * P.tiles)];
-    const hits = P.pieces.filter((pc) => (P.nearBy.get(H.mul(H.inv[pc.home], h)) || []).some((m) => faceHas(P.regions[pc.region].face, mobius.apply(m, z))));
-    assert.equal(hits.length, covered ? 1 : 0, `point ${z} on tile ${H.coset.face.of[h]}: in ${hits.length} pieces`);
-    if (hits.length) assert.ok(hits[0].faces.includes(H.coset.face.of[h]), "no sticker for the tile there");
-  }
-}
+// The pieces are found a tile at a time: tile 0 cut into fragments, joined across tiles' edges.
+// Designs to check that on: the presets, and others with corners, edges, rings, small surfaces
+// (tiles meeting themselves) and big tiles (long edges, circles past them).
+const designs = () => {
+  const D = (N, M, surface, face, vertex = [], edge = []) => buildHyper({ rule: "hyper", N, M, surface, cuts: [{ on: "face", depths: face }, { on: "vertex", depths: vertex }, { on: "edge", depths: edge }], blackout: [] }, file(N, M));
+  return [...HYPER_PRESETS.map((p) => preset(p.id)), D(7, 3, 0, [0.714], [0.6], [0.4]), D(8, 3, 0, [0.5, 1.2], [0.7]), D(6, 4, 1, [1.45], [0.25]), D(5, 4, 0, [], [0.25]),
+    D(4, 5, 0, [0.5], [], [0.3]), D(12, 4, 0, [1.7912512496328927]), D(12, 3, 0, [1.895747403967124]), D(10, 5, 0, [1.5], [0.5])];
+};
+const area = (l) => { let a = 0; for (let i = 0, j = l.length - 1; i < l.length; j = i++) a += l[j][0] * l[i][1] - l[i][0] * l[j][1]; return a / 2; };
+const loopsArea = (ls) => Math.abs(ls.reduce((s, l) => s + area(l), 0));
 
-test("no color drawn where it isn't: every covered spot of the surface in exactly one piece", () => {
-  const rand = seeded(7);
-  for (const p of HYPER_PRESETS) checkCover(preset(p.id), rand);
-  checkCover(preset("hyper-klein", { cuts: [{ on: "face", depths: [0.714] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [0.4] }] }), rand);
-  checkCover(preset("hyper-octagons", { cuts: [{ on: "face", depths: [0.5, 1.2] }, { on: "vertex", depths: [0.7] }] }), rand);
+// No color drawn where it isn't, nor a hole: tile 0's fragments are inside it and cover it once
+// (their areas add up to its), at every level of detail drawn
+test("tile 0's fragments cover it exactly, at every level of detail", () => {
+  for (const P of designs()) {
+    const tile = Math.abs(area(P.G.poly)), shapes = fragmentShapes(P);
+    for (let lod = 0; lod < 4; lod++) {
+      const sum = P.regions.reduce((s, _, f) => s + loopsArea(shapes[f][lod].loops), 0);
+      assert.ok(Math.abs(sum - tile) < (lod ? 0.01 : 0.002) * tile, `{${P.N},${P.M}} level ${lod}: fragments ${sum} vs tile ${tile}`);
+    }
+  }
 });
 
-// Drawing: a piece's stickers, each cut to its tile, fill its outline and nothing else, at every
-// level of detail. (On the 6 octagons, tiles near tile 0 repeat: cut to the wrong copy, every
-// sticker came out empty and turns showed no color moving.)
-test("drawn stickers fill their piece, on every preset and level of detail", () => {
-  const area = (l) => { let a = 0; for (let i = 0, j = l.length - 1; i < l.length; j = i++) a += l[j][0] * l[i][1] - l[i][0] * l[j][1]; return a / 2; };
-  const loopsArea = (ls) => Math.abs(ls.reduce((s, l) => s + area(l), 0));
-  // (and big tiles, whose long edges a sticker can run along: cut as one straight Klein segment
-  // and drawn as a chord, it missed the arc by 8% of the piece)
-  const big = (N, M, cuts) => buildHyper({ rule: "hyper", N, M, surface: 0, cuts, blackout: [] }, file(N, M));
-  for (const P of [...HYPER_PRESETS.map((p) => preset(p.id)), big(12, 4, [{ on: "face", depths: [1.7912512496328927] }]), big(10, 5, [{ on: "face", depths: [1.5] }, { on: "vertex", depths: [0.5] }])]) {
-    const p = { id: `{${P.N},${P.M}}` }, shapes = pieceShapes(P);
-    P.regions.forEach((region, r) => shapes[r].forEach(({ loops, stickers }, lod) => {
-      const whole = loopsArea(loops), parts = stickers.map(loopsArea);
-      assert.ok(parts.every((a) => a > 0), `${p.id} region ${r} level ${lod}: an empty sticker`);
-      assert.ok(Math.abs(parts.reduce((s, a) => s + a, 0) - whole) < 0.02 * whole, `${p.id} region ${r} level ${lod}: stickers ${parts} vs piece ${whole}`);
-    }));
+// a piece is one cell of the circles' arrangement: every fragment of it inside the same circles
+test("every fragment of a piece is inside the same circles", () => {
+  for (const P of designs()) {
+    const { H } = P;
+    for (const pc of P.pieces) for (const { x, f } of pc.frags) {
+      const name = new Map(P.regions[f].name.map(([kind, e, ring]) => [`${kind}:${H.coset[kind].of[H.mul(x, e)]}`, ring]));
+      assert.deepEqual([...name].sort(), [...pc.name].sort(), `{${P.N},${P.M}}`);
+    }
+  }
+});
+
+// A turn carries whole pieces onto whole pieces: after a scramble, every fragment spot of the
+// surface (a tile and a fragment of it) still has exactly one piece's fragment on it
+test("after a scramble, every fragment spot of the surface is still filled exactly once", () => {
+  const rand = seeded(11);
+  for (const P of designs()) {
+    const s = play(P, hyperScrambleMoves(P, 60, rand)), home = new Set(), now = new Map();
+    P.pieces.forEach((pc, i) => pc.frags.forEach(({ x, f }) => { home.add(P.canon(x, f)); const k = P.canon(P.H.mul(s[i], x), f); now.set(k, (now.get(k) || 0) + 1); }));
+    assert.equal(now.size, home.size, `{${P.N},${P.M}}`);
+    for (const [k, n] of now) assert.ok(n === 1 && home.has(k), `{${P.N},${P.M}}: spot ${k} has ${n}`);
   }
 });
 
@@ -148,9 +149,23 @@ test("a circle stops short of its own copy: the cap is under half the way to it"
   assert.ok(Q.shrunk && r < Q.cap.face && r > Q.cap.face - 0.01, `${r} vs ${Q.cap.face}`);
 });
 
-test("circles too many to work out shrink, the biggest first, until they fit", () => {
-  const P = buildHyper({ rule: "hyper", N: 10, M: 8, surface: 0, cuts: [{ on: "face", depths: [2.5] }, { on: "vertex", depths: [0.6] }], blackout: [] }, file(10, 8));
-  const face = P.spec.cuts.find((c) => c.on === "face").depths[0], vertex = P.spec.cuts.find((c) => c.on === "vertex").depths[0];
-  assert.ok(P.shrunk && !P.tooBig && P.n > 0 && face < 2.5, `face ${face}`);
-  assert.equal(vertex, 0.6); // (the smaller one left as it was)
+test("a design too costly to work out shrinks, the biggest circles first and together, until it fits", () => {
+  // (the Klein quartic's tiling on its biggest surface, 192 tiles: big circles mean tens of
+  // thousands of pieces)
+  const f = file(7, 3), last = hyperSurfaces(f).length - 1, cut = (P, on) => P.spec.cuts.find((c) => c.on === on).depths;
+  const P = buildHyper({ rule: "hyper", N: 7, M: 3, surface: last, cuts: [{ on: "face", depths: [3] }, { on: "vertex", depths: [0.3] }], blackout: [] }, f);
+  assert.ok(P.shrunk && !P.tooBig && P.n > 0 && P.n <= 40000 && cut(P, "face")[0] < 3, `face ${cut(P, "face")}, ${P.n} pieces`);
+  assert.deepEqual(cut(P, "vertex"), [0.3]); // (the smaller one left as it was)
+  // (two big ones come down together, neither to nothing)
+  const Q = buildHyper({ rule: "hyper", N: 7, M: 3, surface: last, cuts: [{ on: "face", depths: [3] }, { on: "vertex", depths: [3] }], blackout: [] }, f);
+  assert.ok(Math.abs(cut(Q, "face")[0] - cut(Q, "vertex")[0]) < 0.06 && cut(Q, "face")[0] > 0.3, JSON.stringify(Q.spec.cuts));
+});
+
+// (Euler's count is exact but where three lines meet at a point, as at a snap mark, where it
+// counts too many: a budget that errs that way only stops a design a little early)
+test("the fragments counted ahead (the budget's) are never many fewer than found, nor far more", () => {
+  for (const P of designs()) {
+    const est = fragmentCount(P, P.radii), n = P.regions.length;
+    assert.ok(est >= 0.9 * n && est <= 1.6 * n, `{${P.N},${P.M}}: counted ${est}, found ${n}`);
+  }
 });

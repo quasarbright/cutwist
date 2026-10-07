@@ -2950,7 +2950,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const reg = viewRegions();
       plane.hidden = false;
       canvas.hidden = true;
-      const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta } : null;
+      const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta, axis: anim.axis, layer: anim.layer } : null;
       // (lit: blacking out, the kind of piece under the pointer; otherwise an algorithm's pieces)
       const lit = hoverType !== null ? new Set(P.pieces.flatMap((pc, i) => (pc.type === hoverType ? [i] : []))) : algLit;
       const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit, litAlpha: hoverType !== null ? 0.34 : litPulse(), litSteady: hoverType !== null, pointer: tilePointer };
