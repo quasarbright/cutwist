@@ -143,7 +143,14 @@ test("a circle stops short of its own copy: the cap is under half the way to it"
   // (the nearest copy of tile 0's middle, found the slow way)
   assert.ok(P.cap.face > 0.5 && P.cap.face < 2 && P.cap.face > geometry(8, 3).Rv);
   assert.ok(2 * P.cap.face < hdist([0, 0], mobius.apply(mobius.about(G.corners[0], Math.PI), [0, 0])) * 2);
-  // circles past the cap are dropped, not left to overlap themselves
-  const Q = preset("hyper-octagons", { cuts: [{ on: "face", depths: [5] }] });
-  assert.equal(Q.axes.length, 0);
+  // circles past the cap come in to just under it, not left to overlap themselves
+  const Q = preset("hyper-octagons", { cuts: [{ on: "face", depths: [5] }] }), r = Q.spec.cuts.find((c) => c.on === "face").depths[0];
+  assert.ok(Q.shrunk && r < Q.cap.face && r > Q.cap.face - 0.01, `${r} vs ${Q.cap.face}`);
+});
+
+test("circles too many to work out shrink, the biggest first, until they fit", () => {
+  const P = buildHyper({ rule: "hyper", N: 10, M: 8, surface: 0, cuts: [{ on: "face", depths: [2.5] }, { on: "vertex", depths: [0.6] }], blackout: [] }, file(10, 8));
+  const face = P.spec.cuts.find((c) => c.on === "face").depths[0], vertex = P.spec.cuts.find((c) => c.on === "vertex").depths[0];
+  assert.ok(P.shrunk && !P.tooBig && P.n > 0 && face < 2.5, `face ${face}`);
+  assert.equal(vertex, 0.6); // (the smaller one left as it was)
 });

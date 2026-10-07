@@ -7,13 +7,15 @@
 // Run: node --test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { mapGroup, permOrder, parseRelator, enumerate, wordPerm, generatedSize } from "./todd-coxeter.mjs";
+import { isPuzzleSurface } from "./hyper.mjs";
 
 const dir = new URL("./regular-maps/", import.meta.url);
 const read = (f) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
 const index = read("index.json");
-const tilings = Object.keys(index.tilings).map((k) => [k, read(`${k.replace(",", "-")}.json`)]);
+// (every tiling's file; the index lists only those with surfaces for a puzzle)
+const tilings = readdirSync(dir).filter((f) => /^\d+-\d+\.json$/.test(f)).map((f) => { const file = read(f); return [`${file.N},${file.M}`, file]; });
 const paper = JSON.parse(readFileSync(new URL("./data/conder-dobcsanyi-genus-2-6.json", import.meta.url), "utf8")).maps;
 
 test("the relator notation: powers, brackets, commutators, and Conder's a*b", () => {
@@ -48,7 +50,8 @@ test("every surface rebuilds: turns of the right orders, and its tiles, genus an
       if (s.tiles < last) wrong.push(`${key}: out of order at ${s.tiles} tiles`);
       last = s.tiles;
     }
-    if (JSON.stringify(index.tilings[key]) !== JSON.stringify(file.surfaces.map((s) => s.tiles))) wrong.push(`${key}: index sizes differ from the file`);
+    const sizes = file.surfaces.filter(isPuzzleSurface).map((s) => s.tiles);
+    if (JSON.stringify(index.tilings[key] || []) !== JSON.stringify(sizes)) wrong.push(`${key}: index sizes differ from the file's puzzle surfaces`);
   }
   assert.deepEqual(wrong, []);
   assert.ok(n > 8000, `${n} surfaces`);
@@ -77,7 +80,7 @@ test("the paper's maps (genus 2 to 6, transcribed by hand): each checks out, and
     for (const [N, M] of [[p, q], [q, p]]) {
       const tiles = row.automs / (2 * N);
       if (N > maxPolygon || M > maxPolygon || tiles > maxTiles || 1 / N + 1 / M >= 1 / 2) continue;
-      const file = index.tilings[`${N},${M}`] ? read(`${N}-${M}.json`) : { surfaces: [] };
+      const file = existsSync(new URL(`${N}-${M}.json`, dir)) ? read(`${N}-${M}.json`) : { surfaces: [] };
       if (!file.surfaces.some((s) => s.tiles === tiles && s.genus === row.genus && s.orientable && !s.chiral)) wrong.push(`${row.id}: no {${N},${M}} surface of ${tiles} tiles, genus ${row.genus}`);
     }
   }

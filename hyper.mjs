@@ -171,8 +171,10 @@ export const HYPER_PRESETS = [
   hyperPreset("hyper-pentagons", "Pentagon Surface", 5, 4, [{ on: "face", depths: [faceDefault(5, 4)] }]),
   hyperPreset("hyper-squares", "Square Surface", 4, 5, [{ on: "face", depths: [faceDefault(4, 5)] }]),
 ];
-// the surfaces a tiling's file offers (two-sided ones), fewest tiles first
-export const hyperSurfaces = (file) => file.surfaces.filter((s) => s.orientable);
+// the surfaces a tiling's file offers: two-sided ones of more than one tile (a one-tile surface
+// has every circle around the same tile: not much of a puzzle), fewest tiles first
+export const isPuzzleSurface = (s) => s.orientable && s.tiles > 1;
+export const hyperSurfaces = (file) => file.surfaces.filter(isPuzzleSurface);
 // a surface's name in the size menu: "24 tiles · genus 3", and which of a mirror pair
 export function surfaceLabel(list, i) {
   const s = list[i], twins = list.filter((t) => t.tiles === s.tiles);
@@ -201,7 +203,20 @@ export function buildHyper(spec, file) {
     const r = Math.min(faceDefault(N, M_), P.cap.face - 0.005, hyperRadiusLimit(P, "face", 0, { face: [], vertex: [], edge: [] }));
     P.spec = spec = { ...spec, cuts: [{ on: "face", depths: [r] }] };
   }
-  P.radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k).filter((r) => r < P.cap[k])]));
+  // Circles that don't fit shrink until they do (P.shrunk, and P.spec has the cuts as built): past
+  // the surface's limit, to just under it; then, while there are too many circles to work out,
+  // the biggest, to as big as it can be with the others (3 decimals, as a ruler sets them)
+  const down = (r) => Math.floor(r * 1000) / 1000;
+  P.radii = Object.fromEntries(KINDS.map((k) => [k, [...new Set(radiiOf(spec, k).map((r) => (r < P.cap[k] ? r : down(P.cap[k] - 0.005))))].sort((a, b) => a - b)]));
+  let shrunk = KINDS.some((k) => radiiOf(spec, k).some((r) => r >= P.cap[k]));
+  while (!fits(P, hyperCircleCount(P, P.radii))) {
+    const [kind, i] = KINDS.flatMap((k) => P.radii[k].map((r, j) => [k, j, r])).reduce((b, c) => (c[2] > b[2] ? c : b));
+    const r = P.radii[kind][i], next = Math.min(down(hyperRadiusLimit(P, kind, i)), down(r - 0.001));
+    if (next < 0.05) { P.radii[kind].splice(i, 1); } else P.radii[kind][i] = next;
+    P.radii[kind] = [...new Set(P.radii[kind])].sort((a, b) => a - b);
+    shrunk = true;
+  }
+  if (shrunk) { P.shrunk = true; P.spec = spec = { ...spec, cuts: KINDS.map((on) => ({ on, depths: [...P.radii[on]] })) }; }
   // (a radius within 1e-5 of a snap mark is that mark exactly: a hair off leaves slivers too
   // thin to work out reliably, the lesson of the flat tiles' color popping)
   for (const kind of KINDS) P.radii[kind].forEach((r, i) => {

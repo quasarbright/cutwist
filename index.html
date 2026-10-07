@@ -1501,6 +1501,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // marks are the ones showing.
     let snapping = true, snaps = [], snapJob = 0;
     let loadFrame = 0; // (a dragged handle's rebuild, waiting for the next frame: see loadSoon)
+    let rulerDragging = false; // (a handle's being dragged: its ruler isn't rebuilt under it)
     const SNAP_PX = 7; // how close (on screen) a handle has to come to a mark to snap
     const SNAP_NEAREST = 16;
     // keep: [r, i] of a handle whose snaps are still right (the one just dragged: its snaps
@@ -1720,8 +1721,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const offset = onHandle ? values[i] - v0 : 0;
       if (!onHandle) setDepth(r, i, v0, true);
       el.ruler.setPointerCapture(e.pointerId);
+      rulerDragging = true;
       const move = (ev) => setDepth(r, i, at(ev.clientX) + offset, true);
       const up = () => {
+        rulerDragging = false;
         el.ruler.removeEventListener("pointermove", move);
         el.ruler.removeEventListener("pointerup", up);
         el.ruler.removeEventListener("pointercancel", up);
@@ -1949,13 +1952,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         return;
       }
       let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
-      if (spec.rule === "hyper" && isCustom() && custom.cuts.some((c) => c.depths.some((d) => d >= next.cap[c.on]))) {
-        // (a design's circles too big for this surface come in to just under its limit)
-        custom.cuts = custom.cuts.map((c) => ({ ...c, depths: [...new Set(c.depths.map((d) => Math.min(d, Math.round((next.cap[c.on] - 0.005) * 1000) / 1000)))] }));
-        spec = currentSpec();
-        next = buildHyper(spec, hyperFileFor(spec));
+      if (spec.rule === "hyper" && isCustom() && next.shrunk) {
+        // (a design's circles too big for this surface, or too many to work out, came in till they
+        // fit: the design takes them as built, and its rulers show them, unless one's being dragged)
+        custom.cuts = next.spec.cuts;
+        if (!rulerDragging) renderBuilder();
       }
-      if (isCustom() && next.tooBig) { $("bStats").innerHTML = `<span class="warn">circles this big cross too many others to work out. Use smaller ones.</span>`; return; }
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
       P = next;
