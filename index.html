@@ -795,7 +795,7 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates,
+      hyperSnapCandidates, hyperRadiusLimit,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
 
@@ -1557,13 +1557,21 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // handles are still easy to catch.
     const CUT_KINDS = ["face", "vertex", "edge"];
     const setOf = (on) => custom.cuts.find((c) => c.on === on);
+    // A hyperbolic ruler ends at the biggest circle that still works out: under the surface's limit
+    // and the circles budget. That's set by the biggest circle of the design (how far the others
+    // reach) and how many there are, so it's the same for every handle on the ruler; new: for one
+    // more circle on it.
+    function hyperRulerMax(on, more = false) {
+      const rs = P.radii[on];
+      return hyperRadiusLimit(P, on, more || !rs.length ? rs.length : rs.indexOf(Math.max(...rs)));
+    }
     // (on a tiling, a cut set's depths are circles' radii, from nothing out: no center mark)
     const cutRuler = (on) => ({
       group: "bSets", label: ON_SHORT[on], max: Infinity, noun: "cut",
       // (a tiling's radii stop where a circle would reach around the torus to overlap itself; a
       // hyperbolic one's, around its surface: the built puzzle knows how far that is)
       get range() {
-        if (isHyperDesign()) return [0.05, isHyper() ? P.cap[on] : 2];
+        if (isHyperDesign()) return [0.05, isHyper() ? hyperRulerMax(on) : 2];
         return isTileDesign() ? [TILE_CUT_RANGE[0], Math.min(TILE_CUT_RANGE[1], tileRadiusCap(custom))] : CUT_RANGE;
       },
       get center() { return !isCircleDesign(); },
@@ -1671,7 +1679,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       let v = 0.15;
       if (R.max !== 1) {
         // (a tiling's: out to the next tile's middle, or the cap; a hyperbolic one's, a tile's corners or the cap)
-        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(R.range[1], 1.2 * (isHyper() ? P.G.Rv : 1))] : [0, 0.95];
+        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(isHyper() ? hyperRulerMax(CUT_KINDS[r - 2], true) : 2, 1.2 * (isHyper() ? P.G.Rv : 1))] : [0, 0.95];
         const pts = [lo, ...R.values().filter((d) => d > lo && d < hi), hi].sort((a, b) => a - b);
         let gap = -1;
         for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1] - pts[k] > gap) { gap = pts[k + 1] - pts[k]; v = (pts[k] + pts[k + 1]) / 2; }
@@ -2033,7 +2041,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function customizePreset() {
       resetEdits();
       if (isTiles()) custom = tileCustom(tileDesign(currentSpec()));
-      else if (isHyper()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: s.cuts, blackout: [] }); }
+      else if (isHyper()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: P.spec.cuts, blackout: [] }); } // (the built cuts: a preset's circle is sized for its tiling)
       else {
         custom = toCustom(P);
         custom.cuts = threeSets(custom.cuts);
@@ -4365,7 +4373,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       async settled() {
         for (const t0 = performance.now(); performance.now() - t0 < 10000;) {
           const s = currentSpec();
-          if (s.rule !== "hyper" || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts))) return this.info();
+          if (s.rule !== "hyper" || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
           await new Promise((r) => setTimeout(r, 25));
         }
         const s = currentSpec();

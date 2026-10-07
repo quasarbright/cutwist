@@ -3,12 +3,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry } from "./hyper.mjs";
+import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps } from "./hyper.mjs";
 import { faceHas, inPolygon } from "./tiles.mjs";
 import { pieceShapes } from "./hyper-view.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
-const preset = (id, more = {}) => { const p = HYPER_PRESETS.find((q) => q.id === id); return buildHyper({ ...p, ...more }, file(p.N, p.M)); };
+// (cuts given: those, not the preset's circle worked out for its tiling)
+const preset = (id, more = {}) => { const p = HYPER_PRESETS.find((q) => q.id === id); return buildHyper({ ...p, ...(more.cuts ? { autoCut: false } : {}), ...more }, file(p.N, p.M)); };
 function seeded(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32); }
 const kinds = (P) => P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {});
 const play = (P, moves, s = solvedHyperState(P)) => { for (const m of moves) applyHyperMove(P, s, m); return s; };
@@ -105,6 +106,32 @@ test("drawn stickers fill their piece, on every preset and level of detail", () 
       assert.ok(parts.every((a) => a > 0), `${p.id} region ${r} level ${lod}: an empty sticker`);
       assert.ok(Math.abs(parts.reduce((s, a) => s + a, 0) - whole) < 0.02 * whole, `${p.id} region ${r} level ${lod}: stickers ${parts} vs piece ${whole}`);
     }));
+  }
+});
+
+test("the circles count, worked out ahead from the plane, is the circles the pieces are found from", () => {
+  for (const [id, cuts] of [["hyper-klein", null], ["hyper-octagons", [{ on: "face", depths: [0.5, 1.2] }, { on: "vertex", depths: [0.7] }]], ["hyper-klein", [{ on: "face", depths: [0.714] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [0.4] }]]]) {
+    const P = preset(id, cuts ? { cuts, autoCut: false } : {});
+    assert.equal(hyperCircleCount(P, P.radii), P.circles.length, id);
+  }
+});
+
+test("a preset stepped onto another tiling gets a circle just past the corners, or as big as works out", () => {
+  const p = HYPER_PRESETS.find((q) => q.id === "hyper-octagons");
+  for (const [N, M] of [[7, 3], [12, 5], [5, 11], [6, 10], [12, 12]]) {
+    const P = buildHyper({ ...p, N, M }, file(N, M)), r = P.spec.cuts[0].depths[0];
+    assert.ok(r <= 1.15 * geometry(N, M).Rv + 1e-9 && r < P.cap.face, `{${N},${M}}`);
+    assert.ok(!P.tooBig && P.n > 0, `{${N},${M}}: ${P.n} pieces`);
+    if (r > geometry(N, M).Rv) assert.ok(P.n > P.tiles, `{${N},${M}}: past the corners, more than a piece a tile`);
+  }
+  // (on its own tiling, the preset's own circle)
+  assert.equal(buildHyper(p, file(8, 3)).spec.cuts[0].depths[0], p.cuts[0].depths[0]);
+});
+
+test("the circle limits stored with the surfaces are the ones worked out from scratch", () => {
+  for (const [N, M] of [[7, 3], [8, 3], [5, 4], [4, 11]]) {
+    const f = file(N, M);
+    for (const s of hyperSurfaces(f).slice(0, 3)) assert.deepEqual(s.caps, surfaceCaps(f, s), `{${N},${M}} ${s.tiles} tiles`);
   }
 });
 

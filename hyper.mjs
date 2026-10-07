@@ -157,9 +157,10 @@ export const HYPER_PARAMS = [
   { key: "M", label: "at a corner", min: 3, max: 12, title: "how many tiles meet at each corner" },
   { key: "surface", label: "size", min: 0, title: "which closed surface the tiling wraps onto: a tiling has only a few, fewest tiles first" },
 ];
-// (surface: an index into the tiling's two-sided surfaces, fewest tiles first)
+// (surface: an index into the tiling's two-sided surfaces, fewest tiles first. autoCut: the
+// preset's circle is worked out for whatever tiling the steppers pick, see buildHyper)
 const hyperPreset = (id, name, N, M_, cuts) => ({
-  id, name, rule: "hyper", size: 2, fixed: true, N, M: M_, surface: 0, cuts, truncate: {}, blackout: [], params: HYPER_PARAMS,
+  id, name, rule: "hyper", size: 2, fixed: true, N, M: M_, surface: 0, cuts, autoCut: true, truncate: {}, blackout: [], params: HYPER_PARAMS,
   title: () => name,
 });
 // (a circle around each tile's middle, a bit past its corners: like the flat puzzles' default)
@@ -192,7 +193,14 @@ export function buildHyper(spec, file) {
   surfaceCache.set(surface, kept);
   const H = (kept.H ??= turnGroup(file, surface));
   const P = { kind: "hyper", spec, G, H, surface, N, M: M_, tiles: H.coset.face.reps.length };
-  P.cap = { ...(kept.cap ??= radiusCaps(P)) };
+  // (the limits are in the data, worked out ahead: see data/add-caps.mjs)
+  P.cap = { ...(kept.cap ??= surface.caps || radiusCaps(P)) };
+  // A preset's circle on another tiling: around each tile, a bit past its corners, as the presets
+  // are (1.15 corner radii), or as big as fits on this surface and still works out
+  if (spec.autoCut) {
+    const r = Math.min(faceDefault(N, M_), P.cap.face - 0.005, hyperRadiusLimit(P, "face", 0, { face: [], vertex: [], edge: [] }));
+    P.spec = spec = { ...spec, cuts: [{ on: "face", depths: [r] }] };
+  }
   P.radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k).filter((r) => r < P.cap[k])]));
   // (a radius within 1e-5 of a snap mark is that mark exactly: a hair off leaves slivers too
   // thin to work out reliably, the lesson of the flat tiles' color popping)
@@ -285,6 +293,11 @@ export function hyperSnapCandidates(P, kind, i, upTo = P.cap[kind]) {
 
 // how big each kind's circles can be: less than halfway to the nearest other copy of the same
 // tile (corner, edge) in the disk, or they'd reach around the surface and overlap themselves
+// a surface's circle limits, from scratch (for storing with it in the data)
+export function surfaceCaps(file, surface) {
+  const G = geometry(file.N, file.M);
+  return radiusCaps({ G, H: turnGroup(file, surface) });
+}
 // The tiles are visited nearest first, stopping once every kind has a copy nearer than the next
 // tile's middle less a corner radius (a nearer copy would be on a nearer tile). It depends only
 // on the surface, so it's kept with it.
@@ -341,15 +354,78 @@ class MinHeap {
 // The pieces: the arrangement of every circle near tile 0, its regions touching tile 0, each named
 // by the circles it's inside; then those regions carried onto every tile of the surface, one piece
 // per name.
-const MAX_CIRCLES = 1200;
+// (a region touching tile 0 is inside a circle that reaches it; the circles bounding the region
+// reach that circle: their middles are this far from tile 0's)
+const piecesReach = (G, rmax) => G.Rv + 3 * rmax + 0.05;
+
+// ---- how many circles a design needs: big circles meet exponentially many others, and working
+// out the pieces grows with them, to minutes. The count is every circle whose middle is within
+// piecesReach of tile 0's, which is the same on every surface of a tiling (it's in the plane the
+// surface unrolls onto): from each kind's distances, nearest first, kept per tiling as far as
+// more than MAX_CIRCLES of each. A design fits when its circles, weighted by the tiles' size (a
+// big tile meets more of the arrangement: each circle costs about Rv times more), are at most
+// MAX_CIRCLES: about a third of a second to build, so a dragged cut keeps up.
+const MAX_CIRCLES = 900;
+const fits = (P, count) => count * Math.max(1, P.G.Rv) <= MAX_CIRCLES;
+const distanceCache = new WeakMap();
+function axisDistances(G, H) {
+  if (distanceCache.has(G)) return distanceCache.get(G);
+  // (tiles nearest first: once the next tile's middle is D away, every point within D − Rv has
+  // been seen, so the lists are complete that far)
+  const lists = { face: [], vertex: [], edge: [] }, points = new PointSet(1e-9), tiles = new PointSet(1e-9), heap = new MinHeap();
+  const within = (k, r) => lists[k].reduce((n, d) => n + (d <= r), 0);
+  const enough = Math.ceil(MAX_CIRCLES / Math.max(1, G.Rv)); // (more than this many circles never fits)
+  heap.push(0, { m: M.I, e: 0 }); tiles.add(cx(0));
+  let exact = 0;
+  while (heap.size) {
+    const [dist, d] = heap.pop();
+    exact = dist - G.Rv;
+    if (dist > 14 || (dist > G.Rv && KINDS.every((k) => lists[k].length > enough && within(k, exact) > enough))) break;
+    for (const a of axisPoints(G, H, d)) if (!points.has(a.p)) { points.add(a.p); lists[a.kind].push(hdist(a.p, cx(0))); }
+    let m = d.m, e = d.e;
+    for (let k = 0; k < G.N; k++) {
+      for (const next of [{ m: M.norm(M.mul(m, G.B)), e: H.right[1][e] }, { m: M.norm(M.mul(m, G.Bi)), e: H.rightInv[1][e] }]) {
+        const p = M.apply(next.m, cx(0));
+        if (abs(p) < 1 && !tiles.has(p)) { tiles.add(p); heap.push(hdist(p, cx(0)), next); }
+      }
+      m = M.mul(m, G.A); e = H.right[0][e];
+    }
+  }
+  for (const k of KINDS) lists[k] = lists[k].filter((d) => d <= exact).sort((a, b) => a - b);
+  const out = { exact, lists };
+  distanceCache.set(G, out);
+  return out;
+}
+// the circles a design with these radii ({ face, vertex, edge: [radius] }) needs (Infinity: more
+// than ever fits, as far as anyone needs to know)
+export function hyperCircleCount(P, radii) {
+  const rmax = Math.max(0, ...KINDS.flatMap((k) => radii[k]));
+  if (!rmax) return 0;
+  const reach = piecesReach(P.G, rmax), { exact, lists } = axisDistances(P.G, P.H);
+  if (reach > exact) return Infinity;
+  const within = (list) => { let lo = 0, hi = list.length; while (lo < hi) { const m = (lo + hi) >> 1; if (list[m] <= reach) lo = m + 1; else hi = m; } return lo; };
+  return KINDS.reduce((s, k) => s + radii[k].length * within(lists[k]), 0);
+}
+// the biggest radius circle i of a kind (i past the end: a new one) can have and still be worked
+// out, given the others: under the surface's limit and the circles budget
+export function hyperRadiusLimit(P, kind, i, radii = P.radii) {
+  const at = (r) => { const rs = Object.fromEntries(KINDS.map((k) => [k, [...radii[k]]])); rs[kind][i] = r; return fits(P, hyperCircleCount(P, rs)); };
+  let lo = 0.05, hi = P.cap[kind];
+  if (at(hi)) return hi;
+  if (!at(lo)) return lo;
+  for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (at(m)) lo = m; else hi = m; }
+  return lo;
+}
+
 function findPieces(P) {
   const { G, H, radii } = P;
   const rmax = Math.max(0, ...KINDS.flatMap((k) => radii[k]));
   P.regions = []; P.pieces = []; P.n = 0;
   if (!rmax) return;
-  // (a region touching tile 0 is inside a circle that reaches it; the circles bounding the region
-  // reach that circle)
-  const reach = G.Rv + 3 * rmax + 0.05;
+  // (too many circles: refused, P.tooBig, and the page says to use smaller ones)
+  const count = hyperCircleCount(P, radii);
+  if (!fits(P, count)) { P.tooBig = count; P.circles = []; P.nearBy = new Map(); return; }
+  const reach = piecesReach(G, rmax);
   const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, cx(0)) < reach + G.Rv);
   const points = new PointSet(1e-9), axes = [];
   for (const d of near) for (const a of axisPoints(G, H, d)) {
@@ -358,12 +434,13 @@ function findPieces(P) {
     axes.push({ ...a, coset: H.coset[a.kind].of[a.e] });
   }
   const circles = axes.flatMap((a, ai) => radii[a.kind].map((r, ring) => ({ ...diskCircle(a.p, r), axis: ai, ring })));
-  // (big circles meet exponentially many others: past this many, working out the pieces takes
-  // seconds to minutes, so it's refused, P.tooBig, and the page says to use smaller circles)
-  if (circles.length > MAX_CIRCLES) { P.tooBig = circles.length; P.circles = circles; P.nearBy = new Map(); return; }
   // tile 0, and the tiles near it (for the stickers), as polygons in the disk
   const tile0 = G.poly;
-  P.near = near.filter((d) => hdist(M.apply(d.m, cx(0)), cx(0)) < G.Rv + 2 * rmax + 2 * G.Rv).map((d) => ({ e: d.e, poly: G.poly.map((z) => M.apply(d.m, z)), klein: kleinTile(G.corners.map((z) => M.apply(d.m, z))) }));
+  // (a region touching tile 0 is inside a circle that reaches it, so within Rv + 2·rmax of its
+  // middle, and a tile under it has its middle within another Rv. Bucketed by where they are in
+  // the Klein model, for finding the ones under a region without trying every one)
+  P.near = near.filter((d) => hdist(M.apply(d.m, cx(0)), cx(0)) < 2 * G.Rv + 2 * rmax + 0.05).map((d) => ({ e: d.e, poly: G.poly.map((z) => M.apply(d.m, z)), klein: kleinTile(G.corners.map((z) => M.apply(d.m, z))) }));
+  const nearGrid = new BoxGrid(P.near, (t) => t.klein.box);
   const box0 = [Math.min(...tile0.map((z) => z[0])), Math.min(...tile0.map((z) => z[1])), Math.max(...tile0.map((z) => z[0])), Math.max(...tile0.map((z) => z[1]))];
   for (const f of arrangement(circles)) {
     // touching tile 0: its edge passes through it, or it covers tile 0's middle or a corner (and
@@ -392,7 +469,7 @@ function findPieces(P) {
     // tile is a convex polygon. tiles: those tiles' polygons, for drawing (on a small surface
     // several tiles near tile 0 are copies of one, with the same element: the element alone
     // doesn't say which copy)
-    const fk = kleinRegion(f), under = P.near.filter((t) => overlap(fk, t.klein) > 1e-9), stickers = under.map((t) => t.e), tiles = under.map((t) => t.poly);
+    const fk = kleinRegion(f), under = nearGrid.near(fk.box).filter((t) => overlap(fk, t.klein) > 1e-9), stickers = under.map((t) => t.e), tiles = under.map((t) => t.poly);
     // the axes near it: where each of its circles' middles is, for turning it about the right one
     const around = [...name.values()].map(({ ring, axis }) => ({ ring, kind: axes[axis].kind, e: axes[axis].e, p: axes[axis].p }));
     P.regions.push({ face: f, outline: [f.outer, ...f.holes], poly: [f.poly(), ...f.holePolys()], anchor, name: [...name.entries()].map(([k, v]) => [axes[v.axis].kind, axes[v.axis].e, v.ring]), around, stickers, tiles });
@@ -411,14 +488,15 @@ function findPieces(P) {
   // symmetry carries a point of one into the other, it carries the whole region.
   const typeOf = P.regions.map((_, i) => i), root = (i) => (typeOf[i] === i ? i : (typeOf[i] = root(typeOf[i])));
   const maps = [...nearBy.values()].flat();
+  // (b's anchor carried by each symmetry in turn, and the earlier regions whose boxes take it in
+  // tried: joining any one of its kind gives the same kinds as trying them in order)
   const inBox = ([x0, y0, x1, y1], [x, y]) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  const regionGrid = new BoxGrid(P.regions.map((r, i) => i), (i) => P.regions[i].face.box);
   P.regions.forEach((b, j) => {
-    let images = null; // (b's anchor carried by every symmetry: worked out once, when first needed)
-    for (let i = 0; i < j; i++) {
-      if (root(i) === root(j) || P.regions[i].stickers.length !== b.stickers.length) continue;
-      images ??= maps.map((m) => M.apply(m, b.anchor));
-      const a = P.regions[i].face;
-      if (images.some((z) => inBox(a.box, z) && faceHas(a, z))) { typeOf[root(j)] = root(i); break; }
+    for (const m of maps) {
+      const z = M.apply(m, b.anchor);
+      const i = regionGrid.near([z[0], z[1], z[0], z[1]]).find((i) => i < j && root(i) !== root(j) && P.regions[i].stickers.length === b.stickers.length && inBox(P.regions[i].face.box, z) && faceHas(P.regions[i].face, z));
+      if (i !== undefined) { typeOf[root(j)] = root(i); break; }
     }
   });
   const typeIds = new Map();
@@ -451,6 +529,23 @@ function findPieces(P) {
 // to it. Each is mapped once, with a bounding box to skip the tiles nowhere near)
 const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [x * s, y * s]; };
 const boxOf = (pts) => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const [x, y] of pts) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; };
+// items in a grid over [−1, 1]² by their boxes ([x0, y0, x1, y1]); near(box): those whose cells
+// the box's cells meet, in their order in the list, once each
+class BoxGrid {
+  constructor(items, boxOf, n = 48) {
+    this.items = items; this.n = n; this.cells = new Map();
+    items.forEach((it, i) => this.each(boxOf(it), (k) => { if (!this.cells.has(k)) this.cells.set(k, []); this.cells.get(k).push(i); }));
+  }
+  each([x0, y0, x1, y1], f) {
+    const c = (v) => Math.max(0, Math.min(this.n - 1, Math.floor(((v + 1) / 2) * this.n)));
+    for (let i = c(x0); i <= c(x1); i++) for (let j = c(y0); j <= c(y1); j++) f(i * this.n + j);
+  }
+  near(box) {
+    const hit = new Set();
+    this.each(box, (k) => { for (const i of this.cells.get(k) || []) hit.add(i); });
+    return [...hit].sort((a, b) => a - b).map((i) => this.items[i]);
+  }
+}
 const kleinTile = (corners) => { const pts = corners.map(toKlein); return { pts, box: boxOf(pts) }; };
 const kleinRegion = (f) => { const outer = f.poly().map(toKlein); return { outer, holes: f.holePolys().map((h) => h.map(toKlein)), box: boxOf(outer) }; };
 function overlap(region, kt) {
