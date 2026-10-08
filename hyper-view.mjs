@@ -101,7 +101,7 @@ export class HyperView {
     // (a new puzzle, even one with the same pieces count and view, is a new picture: the cached one
     // is keyed by view and state, so it goes)
     // (the same surface rebuilt, as while a cut is dragged, keeps where the view is)
-    if (this.P !== P) { if (!this.P || this.P.H !== P.H) this.start = { m: Mb.I, e: 0 }; this.P = P; this.visible = null; this.cache = null; this.lines = null; }
+    if (this.P !== P) { if (!this.P || this.P.H !== P.H) this.start = { m: Mb.I, e: 0 }; this.P = P; this.visible = null; this.cache = null; this.lines = null; this.ring = null; }
     const w = Math.max(40, safe.right - safe.left), h = Math.max(40, safe.bottom - safe.top);
     this.R = Math.min(w, h) / 2 - 2;
     this.cx = safe.left + w / 2; this.cy = safe.top + h / 2;
@@ -314,6 +314,24 @@ export class HyperView {
       }
     }
   }
+  // The darts of every tile a turning ring reaches, at each of its circle's copies that shows, by
+  // element (as listVisible's byElement): found outward from the visible tile nearest the copy's
+  // middle, whether they show or not. Kept while the same ring turns in the same view.
+  ringDarts({ axis, layer }) {
+    const key = [this.viewKey(), axis, layer].join("|");
+    if (this.ring && this.ring.key === key) return this.ring.byElement;
+    const { P } = this, { G, H } = P, ax = P.axes[axis], r = ax.radii[layer], tiles = this.listVisible().tiles, byElement = new Map();
+    for (const { axis: a, at } of this.axisCopies(ax.kind)) {
+      if (a !== axis) continue;
+      const start = tiles.reduce((b, d) => (hdist(Mb.apply(d.m, [0, 0]), at) < hdist(Mb.apply(b.m, [0, 0]), at) ? d : b));
+      for (const d of darts(G, H, start, (c) => hdist(c, at) < r + G.Rv + 1e-6)) {
+        let m = d.m, e = d.e;
+        for (let k = 0; k < G.N; k++) { if (!byElement.has(e)) byElement.set(e, []); byElement.get(e).push(m); m = Mb.mul(m, G.A); e = H.right[0][e]; }
+      }
+    }
+    this.ring = { key, byElement };
+    return byElement;
+  }
   // a turning ring's inner circle (still fragments are inside it, so none of the turning ones draws it)
   innerRing(ctx, { axis, layer }) {
     const { P } = this, ax = P.axes[axis];
@@ -407,12 +425,15 @@ export class HyperView {
     for (let i = 0; i < P.n; i++) {
       if (!which(i)) continue;
       const pc = P.pieces[i], pivots = turn && turn.pieces.get(i);
+      // (a turning piece: from every tile its ring reaches, seen or not, as turned they can come
+      // into view: half way round, the far side of a ring by the rim comes to its near side)
+      const at = pivots ? this.ringDarts(turn) : vis.byElement;
       pc.frags.forEach(({ x, f }, k) => {
         const spin = pivots ? Mb.about(pivots[k], turn.theta) : null;
-        for (const m0 of vis.byElement.get(H.mul(state[i], x)) || []) {
-          const px = this.pxSize(m0);
+        for (const m0 of at.get(H.mul(state[i], x)) || []) {
+          const m = spin ? Mb.mul(m0, spin) : m0, px = this.pxSize(m);
           if (px < PIECE_PX) continue; // (too small to see: the solved picture under it shows)
-          const m = spin ? Mb.mul(m0, spin) : m0, shape = shapes[f][STEPS.indexOf(this.stepFor(px))];
+          const shape = shapes[f][STEPS.indexOf(this.stepFor(px))];
           if (mode === "edges") {
             ctx.lineWidth = this.edgeWidth(m);
             for (const { pts, k: e } of shape.edges) if (this.firstSide(m, e)) { ctx.beginPath(); this.polyline(ctx, pts, m); ctx.stroke(); }

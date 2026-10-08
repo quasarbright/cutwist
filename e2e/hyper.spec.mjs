@@ -146,3 +146,52 @@ test("sides and tiles at a corner: the other one follows to a hyperbolic tiling;
   s = await settled(page);
   expect(s).toMatchObject({ N: 6, M: 4 });
 });
+
+// A turn drawn partway, stopped at a whole number of steps, is the puzzle after that many steps:
+// the same picture (but for the edges of lines). Drawn with the page's own view, on a canvas of
+// its own, half way round and one step. (Big circles on the 12-gons, 4 of them: turned, the
+// pieces from a circle's far side, near the rim, come to its near side, and they were missing,
+// drawn only from the tiles showing before the turn: a hole in the turning circle.)
+test("a turn stopped at whole steps looks like the puzzle after those steps: nothing missing", async ({ page }) => {
+  const S = 400; // (the canvas, px: the test browser draws in software)
+  const cases = await page.evaluate(async (S) => {
+    const h = await import("./hyper.mjs"), { HyperView } = await import("./hyper-view.mjs");
+    // (a design and the circles to turn: two of the 12-gons' four, and a tile's and a corner's of
+    // the Klein quartic's; the rest are the same by symmetry)
+    const designs = [
+      [{ rule: "hyper", N: 12, M: 3, surface: 0, cuts: [{ on: "face", depths: [1.895747403967124] }], blackout: [] }, ["face", "face"]],
+      [{ rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.714] }, { on: "vertex", depths: [0.6] }], blackout: [] }, ["face", "vertex"]],
+    ];
+    const out = [];
+    for (const [spec, kinds] of designs) {
+      const file = await (await fetch(`regular-maps/${spec.N}-${spec.M}.json`)).json(), P = h.buildHyper(spec, file);
+      const canvas = document.createElement("canvas"); canvas.width = canvas.height = S;
+      canvas.style.width = canvas.style.height = S + "px"; document.body.append(canvas);
+      const view = new HyperView(canvas), picture = (state, turn) => {
+        view.layout(P, { left: 0, top: 0, right: S, bottom: S }); view.cache = null; view.lines = null;
+        view.draw(state, turn, {});
+        return view.ctx.getImageData(0, 0, S, S).data;
+      };
+      const axes = kinds.map((kind, j) => P.axes.map((ax, i) => [ax, i]).filter(([ax]) => ax.kind === kind)[kinds.slice(0, j).filter((k) => k === kind).length]);
+      for (const [ax, axis] of axes) for (const q of [Math.floor(ax.order / 2), 1]) {
+        const s0 = h.solvedHyperState(P), pieces = h.hyperPiecesInLayer(P, s0, axis, 0), s1 = s0.slice();
+        h.applyHyperMove(P, s1, { axis, layer: 0, q });
+        const during = picture(s0, { pieces, theta: (2 * Math.PI * q) / ax.order, axis, layer: 0 }), after = picture(s1, null);
+        // (pixels that differ, then only those whose every neighbor within 2 px differs too: a line
+        // drawn a hair apart is thinner than that, a missing piece isn't)
+        const off = new Uint8Array(S * S);
+        for (let p = 0, i = 0; p < off.length; p++, i += 4) off[p] = Math.abs(during[i] - after[i]) + Math.abs(during[i + 1] - after[i + 1]) + Math.abs(during[i + 2] - after[i + 2]) > 90 ? 1 : 0;
+        let differ = 0;
+        for (let y = 2; y < S - 2; y++) for (let x = 2; x < S - 2; x++) {
+          let all = true;
+          for (let dy = -2; dy <= 2 && all; dy++) for (let dx = -2; dx <= 2 && all; dx++) all = off[(y + dy) * S + x + dx] === 1;
+          if (all) differ++;
+        }
+        out.push({ design: `{${spec.N},${spec.M}} axis ${axis} (${ax.kind}) q ${q}`, differ });
+      }
+      canvas.remove();
+    }
+    return out;
+  }, S);
+  for (const c of cases) expect(c.differ, c.design).toBeLessThan(10);
+});
