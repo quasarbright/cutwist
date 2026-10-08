@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildHyper } from "./hyper.mjs";
-import { surfaceMesh, plateLayout, plateSurface, embedPlate, eulerOf } from "./hyper-surface.mjs";
+import { surfaceMesh, plateLayout, implicitSurface, pretzel, turnedOver, eulerOf } from "./hyper-surface.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
 const build = (N, M, surface = 0) => buildHyper({ rule: "hyper", N, M, surface, cuts: [], blackout: [] }, file(N, M));
@@ -38,26 +38,28 @@ test("every two-holed surface lies flat with none turned over (but {6,6}'s two h
   }
 });
 
-test("the finer surface for drawing has nothing turned over either, and its rims sit at the middle height", () => {
-  for (const [N, M] of [[8, 3], [4, 6], [3, 8]]) {
-    const P = build(N, M), mesh = surfaceMesh(P), { pos, tris } = plateSurface(P, mesh), xz = Float64Array.from({ length: (2 * pos.length) / 3 }, (_, i) => pos[3 * (i >> 1) + (i & 1 ? 2 : 0)]);
-    const up = (t) => t.some((v) => pos[3 * v + 1] > 1e-9), signs = (side) => new Set(tris.filter((t) => up(t) === side).map((t) => Math.sign(turning(xz, t))));
-    assert.equal(signs(true).size, 1, `{${N},${M}}: the top's triangles all run round one way`);
-    assert.equal(signs(false).size, 1, `{${N},${M}}: and the bottom's`);
-  }
-});
-
 test("a surface with no half turn (the Klein quartic) has no plate", () => {
   const P = build(7, 3);
   assert.throws(() => plateLayout(P, surfaceMesh(P)), /no half turn/);
 });
 
-test("in space: the top up, the bottom down, meeting at the rims", () => {
-  const P = build(8, 3), mesh = surfaceMesh(P), pos = embedPlate(P, mesh), { top, rims } = plateLayout(P, mesh);
-  const onRim = new Set(rims.flat());
-  mesh.tris.forEach((t, i) => t.forEach((v) => {
-    const y = pos[3 * v + 1];
-    if (onRim.has(v)) assert.ok(Math.abs(y) < 1e-9, "a rim vertex sits at the middle height");
-    else assert.ok(top[i] ? y > 0 : y < 0, "the top above, the bottom below");
-  }));
+// (the shapes kept in regular-maps/shapes/, as the page draws them)
+const kept = (N, M, k = 0) => JSON.parse(readFileSync(new URL(`./regular-maps/shapes/${N}-${M}-${k}.json`, import.meta.url), "utf8"));
+const unpack = ({ mid, shape }) => ({ mid: Float64Array.from(new Float32Array(Uint8Array.from(Buffer.from(mid, "base64")).buffer)), shape });
+
+test("the kept shapes draw on the pretzel, smooth, with nothing turned over", () => {
+  for (const [N, M] of [[8, 3], [3, 8], [4, 6], [6, 4]]) {
+    const P = build(N, M), mesh = surfaceMesh(P), drawn = implicitSurface(mesh, unpack(kept(N, M)));
+    assert.equal(turnedOver(drawn, kept(N, M).shape), 0, `{${N},${M}}`);
+    const { out } = pretzel(kept(N, M).shape);
+    let worst = 0;
+    for (let v = 0; v < drawn.pos.length / 3; v++) { const [f, gx, gy, gz] = out(drawn.pos[3 * v], drawn.pos[3 * v + 1], drawn.pos[3 * v + 2]); worst = Math.max(worst, Math.abs(f) / (Math.hypot(gx, gy, gz) || 1)); }
+    assert.ok(worst < 1e-6, `{${N},${M}}: every point on the pretzel (off by ${worst})`);
+    assert.equal(eulerOf({ verts: { length: drawn.pos.length / 3 }, tris: drawn.tris }), -2, `{${N},${M}}: still two-holed`);
+  }
+});
+
+test("a kept shape for another mesh is refused", () => {
+  const P = build(4, 6);
+  assert.throws(() => implicitSurface(surfaceMesh(P), unpack(kept(8, 3))), /another mesh/);
 });

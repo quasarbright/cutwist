@@ -801,7 +801,7 @@
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
-    import { surfaceMesh as hyperSurfaceMesh, plateSurface } from "./hyper-surface.mjs";
+    import { surfaceMesh as hyperSurfaceMesh, implicitSurface } from "./hyper-surface.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1203,21 +1203,33 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // two-holed surface, once that's laid out: see hyperShape)
     const isHyper = () => !!P && P.kind === "hyper";
     function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles" || P.kind === "hyper"); } // (hoisted: the camera asks before this line runs)
-    const has3D = () => !isHyper() || !!hyperShape(false);
-    // A two-holed hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel): its mesh and
-    // where each vertex is, or null (another genus, or it came out folded). Laid out once per
-    // surface, which takes a second or so; `make` false only asks (undefined: not laid out yet).
-    function hyperShape(make = true) {
+    const has3D = () => !isHyper() || !!hyperShape();
+    // A two-holed hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel, the tiles laid
+    // on it ahead of time by data/add-shapes.mjs into regular-maps/shapes/): its mesh and the surface
+    // to draw, or null (another genus, or none kept for it); undefined while it's still to come.
+    // load() fetches it (once per surface) and calls done() when it's in.
+    function hyperShape() {
       if (!isHyper() || P.surface.genus !== 2) return null;
-      const cache = (hyperShape.cache ||= new Map()), key = `${P.N}-${P.M}-${P.spec.surface | 0}`;
-      if (!cache.has(key)) {
-        if (!make) return undefined;
-        let shape = null;
-        try { const mesh = hyperSurfaceMesh(P); shape = { mesh, surface: plateSurface(P, mesh) }; } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
-        cache.set(key, shape);
-      }
-      return cache.get(key);
+      const got = (hyperShape.cache ||= new Map()).get(hyperShapeKey());
+      return got === "loading" ? undefined : got;
     }
+    const hyperShapeKey = () => `${P.N}-${P.M}-${P.spec.surface | 0}`;
+    hyperShape.load = (done) => {
+      const key = hyperShapeKey(), cache = hyperShape.cache;
+      if (cache.has(key)) return;
+      cache.set(key, "loading");
+      fetch(`regular-maps/shapes/${key}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((kept) => {
+        let shape = null;
+        if (kept && isHyper() && hyperShapeKey() === key) try {
+          const bytes = Uint8Array.from(atob(kept.mid), (c) => c.charCodeAt(0)), mid = Float64Array.from(new Float32Array(bytes.buffer));
+          const mesh = hyperSurfaceMesh(P);
+          shape = { mesh, surface: implicitSurface(mesh, { mid, shape: kept.shape }) };
+        } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
+        if (kept && !shape && hyperShapeKey() !== key) { cache.delete(key); return; } // (another surface by now: fetch it again when asked)
+        cache.set(key, shape);
+        if (shape) done();
+      });
+    };
     const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : isTiles() ? applyTileMove(P, s, m) : isHyper() ? applyHyperMove(P, s, m) : applyMove(P, s, m));
     const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : isTiles() ? inverseTileMove(P, m) : isHyper() ? inverseHyperMove(P, m) : inverseMove(P, m));
     const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isTiles() ? isTileSolved(P, s) : isHyper() ? isHyperSolved(P, s) : isSolved(P, s));
@@ -3192,13 +3204,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     function drawHyper() {
       // (a two-holed surface: laid out in 3D just after the disk first shows, then its 3D view on)
-      if (hyperShape(false) === undefined && !hyperShape.waiting) {
-        hyperShape.waiting = setTimeout(() => {
-          hyperShape.waiting = null;
-          if (!isHyper() || !hyperShape()) return;
-          showViews(true); planeBox = ""; placeCamera();
-        }, 50);
-      }
+      if (hyperShape() === undefined) hyperShape.load(() => { if (hyperShape()) { showViews(true); planeBox = ""; placeCamera(); } });
       const reg = viewRegions();
       const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta, axis: anim.axis, layer: anim.layer } : null;
       // (lit: blacking out, the kind of piece under the pointer; otherwise an algorithm's pieces)

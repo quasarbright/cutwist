@@ -3,9 +3,11 @@
 // The surface itself, as a triangle mesh: each tile sampled in rings about its middle (in its own
 // frame, tile 0's coordinates in the disk), the points on its edges and corners shared with the
 // tiles around (found through the surface's group: a corner is a corner coset, an edge point an
-// edge coset and how far along). Then, for a two-holed surface, placed in space as a pretzel: a
-// thick plate with two holes (see embedPlate). Every vertex keeps where it is on its tile (tile,
-// point in the disk), for painting the tiles on.
+// edge coset and how far along). Then, for a two-holed surface, laid on a pretzel in space: laid
+// flat as a plate's top and bottom (plateLayout), a smooth pretzel fitted to that (pretzel), and
+// the tiles moved over it to keep their shapes (implicitShape; kept in regular-maps/shapes/ by
+// data/add-shapes.mjs, and drawn from by implicitSurface). Every vertex keeps where it is on its
+// tile (tile, point in the disk), for painting the tiles on.
 import { mobius as Mb } from "./hyper.mjs";
 
 const abs = (z) => Math.hypot(z[0], z[1]);
@@ -209,38 +211,7 @@ function untangle(tris, ref, xz, free, { lambda = 1, rounds = 40, steps = 200 } 
     if (grad) for (let v = 0; v < free.length; v++) if (!free[v]) grad[2 * v] = grad[2 * v + 1] = 0;
     return E;
   };
-  const dot = (p, q) => { let s = 0; for (let j = 0; j < p.length; j++) s += p[j] * q[j]; return s; };
-  const axpy = (p, a, q) => { for (let j = 0; j < p.length; j++) p[j] += a * q[j]; };
-  // L-BFGS (a few pairs) with a backtracking line search
-  const L = xz.length, X2 = new Float64Array(L), d = new Float64Array(L);
-  const lbfgs = (eps) => {
-    const g = new Float64Array(L), g2 = new Float64Array(L), S = [], Y = [], mem = 8;
-    let E = energy(xz, eps, g);
-    for (let it = 0; it < steps; it++) {
-      const al = [];
-      for (let j = 0; j < L; j++) d[j] = -g[j];
-      for (let j = S.length - 1; j >= 0; j--) { const a = dot(S[j], d) / dot(Y[j], S[j]); al[j] = a; axpy(d, -a, Y[j]); }
-      if (S.length) { const y = Y.at(-1), s = S.at(-1), gam = dot(s, y) / dot(y, y); for (let j = 0; j < d.length; j++) d[j] *= gam; }
-      for (let j = 0; j < S.length; j++) { const b = dot(Y[j], d) / dot(Y[j], S[j]); axpy(d, al[j] - b, S[j]); }
-      let slope = dot(g, d);
-      if (slope >= 0) { for (let j = 0; j < d.length; j++) d[j] = -g[j]; slope = dot(g, d); S.length = Y.length = 0; }
-      let t = 1, E2;
-      for (let tries = 0; tries < 30; tries++, t /= 2) {
-        for (let j = 0; j < L; j++) X2[j] = xz[j] + t * d[j];
-        E2 = energy(X2, eps, g2);
-        if (E2 <= E + 1e-4 * t * slope) break;
-      }
-      if (!(E2 < E)) break;
-      const s = new Float64Array(L), y = new Float64Array(L);
-      for (let j = 0; j < L; j++) { s[j] = X2[j] - xz[j]; y[j] = g2[j] - g[j]; }
-      if (dot(s, y) > 1e-12) { S.push(s); Y.push(y); if (S.length > mem) { S.shift(); Y.shift(); } }
-      xz.set(X2); g.set(g2);
-      const done = E - E2 < 1e-9 * Math.abs(E);
-      E = E2;
-      if (done) break;
-    }
-    return E;
-  };
+  const lbfgs = (eps) => minimize((X, g) => energy(X, eps, g), xz, steps);
   // ε as the paper has it: down each round by how much the energy fell, kept near the worst det
   let eps = 1, E = energy(xz, eps);
   for (let r = 0; r < rounds; r++) {
@@ -252,6 +223,41 @@ function untangle(tris, ref, xz, free, { lambda = 1, rounds = 40, steps = 200 } 
   let over = 0;
   for (let i = 0; i < T; i++) { const [a, b, c, d] = jac(i, xz); if (a * d - b * c <= 0) over++; }
   return over;
+}
+
+// The least of an energy, from x (moved there, in place): L-BFGS (a few pairs) with a backtracking
+// line search. f(X, g) returns the energy at X, its gradient into g; project(X), if given, puts a
+// tried X back where it may be (on a surface), in place. Returns the energy.
+function minimize(f, x, steps, mem = 8, project = null) {
+  const L = x.length, X2 = new Float64Array(L), d = new Float64Array(L), g = new Float64Array(L), g2 = new Float64Array(L), S = [], Y = [];
+  const dot = (p, q) => { let s = 0; for (let j = 0; j < L; j++) s += p[j] * q[j]; return s; };
+  const axpy = (p, a, q) => { for (let j = 0; j < L; j++) p[j] += a * q[j]; };
+  let E = f(x, g);
+  for (let it = 0; it < steps; it++) {
+    const al = [];
+    for (let j = 0; j < L; j++) d[j] = -g[j];
+    for (let j = S.length - 1; j >= 0; j--) { const a = dot(S[j], d) / dot(Y[j], S[j]); al[j] = a; axpy(d, -a, Y[j]); }
+    if (S.length) { const y = Y.at(-1), s = S.at(-1), gam = dot(s, y) / dot(y, y); for (let j = 0; j < L; j++) d[j] *= gam; }
+    for (let j = 0; j < S.length; j++) { const b = dot(Y[j], d) / dot(Y[j], S[j]); axpy(d, al[j] - b, S[j]); }
+    let slope = dot(g, d);
+    if (slope >= 0) { for (let j = 0; j < L; j++) d[j] = -g[j]; slope = dot(g, d); S.length = Y.length = 0; }
+    let t = 1, E2;
+    for (let tries = 0; tries < 30; tries++, t /= 2) {
+      for (let j = 0; j < L; j++) X2[j] = x[j] + t * d[j];
+      if (project) project(X2);
+      E2 = f(X2, g2);
+      if (E2 <= E + 1e-4 * t * slope) break;
+    }
+    if (!(E2 < E)) break;
+    const s = new Float64Array(L), y = new Float64Array(L);
+    for (let j = 0; j < L; j++) { s[j] = X2[j] - x[j]; y[j] = g2[j] - g[j]; }
+    if (dot(s, y) > 1e-12) { S.push(s); Y.push(y); if (S.length > mem) { S.shift(); Y.shift(); } }
+    x.set(X2); g.set(g2);
+    const done = E - E2 < 1e-10 * Math.abs(E);
+    E = E2;
+    if (done) break;
+  }
+  return E;
 }
 
 // The mesh's neighbors of each vertex
@@ -516,125 +522,218 @@ export function plateLayout(P, mesh, { iterations = 2000, A = 4, B = 1.8, holeSc
   return { xz, top, rims: runs, turned };
 }
 
-// The surface in space as a pretzel (plateLayout's plate, thick): positions (Float64Array, x y z
-// per vertex; the plate in x and z, y up), the top up and the bottom down by how far each point is
-// from the nearest rim, rounding over at the rims. Throws if the layout has triangles turned over.
-export function embedPlate(P, mesh, { thick = 0.55, round = 0.6, ...layout } = {}) {
-  const { xz, top, rims, turned } = plateLayout(P, mesh, layout), n = mesh.verts.length;
-  if (turned) throw new Error(`${turned} triangles came out turned over`);
-  const segs = rims.flatMap((run) => run.map((v, k) => { const w = run[(k + 1) % run.length]; return [xz[2 * v], xz[2 * v + 1], xz[2 * w], xz[2 * w + 1]]; }));
-  const height = (x, z) => {
-    let d = Infinity;
-    for (const [ax, az, bx, bz] of segs) {
-      const dx = bx - ax, dz = bz - az, s = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
-      d = Math.min(d, Math.hypot(x - ax - s * dx, z - az - s * dz));
-    }
-    const t = Math.min(1, d / round);
-    return thick * Math.sqrt(1 - (1 - t) ** 2);
-  };
-  const pos = new Float64Array(3 * n);
-  mesh.tris.forEach((t, i) => t.forEach((v) => pos.set([xz[2 * v], (top[i] ? 1 : -1) * height(xz[2 * v], xz[2 * v + 1]), xz[2 * v + 1]], 3 * v)));
-  return pos;
+// A two-holed surface in space, smooth by its making: a pretzel given by an equation,
+// y² = s·e(x, z)·h₁(x, z)·h₂(x, z), e > 0 inside an oval and each hᵢ > 0 outside a hole's circle
+// (the plate's top and bottom: y = ±√(s·…), meeting where the product is 0, round over at the rims),
+// and the tiles laid on it. Laid out flat then lifted by a height, the tiles carried every kink of
+// the layout into the curves on the surface, and every crease of the height into dents; here the
+// shape is fixed and smooth, and only where each vertex sits on it is worked out:
+//   - start: plateLayout's plate, the oval and the holes fitted to its rims, each vertex lifted onto
+//     the top or bottom at its place (and the rims' onto the rims);
+//   - then every vertex moved over the surface (put back onto it after each step) to the least of
+//     the same energy untangle uses, on the surface: each triangle as near its own shape, angles
+//     and size, as it can be, none turned over (here, run round against the way out of the surface).
+// Returns { pos (x y z per vertex), shape (the pretzel's numbers: see pretzel) }.
+export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30, steps = 300 } = {}) {
+  const { xz, top, rims } = plateLayout(P, mesh), n = mesh.verts.length, T = mesh.tris.length;
+  // ---- the shape: the oval and holes fitted to the layout's rims (the outside's the longest round)
+  const len = (r) => r.reduce((s, v, k) => s + Math.hypot(xz[2 * v] - xz[2 * r[(k + 1) % r.length]], xz[2 * v + 1] - xz[2 * r[(k + 1) % r.length] + 1]), 0);
+  const outer = rims.reduce((a, b) => (len(b) > len(a) ? b : a)), holes = rims.filter((r) => r !== outer);
+  const A = Math.max(...outer.map((v) => Math.abs(xz[2 * v]))), B = Math.max(...outer.map((v) => Math.abs(xz[2 * v + 1])));
+  const circles = holes.map((r) => {
+    const cx = r.reduce((s, v) => s + xz[2 * v], 0) / r.length, cz = r.reduce((s, v) => s + xz[2 * v + 1], 0) / r.length;
+    return [cx, cz, r.reduce((s, v) => s + Math.hypot(xz[2 * v] - cx, xz[2 * v + 1] - cz), 0) / r.length];
+  });
+  const shape = { A, B, circles, s: 1 }, { F } = pretzel(shape);
+  let most = 0;
+  for (let i = 0; i <= 200; i++) for (let j = 0; j <= 100; j++) most = Math.max(most, F(-A + (2 * A * i) / 200, -B + (2 * B * j) / 100)[0]);
+  shape.s = (thick * thick) / most;
+  const { out, project } = pretzel(shape);
+  // ---- the start: each vertex up or down by the surface's height where it is
+  const side = new Int8Array(n), onRim = new Set(rims.flat()), x = new Float64Array(3 * n);
+  mesh.tris.forEach((t, i) => t.forEach((v) => { if (!onRim.has(v)) side[v] = top[i] ? 1 : -1; }));
+  for (let v = 0; v < n; v++) x.set([xz[2 * v], side[v] * Math.sqrt(Math.max(0, shape.s * F(xz[2 * v], xz[2 * v + 1])[0])), xz[2 * v + 1]], 3 * v);
+  project(x);
+  const per = T / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at)), local = mesh.tris.map((t, i) => t.map((v) => at[Math.floor(i / per)].get(v)));
+  settleOnSurface(mesh.tris, local, x, out, project, { lambda, rounds, steps });
+  return { pos: x, shape };
 }
 
-// The plate in space, finer, for drawing: plateLayout's flat layout with each triangle split in
-// four, `levels` times (each rim's new points on a smooth curve through its old ones, by the
-// four-point rule: 9/16 each of an edge's ends less 1/16 each of the next ones on), then every
-// point lifted by the plate's profile (see height). The profile is worked out at every fine point,
-// so the rounded rims are as fine as the rest. Returns { pos (x y z per vertex), tris, tile (per
-// triangle), local (per triangle, its corners' points on that tile, in the disk, for painting) }.
-export function plateSurface(P, mesh, { levels = 2, smoothing = globalThis.SMOOTHING ?? 40, thick = 0.55, round = 0.6, ...layout } = {}) {
-  const { xz: xz0, top: top0, rims, turned } = plateLayout(P, mesh, layout);
-  if (turned) throw new Error(`${turned} triangles came out turned over`);
-  const per = mesh.tris.length / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at));
-  let xz = Array.from(xz0), tris = mesh.tris.map((t) => [...t]), top = Array.from(top0), cycles = rims.map((r) => [...r]);
-  let tile = tris.map((_, i) => Math.floor(i / per)), local = tris.map((t, i) => t.map((v) => at[tile[i]].get(v)));
-  const ek = (p, q) => (p < q ? `${p},${q}` : `${q},${p}`);
-  // (which way round a triangle on the top runs, laid flat; one on the bottom the other way)
-  const turning = ([a, b, c]) => (xz[2 * b] - xz[2 * a]) * (xz[2 * c + 1] - xz[2 * a + 1]) - (xz[2 * b + 1] - xz[2 * a + 1]) * (xz[2 * c] - xz[2 * a]);
-  const way = Math.sign(turning(tris[top.indexOf(1)]));
-  const fine = (i) => turning(tris[i]) * (top[i] ? way : -way) > 0;
-  // (a point moved only if none of its triangles turns over; else put back)
-  const tryMove = (v, x, z, around) => {
-    const was = [xz[2 * v], xz[2 * v + 1]];
-    xz[2 * v] = x; xz[2 * v + 1] = z;
-    if (around[v].every(fine)) return true;
-    [xz[2 * v], xz[2 * v + 1]] = was;
-    return false;
+// The pretzel from its numbers ({ A, B: the oval's half widths; circles: [x, z, r] each hole; s }):
+// F(x, z) = e·h₁·h₂… and its slopes in x and z; out(x, y, z): the equation's value, y² − s·F, and
+// its slope (the way out of the surface); onto(p): a point moved onto the surface (Newton's way);
+// project(X): every point of X (x y z each) moved onto it, in place.
+export function pretzel({ A, B, circles, s }) {
+  const F = (x, z) => {
+    let f = 1 - (x / A) ** 2 - (z / B) ** 2, fx = (-2 * x) / (A * A), fz = (-2 * z) / (B * B);
+    for (const [cx, cz, r] of circles) {
+      const q = ((x - cx) ** 2 + (z - cz) ** 2) / (r * r) - 1, qx = (2 * (x - cx)) / (r * r), qz = (2 * (z - cz)) / (r * r);
+      [f, fx, fz] = [f * q, fx * q + f * qx, fz * q + f * qz];
+    }
+    return [f, fx, fz];
   };
-  const trisAt = () => { const at = Array.from({ length: xz.length / 2 }, () => []); tris.forEach((t, i) => t.forEach((v) => at[v].push(i))); return at; };
+  const out = (x, y, z) => { const [f, fx, fz] = F(x, z); return [y * y - s * f, -s * fx, 2 * y, -s * fz]; };
+  const onto = (p) => {
+    for (let k = 0; k < 8; k++) { const [f, gx, gy, gz] = out(...p), g2 = gx * gx + gy * gy + gz * gz || 1; p = [p[0] - (f * gx) / g2, p[1] - (f * gy) / g2, p[2] - (f * gz) / g2]; }
+    return p;
+  };
+  const project = (X) => { for (let v = 0; v < X.length / 3; v++) X.set(onto([X[3 * v], X[3 * v + 1], X[3 * v + 2]]), 3 * v); };
+  return { F, out, onto, project };
+}
+
+// Every vertex (x: x y z each, on the surface, moved in place) moved over a surface (out: its
+// equation's value and slope at a point; project: points back onto it) to the least of the energy
+// untangle uses, there: each triangle (tris; local: its corners in the disk, its own shape) as near
+// its own angles and size as it can be, none turned over (run round against the way out).
+function settleOnSurface(tris, local, x, out, project, { lambda, rounds, steps }) {
+  const n = x.length / 3, T = tris.length;
+  // ---- the triangles' own shapes: their angles' cotangents (the disk keeps angles), their areas
+  // (hyperbolic), all scaled to cover the surface
+  const cot = new Float64Array(3 * T), own = new Float64Array(T);
+  const area3 = (X, [a, b, c]) => {
+    const u = [X[3 * b] - X[3 * a], X[3 * b + 1] - X[3 * a + 1], X[3 * b + 2] - X[3 * a + 2]], w = [X[3 * c] - X[3 * a], X[3 * c + 1] - X[3 * a + 1], X[3 * c + 2] - X[3 * a + 2]];
+    return Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) / 2;
+  };
+  let ownAll = 0, now = 0;
+  tris.forEach((t, i) => {
+    const p = local[i];
+    for (let k = 0; k < 3; k++) {
+      const a = p[k], b = p[(k + 1) % 3], c = p[(k + 2) % 3], u = [b[0] - a[0], b[1] - a[1]], w = [c[0] - a[0], c[1] - a[1]];
+      cot[3 * i + k] = (u[0] * w[0] + u[1] * w[1]) / Math.abs(u[0] * w[1] - u[1] * w[0]);
+    }
+    const m = [(p[0][0] + p[1][0] + p[2][0]) / 3, (p[0][1] + p[1][1] + p[2][1]) / 3], flat = Math.abs((p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[1][1] - p[0][1]) * (p[2][0] - p[0][0])) / 2;
+    own[i] = (flat * 4) / (1 - m[0] ** 2 - m[1] ** 2) ** 2;
+    ownAll += own[i]; now += area3(x, t);
+  });
+  for (let i = 0; i < T; i++) own[i] *= now / ownAll;
+  // (which way the triangles run round, seen from outside: most of them, at the start)
+  const runs = (X, i) => {
+    const [a, b, c] = tris[i], m = [0, 1, 2].map((j) => (X[3 * a + j] + X[3 * b + j] + X[3 * c + j]) / 3), [, gx, gy, gz] = out(...m);
+    const u = [0, 1, 2].map((j) => X[3 * b + j] - X[3 * a + j]), w = [0, 1, 2].map((j) => X[3 * c + j] - X[3 * a + j]);
+    return (u[1] * w[2] - u[2] * w[1]) * gx + (u[2] * w[0] - u[0] * w[2]) * gy + (u[0] * w[1] - u[1] * w[0]) * gz;
+  };
+  let agree = 0;
+  for (let i = 0; i < T; i++) agree += Math.sign(runs(x, i));
+  const way = agree < 0 ? -1 : 1;
+  // ---- the energy (as untangle's): per triangle its own area times (|J|² + λ(det² + 1)) / χ(det),
+  // |J|² = D / its own area, det = its signed area (by the way out) over its own
+  const cross = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const energy = (X, g, eps) => {
+    if (g) g.fill(0);
+    let E = 0;
+    for (let i = 0; i < T; i++) {
+      const [a, b, c] = tris[i], P0 = [X[3 * a], X[3 * a + 1], X[3 * a + 2]], P1 = [X[3 * b], X[3 * b + 1], X[3 * b + 2]], P2 = [X[3 * c], X[3 * c + 1], X[3 * c + 2]];
+      const e0 = [0, 1, 2].map((j) => P2[j] - P1[j]), e1 = [0, 1, 2].map((j) => P0[j] - P2[j]), e2 = [0, 1, 2].map((j) => P1[j] - P0[j]);
+      const m = [0, 1, 2].map((j) => (P0[j] + P1[j] + P2[j]) / 3), [, gx, gy, gz] = out(...m), gl = way / (Math.hypot(gx, gy, gz) || 1), nn = [gx * gl, gy * gl, gz * gl];
+      const N = cross(e2, [-e1[0], -e1[1], -e1[2]]), As = 0.5 * (N[0] * nn[0] + N[1] * nn[1] + N[2] * nn[2]);
+      const c0 = cot[3 * i], c1 = cot[3 * i + 1], c2 = cot[3 * i + 2], sq = (e) => e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+      const Ar = own[i], J2 = (0.5 * (c0 * sq(e0) + c1 * sq(e1) + c2 * sq(e2))) / Ar, det = As / Ar;
+      const root = Math.sqrt(eps * eps + det * det), chi = (det + root) / 2, topE = J2 + lambda * (det * det + 1);
+      E += Ar * (topE / chi);
+      if (!g) continue;
+      // ∂/∂J², ∂/∂det, then each to the corners (J² by its sides, det by ½ n × the side across)
+      const kJ = Ar / chi / Ar, kd = (Ar * ((2 * lambda * det) / chi - (topE * (1 + det / root)) / 2 / (chi * chi))) / Ar;
+      const d0 = cross(nn, e0), d1 = cross(nn, e1), d2 = cross(nn, e2);
+      for (let j = 0; j < 3; j++) {
+        g[3 * a + j] += kJ * (c1 * e1[j] - c2 * e2[j]) + kd * 0.5 * d0[j];
+        g[3 * b + j] += kJ * (c2 * e2[j] - c0 * e0[j]) + kd * 0.5 * d1[j];
+        g[3 * c + j] += kJ * (c0 * e0[j] - c1 * e1[j]) + kd * 0.5 * d2[j];
+      }
+    }
+    // (only along the surface: each vertex's push less its part along the way out)
+    if (g) for (let v = 0; v < n; v++) {
+      const [, gx, gy, gz] = out(X[3 * v], X[3 * v + 1], X[3 * v + 2]), g2 = gx * gx + gy * gy + gz * gz || 1, k = (g[3 * v] * gx + g[3 * v + 1] * gy + g[3 * v + 2] * gz) / g2;
+      g[3 * v] -= k * gx; g[3 * v + 1] -= k * gy; g[3 * v + 2] -= k * gz;
+    }
+    return E;
+  };
+  const worst = (X) => { let m = Infinity; for (let i = 0; i < T; i++) m = Math.min(m, (way * runs(X, i)) / 2 / own[i]); return m; };
+  let eps = 1, E = energy(x, null, eps);
+  for (let r = 0; r < rounds; r++) {
+    const D = worst(x), E2 = minimize((X, g) => energy(X, g, eps), x, steps, 8, project), sigma = Math.max(1 - E2 / E, 0.1), D2 = worst(x);
+    eps = (1 - sigma) * (D2 + Math.sqrt(eps * eps + D2 * D2)) / 2;
+    E = E2;
+    if (D > 0 && D2 > 0 && r > 2) break;
+  }
+}
+
+// A closed mesh in space made finer and smooth for drawing: each triangle split in four, `levels`
+// times, the points moved by Loop's rule (a new point on an edge 3/8 each of its ends and 1/8 each
+// of the two across; an old one pulled toward its neighbors' average). Returns { pos, tris, tile
+// (per triangle), local (per triangle, its corners' points on that tile, in the disk: a new one
+// halfway along the hyperbolic line between, so tiles' edges stay on their curved edges) }.
+// (mesh: surfaceMesh's, or one split already, { tris, tile, local })
+export function loopSurface(mesh, pos, levels = 2) {
+  let X = Float64Array.from(pos), tris = mesh.tris.map((t) => [...t]), tile, local;
+  if (mesh.tiles) {
+    const per = mesh.tris.length / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at));
+    tile = tris.map((_, i) => Math.floor(i / per)); local = tris.map((t, i) => t.map((v) => at[tile[i]].get(v)));
+  } else ({ tile, local } = mesh);
+  const ek = (p, q) => (p < q ? `${p},${q}` : `${q},${p}`);
   for (let l = 0; l < levels; l++) {
-    const made = new Map(), curve = [];
-    // (each rim's edges first: their new points halfway, to go onto the curve once the triangles are split)
-    cycles = cycles.map((c) => c.flatMap((v, k) => {
-      const L = c.length, [a, b, d, e] = [c[(k - 1 + L) % L], v, c[(k + 1) % L], c[(k + 2) % L]], m = xz.length / 2;
-      xz.push((xz[2 * b] + xz[2 * d]) / 2, (xz[2 * b + 1] + xz[2 * d + 1]) / 2);
-      curve.push([m, ...[0, 1].map((j) => (9 * (xz[2 * b + j] + xz[2 * d + j]) - xz[2 * a + j] - xz[2 * e + j]) / 16)]);
-      made.set(ek(b, d), m);
-      return [v, m];
-    }));
+    const n = X.length / 3, nbrs = Array.from({ length: n }, () => new Set()), across = new Map(), made = new Map(), out = [];
+    for (const [a, b, c] of tris) for (const [p, q, o] of [[a, b, c], [b, c, a], [c, a, b]]) {
+      nbrs[p].add(q); nbrs[q].add(p);
+      const k = ek(p, q);
+      if (!across.has(k)) across.set(k, []);
+      across.get(k).push(o);
+    }
+    for (let v = 0; v < n; v++) {
+      const k = nbrs[v].size, beta = k === 3 ? 3 / 16 : 3 / (8 * k);
+      for (let j = 0; j < 3; j++) { let s = 0; for (const w of nbrs[v]) s += X[3 * w + j]; out.push((1 - k * beta) * X[3 * v + j] + beta * s); }
+    }
     const mid = (p, q) => {
       const k = ek(p, q);
-      if (!made.has(k)) { made.set(k, xz.length / 2); xz.push((xz[2 * p] + xz[2 * q]) / 2, (xz[2 * p + 1] + xz[2 * q + 1]) / 2); }
+      if (!made.has(k)) {
+        const [c, d] = across.get(k);
+        made.set(k, out.length / 3);
+        for (let j = 0; j < 3; j++) out.push((3 / 8) * (X[3 * p + j] + X[3 * q + j]) + (1 / 8) * (X[3 * c + j] + X[3 * d + j]));
+      }
       return made.get(k);
     };
-    // (a new corner's point on its tile halfway along the hyperbolic line between, so a tile's edge
-    // stays on the curved edge painted on it: halfway in the disk, it zigzags across the painted one)
-    const half = (u, w) => along(u, w, 0.5);
-    const next = [], nextTop = [], nextTile = [], nextLocal = [];
+    const half = (u, w) => along(u, w, 0.5), next = [], nextTile = [], nextLocal = [];
     tris.forEach(([a, b, c], i) => {
       const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a), [la, lb, lc] = local[i], lab = half(la, lb), lbc = half(lb, lc), lca = half(lc, la);
       next.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
       nextLocal.push([la, lab, lca], [lab, lb, lbc], [lca, lbc, lc], [lab, lbc, lca]);
-      for (let k = 0; k < 4; k++) { nextTile.push(tile[i]); nextTop.push(top[i]); }
+      for (let k = 0; k < 4; k++) nextTile.push(tile[i]);
     });
-    tris = next; top = nextTop; tile = nextTile; local = nextLocal;
-    const around = trisAt();
-    for (const [m, x, z] of curve) tryMove(m, x, z, around);
+    X = Float64Array.from(out); tris = next; tile = nextTile; local = nextLocal;
   }
-  const onRim = new Set(cycles.flat()), n = xz.length / 2, side = new Int8Array(n), pos = new Float64Array(3 * n);
-  // (then each point but the rims' moved halfway to the average of its neighbors, a few times: the
-  // layout bends sharply at the coarse mesh's points, kinks the split carries on, and this evens
-  // them out. Each face's own neighbors only: the two lie over each other.)
-  const nbrs = Array.from({ length: n }, () => new Set()), around = trisAt();
-  tris.forEach((t) => { for (const [p, q] of [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]) { nbrs[p].add(q); nbrs[q].add(p); } });
-  for (let it = 0; it < smoothing; it++) for (let v = 0; v < n; v++) {
-    if (onRim.has(v)) continue;
-    let x = 0, z = 0;
-    for (const w of nbrs[v]) { x += xz[2 * w]; z += xz[2 * w + 1]; }
-    tryMove(v, (xz[2 * v] + x / nbrs[v].size) / 2, (xz[2 * v + 1] + z / nbrs[v].size) / 2, around);
-  }
-  // the profile: up (or down) by how far from the nearest rim, a quarter circle rounding over it
-  const segs = cycles.flatMap((c) => c.map((v, k) => { const w = c[(k + 1) % c.length]; return [xz[2 * v], xz[2 * v + 1], xz[2 * w], xz[2 * w + 1]]; }));
-  tris.forEach((t, i) => t.forEach((v) => { if (!onRim.has(v)) side[v] = top[i] ? 1 : -1; }));
-  let dist = new Float64Array(n);
-  for (let v = 0; v < n; v++) {
-    if (!side[v]) continue;
-    const x = xz[2 * v], z = xz[2 * v + 1];
-    let d = Infinity;
-    for (const [ax, az, bx, bz] of segs) {
-      const dx = bx - ax, dz = bz - az, s = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
-      d = Math.min(d, Math.hypot(x - ax - s * dx, z - az - s * dz));
-    }
-    dist[v] = Math.min(d, round);
-  }
-  // (the distance evened out a little, the rims held at 0: it creases where the nearest stretch of
-  // rim changes, and more where the rim bends sharply, and the creases showed as dents)
-  for (let it = 0; it < 12; it++) {
-    const was = dist;
-    dist = Float64Array.from(was);
-    for (let v = 0; v < n; v++) {
-      if (!side[v]) continue;
-      let s = 0;
-      for (const w of nbrs[v]) s += was[w];
-      dist[v] = (was[v] + s / nbrs[v].size) / 2;
-    }
-  }
-  for (let v = 0; v < n; v++) {
-    const t = side[v] ? Math.min(1, dist[v] / round) : 0;
-    pos.set([xz[2 * v], side[v] * thick * Math.sqrt(1 - (1 - t) ** 2), xz[2 * v + 1]], 3 * v);
-  }
-  return { pos, tris, tile, local };
+  return { pos: X, tris, tile, local };
+}
+
+// implicitPlate's surface, finer for drawing: Loop's split twice, every point then put back on the
+// pretzel's equation (so the shape stays exactly the smooth one). Returns { pos, tris, tile, local }.
+// (Laid out twice: on the mesh, then on it split once, as the split's straight-in-the-disk new
+// points bend the map where it crosses the old triangles' edges. Some seconds: the data keeps it,
+// see data/add-shapes.mjs. Returns { mid (the once-split vertices' places), shape }.)
+export function implicitShape(P, mesh, { lambda = 0.3, ...opts } = {}) {
+  const { pos, shape } = implicitPlate(P, mesh, { lambda, ...opts }), { out, project } = pretzel(shape), mid = loopSurface(mesh, pos, 1);
+  project(mid.pos);
+  settleOnSurface(mid.tris, mid.local, mid.pos, out, project, { lambda, rounds: 30, steps: opts.fineSteps ?? 200 });
+  return { mid: mid.pos, shape };
+}
+// The surface to draw from implicitShape's (kept) result: the mesh split once (where mid's places
+// go), then once more, every point onto the pretzel. Returns { pos, tris, tile, local }.
+export function implicitSurface(mesh, { mid, shape }) {
+  const half = { ...loopSurface(mesh, new Float64Array(3 * mesh.verts.length), 1) };
+  if (half.pos.length !== mid.length) throw new Error("the kept shape is for another mesh");
+  const fine = loopSurface(half, mid, 1);
+  pretzel(shape).project(fine.pos);
+  return fine;
+}
+
+// How many triangles of a surface on the pretzel run round the other way to most (turned over),
+// seen from outside it
+export function turnedOver({ pos, tris }, shape) {
+  const { out } = pretzel(shape), signs = tris.map(([a, b, c]) => {
+    const u = [0, 1, 2].map((j) => pos[3 * b + j] - pos[3 * a + j]), w = [0, 1, 2].map((j) => pos[3 * c + j] - pos[3 * a + j]);
+    const [, gx, gy, gz] = out(...[0, 1, 2].map((j) => (pos[3 * a + j] + pos[3 * b + j] + pos[3 * c + j]) / 3));
+    return Math.sign((u[1] * w[2] - u[2] * w[1]) * gx + (u[2] * w[0] - u[0] * w[2]) * gy + (u[0] * w[1] - u[1] * w[0]) * gz);
+  });
+  const up = signs.filter((s) => s > 0).length;
+  return Math.min(up, signs.length - up);
 }
 
 // V − E + F of a mesh
