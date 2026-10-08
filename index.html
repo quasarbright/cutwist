@@ -801,7 +801,7 @@
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
-    import { surfaceMesh as hyperSurfaceMesh, implicitSurface } from "./hyper-surface.mjs";
+    import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1221,9 +1221,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       fetch(`regular-maps/shapes/${key}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((kept) => {
         let shape = null;
         if (kept && isHyper() && hyperShapeKey() === key) try {
-          const bytes = Uint8Array.from(atob(kept.mid), (c) => c.charCodeAt(0)), mid = Float64Array.from(new Float32Array(bytes.buffer));
           const mesh = hyperSurfaceMesh(P);
-          shape = { mesh, surface: implicitSurface(mesh, { mid, shape: kept.shape }) };
+          shape = { mesh, surface: implicitSurface(mesh, unpackShape(kept)) };
         } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
         if (kept && !shape && hyperShapeKey() !== key) { cache.delete(key); return; } // (another surface by now: fetch it again when asked)
         cache.set(key, shape);
@@ -2737,11 +2736,21 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
             float ink = 0.0;
             for (int i = 0; i < 1024; i++) {
               if (i >= n) break;
-              vec4 L = texelFetch(uLines, ivec2(i, t), 0);
+              vec4 L = texelFetch(uLines, ivec2(2 * i, t), 0);
               vec2 d = q - L.xy;
               float l = max(length(d), 1e-9);
               vec2 u = d / l;
-              float px = abs(l - L.z) / max(length(vec2(dot(u, qx), dot(u, qy))), 1e-9);
+              float dist = abs(l - L.z);
+              if (L.w > 0.5) {
+                // (a tile's edge: its arc only; past a corner, how far from that corner)
+                vec4 E = texelFetch(uLines, ivec2(2 * i + 1, t), 0);
+                vec2 ua = normalize(E.xy - L.xy), ub = normalize(E.zw - L.xy), um = normalize(ua + ub);
+                if (dot(u, um) < dot(ua, um)) {
+                  vec2 da = q - E.xy, db = q - E.zw, e = dot(da, da) < dot(db, db) ? da : db;
+                  dist = max(length(e), 1e-9); u = e / dist;
+                }
+              }
+              float px = dist / max(length(vec2(dot(u, qx), dot(u, qy))), 1e-9);
               float w = L.w > 0.5 ? 0.5 : 1.0; // (a tile's edge, a circle: half their widths, px)
               ink = max(ink, 1.0 - smoothstep(w - 0.5, w + 0.6, px));
             }
@@ -2757,11 +2766,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function buildHyperSurface() {
       const shape = hyperShape(), T = shape.mesh.tiles.length;
       const { pos, tris, tile, local } = shape.surface;
-      const shared = new THREE.BufferGeometry();
-      shared.setAttribute("position", new THREE.BufferAttribute(Float32Array.from(pos), 3));
-      shared.setIndex(tris.flat()); shared.computeVertexNormals();
-      const normals = shared.getAttribute("normal").array;
-      shared.dispose();
+      // (the surface's own normals, turned to the side the triangles face: three.js shades a triangle
+      // seen from behind with its normal turned round)
+      let facing = 0;
+      for (const [a, b, c] of tris.slice(0, 200)) {
+        const u = [0, 1, 2].map((j) => pos[3 * b + j] - pos[3 * a + j]), w = [0, 1, 2].map((j) => pos[3 * c + j] - pos[3 * a + j]);
+        facing += Math.sign((u[1] * w[2] - u[2] * w[1]) * shape.surface.normals[3 * a] + (u[2] * w[0] - u[0] * w[2]) * shape.surface.normals[3 * a + 1] + (u[0] * w[1] - u[1] * w[0]) * shape.surface.normals[3 * a + 2]);
+      }
+      const normals = facing < 0 ? shape.surface.normals.map((x) => -x) : shape.surface.normals;
       const cols = Math.ceil(Math.sqrt(T)), rows = Math.ceil(T / cols), size = Math.min(768, Math.floor(Math.min(4096, renderer.capabilities.maxTextureSize) / Math.max(cols, rows)));
       texCanvas.width = cols * size; texCanvas.height = rows * size;
       hyperCell.width = hyperCell.height = size;
@@ -2793,17 +2805,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // the lines, a row of circles per tile ({ c, r } and 1 for a tile's edge): a float texture
       const lines = P.H.coset.face.reps.map((e) => hyperCellView.tileLines(P, e));
       hyperCopies = lines.map((l) => l.copies);
-      const width = Math.min(1024, Math.max(1, ...lines.map((l) => l.cuts.length + l.edges.length))), data = new Float32Array(width * T * 4);
+      // (two texels a line: its circle and kind, then a tile's edge's two corners)
+      const width = Math.min(1024, Math.max(1, ...lines.map((l) => l.cuts.length + l.edges.length))), data = new Float32Array(2 * width * T * 4);
       // (the ones reaching the tile first, then the rest, which only a turning ring needs)
       lines.forEach(({ cuts, edges, nearCuts, nearEdges }, t) => {
         const all = [...cuts.slice(0, nearCuts).map((q) => [q, 0]), ...edges.slice(0, nearEdges).map((q) => [q, 1]),
           ...cuts.slice(nearCuts).map((q) => [q, 0]), ...edges.slice(nearEdges).map((q) => [q, 1])].slice(0, width);
-        all.forEach(([{ c, r }, edge], i) => data.set([c[0], c[1], r, edge], 4 * (t * width + i)));
+        all.forEach(([{ c, r, a, b }, edge], i) => data.set([c[0], c[1], r, edge, ...(edge ? [a[0], a[1], b[0], b[1]] : [0, 0, 0, 0])], 8 * (t * width + i)));
         hyperLines.uLineCount.value[t] = Math.min(all.length, nearCuts + nearEdges);
         hyperLines.uLineAll.value[t] = all.length;
       });
       hyperLines.uLines.value?.dispose();
-      hyperLines.uLines.value = floatTexture(data, width, T);
+      hyperLines.uLines.value = floatTexture(data, 2 * width, T);
       hyperLines.uRings.value ??= floatTexture(new Float32Array(32 * 64 * 4), 32, 64);
       hyperLines.uRings.value.userData.key = null; // (a new surface, new copies)
       if (surfaceTexture) surfaceTexture.dispose();

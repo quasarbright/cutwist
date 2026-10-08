@@ -6,8 +6,8 @@
 // edge coset and how far along). Then, for a two-holed surface, laid on a pretzel in space: laid
 // flat as a plate's top and bottom (plateLayout), a smooth pretzel fitted to that (pretzel), and
 // the tiles moved over it to keep their shapes (implicitShape; kept in regular-maps/shapes/ by
-// data/add-shapes.mjs, and drawn from by implicitSurface). Every vertex keeps where it is on its
-// tile (tile, point in the disk), for painting the tiles on.
+// data/add-shapes.mjs as packShape packs it, and drawn from by implicitSurface). Every vertex keeps
+// where it is on its tile (tile, point in the disk), for painting the tiles on.
 import { mobius as Mb } from "./hyper.mjs";
 
 const abs = (z) => Math.hypot(z[0], z[1]);
@@ -662,8 +662,10 @@ function settleOnSurface(tris, local, x, out, project, { lambda, rounds, steps }
 // of the two across; an old one pulled toward its neighbors' average). Returns { pos, tris, tile
 // (per triangle), local (per triangle, its corners' points on that tile, in the disk: a new one
 // halfway along the hyperbolic line between, so tiles' edges stay on their curved edges) }.
-// (mesh: surfaceMesh's, or one split already, { tris, tile, local })
-export function loopSurface(mesh, pos, levels = 2) {
+// (mesh: surfaceMesh's, or one split already, { tris, tile, local }. smooth false: no Loop, each
+// new point halfway along its edge and the old ones where they were, so the map from the disk stays
+// what it was: Loop moves points in space and not on their tiles, and lines on the tiles kink.)
+export function loopSurface(mesh, pos, levels = 2, smooth = true) {
   let X = Float64Array.from(pos), tris = mesh.tris.map((t) => [...t]), tile, local;
   if (mesh.tiles) {
     const per = mesh.tris.length / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at));
@@ -679,7 +681,7 @@ export function loopSurface(mesh, pos, levels = 2) {
       across.get(k).push(o);
     }
     for (let v = 0; v < n; v++) {
-      const k = nbrs[v].size, beta = k === 3 ? 3 / 16 : 3 / (8 * k);
+      const k = nbrs[v].size, beta = !smooth ? 0 : k === 3 ? 3 / 16 : 3 / (8 * k);
       for (let j = 0; j < 3; j++) { let s = 0; for (const w of nbrs[v]) s += X[3 * w + j]; out.push((1 - k * beta) * X[3 * v + j] + beta * s); }
     }
     const mid = (p, q) => {
@@ -687,7 +689,7 @@ export function loopSurface(mesh, pos, levels = 2) {
       if (!made.has(k)) {
         const [c, d] = across.get(k);
         made.set(k, out.length / 3);
-        for (let j = 0; j < 3; j++) out.push((3 / 8) * (X[3 * p + j] + X[3 * q + j]) + (1 / 8) * (X[3 * c + j] + X[3 * d + j]));
+        for (let j = 0; j < 3; j++) out.push(smooth ? (3 / 8) * (X[3 * p + j] + X[3 * q + j]) + (1 / 8) * (X[3 * c + j] + X[3 * d + j]) : (X[3 * p + j] + X[3 * q + j]) / 2);
       }
       return made.get(k);
     };
@@ -703,24 +705,49 @@ export function loopSurface(mesh, pos, levels = 2) {
   return { pos: X, tris, tile, local };
 }
 
-// implicitPlate's surface, finer for drawing: Loop's split twice, every point then put back on the
-// pretzel's equation (so the shape stays exactly the smooth one). Returns { pos, tris, tile, local }.
-// (Laid out twice: on the mesh, then on it split once, as the split's straight-in-the-disk new
-// points bend the map where it crosses the old triangles' edges. Some seconds: the data keeps it,
-// see data/add-shapes.mjs. Returns { mid (the once-split vertices' places), shape }.)
+// implicitPlate's surface, finer for drawing: the mesh split twice (each new point halfway along
+// its edge, put back on the pretzel), the tiles moved over it again after each split. (Split
+// without moving them again, each old triangle's edges stay creases in the map from the disk:
+// lines drawn on the tiles kink there. Laid out with Loop's split instead, the points move in space
+// and not on their tiles, and the lines kink worse.) Most of a minute: the data keeps it, see
+// data/add-shapes.mjs. Returns { at (the twice-split mesh's vertices' places), shape }.
 export function implicitShape(P, mesh, { lambda = 0.3, ...opts } = {}) {
-  const { pos, shape } = implicitPlate(P, mesh, { lambda, ...opts }), { out, project } = pretzel(shape), mid = loopSurface(mesh, pos, 1);
-  project(mid.pos);
-  settleOnSurface(mid.tris, mid.local, mid.pos, out, project, { lambda, rounds: 30, steps: opts.fineSteps ?? 200 });
-  return { mid: mid.pos, shape };
+  let { pos, shape } = implicitPlate(P, mesh, { lambda, ...opts }), at = mesh;
+  const { out, project } = pretzel(shape);
+  for (let k = 0; k < 2; k++) {
+    at = loopSurface(at, pos, 1, false);
+    ({ pos } = at);
+    project(pos);
+    settleOnSurface(at.tris, at.local, pos, out, project, { lambda, rounds: 30, steps: opts.fineSteps ?? 200 });
+  }
+  return { at: pos, shape };
 }
-// The surface to draw from implicitShape's (kept) result: the mesh split once (where mid's places
-// go), then once more, every point onto the pretzel. Returns { pos, tris, tile, local }.
-export function implicitSurface(mesh, { mid, shape }) {
-  const half = { ...loopSurface(mesh, new Float64Array(3 * mesh.verts.length), 1) };
-  if (half.pos.length !== mid.length) throw new Error("the kept shape is for another mesh");
-  const fine = loopSurface(half, mid, 1);
-  pretzel(shape).project(fine.pos);
+// implicitShape's places, kept: as whole numbers (16 bits, of the most any place is from 0 in x, y
+// or z), base64. Back on the pretzel after, they're off along it by about 1/30000 of that.
+export function packShape({ at, shape }) {
+  const most = at.reduce((m, x) => Math.max(m, Math.abs(x)), 0), q = Int16Array.from(at, (x) => Math.round((x / most) * 32767)), bytes = new Uint8Array(q.buffer);
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 8192) s += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return { shape, most, vertices: at.length / 3, at: btoa(s) };
+}
+export function unpackShape({ shape, most, at }) {
+  const bytes = Uint8Array.from(atob(at), (c) => c.charCodeAt(0)), q = new Int16Array(bytes.buffer);
+  return { shape, at: Float64Array.from(q, (x) => (x / 32767) * most) };
+}
+// The surface to draw from implicitShape's (kept) result: the mesh split twice, its points at their
+// places on the pretzel. Returns { pos, normals (the surface's own, from its equation's slope: from
+// the triangles' they shade the mesh's unevenness in as dents), tris, tile, local }.
+export function implicitSurface(mesh, { at, shape }) {
+  const fine = loopSurface(mesh, new Float64Array(3 * mesh.verts.length), 2, false);
+  if (fine.pos.length !== at.length) throw new Error("the kept shape is for another mesh");
+  const { project, out } = pretzel(shape);
+  fine.pos = Float64Array.from(at);
+  project(fine.pos);
+  fine.normals = new Float64Array(fine.pos.length);
+  for (let v = 0; v < fine.pos.length / 3; v++) {
+    const [, gx, gy, gz] = out(fine.pos[3 * v], fine.pos[3 * v + 1], fine.pos[3 * v + 2]), l = Math.hypot(gx, gy, gz) || 1;
+    fine.normals.set([gx / l, gy / l, gz / l], 3 * v);
+  }
   return fine;
 }
 

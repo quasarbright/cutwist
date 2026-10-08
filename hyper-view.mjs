@@ -167,8 +167,8 @@ export class HyperView {
   }
   // The lines on element e's tile, in its dart's frame (the disk with that dart at the middle):
   // every circle around every copy of a turning point that reaches the tile ({ c, r }: a circle in
-  // the disk), the tile's own edges (each a circle too), and every copy of a turning point near
-  // it ({ axis, at }), for turning the lines in a turning ring.
+  // the disk), the tiles' edges (each an arc of a circle: { c, r, a, b }, from corner a to b), and
+  // every copy of a turning point near it ({ axis, at }), for turning the lines in a turning ring.
   // (The tiles around too, and lines a way past the tile: a turning ring brings what's beside the
   // tile into it.)
   tileLines(P, e) {
@@ -183,11 +183,17 @@ export class HyperView {
       copies.push({ axis, at });
       for (const r of P.radii[kind]) { const circle = diskCircle(at, r); if (meets(circle)) cuts.push(circle); }
     }
-    // (each tile's edges: the circle through an edge's ends and middle, where the tile is)
+    // (each tile's edges: the circle through an edge's ends and middle, where the tile is; every
+    // seen tile's, the same circle once. Taken from one side of each edge only, as drawing does,
+    // the ones whose side is past the tiles seen went missing, and a turned ring brought them in.)
+    // (An edge is just its arc, from corner to corner, a and b: past them its circle runs on
+    // through other tiles, which a turned ring brings in as stray lines.)
+    const seen = new Set();
     for (const d of this.listVisible().tiles) for (let k = 0; k < G.N; k++) {
-      if (!this.firstSide(d.m, k)) continue;
-      const circle = circleThrough(...[G.corners[k], G.mids[k], G.corners[(k + 1) % G.N]].map((p) => Mb.apply(d.m, p)));
-      if (circle && meets(circle)) edges.push(circle);
+      const [a, m, b] = [G.corners[k], G.mids[k], G.corners[(k + 1) % G.N]].map((p) => Mb.apply(d.m, p)), circle = circleThrough(a, m, b);
+      if (!circle || !meets(circle)) continue;
+      const key = [circle.c[0], circle.c[1], circle.r].map((x) => Math.round(x * 1e6)).join();
+      if (!seen.has(key)) { seen.add(key); edges.push({ ...circle, a, b }); }
     }
     const first = (list) => [...list.filter(near), ...list.filter((q) => !near(q))];
     return { cuts: first(cuts), edges: first(edges), nearCuts: cuts.filter(near).length, nearEdges: edges.filter(near).length, copies };
