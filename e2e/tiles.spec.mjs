@@ -44,6 +44,23 @@ test("a turn and its reverse; six sixths of a hexagon's turn is no change", asyn
   expect((await info(page)).solved).toBe(true);
 });
 
+// (a press near a circle's line dragged it, even on a corner's or edge's middle with other
+// circles' lines running close by: the nearer one wins now)
+test("tapping a corner's or an edge's middle turns its circle", async ({ page }) => {
+  // (corner circles that don't come within a pixel of the edges' middles: there, a click a hair
+  // off rightly takes the line)
+  const design = { rule: "tiles", tiling: "hex", a: 3, b: 0, cuts: [{ on: "face", depths: [0.6] }, { on: "vertex", depths: [0.2] }, { on: "edge", depths: [0.25] }], truncate: {}, blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  const axes = await page.evaluate(() => window.cutwist.info().axes);
+  for (const kind of ["vertex", "edge"]) {
+    const axis = axes.findIndex((a) => a.kind === kind), mid = await page.evaluate((a) => window.cutwist.tileMiddle(a), axis);
+    const before = (await info(page)).moves;
+    await page.mouse.click(mid.x, mid.y);
+    await finish(page);
+    expect((await info(page)).moves, kind).toBe(before + 1);
+  }
+});
+
 test("dragging a circle turns it: it follows the pointer and snaps to whole steps", async ({ page }) => {
   await load(page);
   const m = await page.evaluate(() => window.cutwist.tileMiddle(4));

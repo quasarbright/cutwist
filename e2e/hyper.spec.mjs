@@ -60,6 +60,20 @@ test("tapping a tile's middle turns it; dragging a circle turns it by as much as
   expect(s.moves).toBe(2);
 });
 
+// (a tap turned only a tile's circle, as the flat tilings' does every kind's)
+test("tapping a corner's or an edge's middle turns its circle", async ({ page }) => {
+  const design = { rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.714] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [0.4] }], blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  const s0 = await settled(page);
+  for (const kind of ["vertex", "edge"]) {
+    const axis = s0.axes.findIndex((a) => a.kind === kind), mid = await page.evaluate((a) => window.cutwist.hyperMiddle(a), axis);
+    const before = (await info(page)).moves;
+    await fire(page, "pointerdown", mid); await fire(page, "pointerup", mid);
+    await page.evaluate(() => window.cutwist.finish());
+    expect((await info(page)).moves, kind).toBe(before + 1);
+  }
+});
+
 test("dragging away from the circles slides the plane, and turns nothing", async ({ page }) => {
   await pick(page, "hyper-klein");
   await settled(page);

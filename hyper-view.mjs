@@ -161,7 +161,8 @@ export class HyperView {
     }
     return (vis.copies[kind] = out);
   }
-  // the circle whose line passes nearest a point, within tol px: { axis, layer, center (disk) }
+  // the circle whose line passes nearest a point, within tol px: { axis, layer, center (disk),
+  // px (how far the line is) }
   circleAt(px, py, tol = 10) {
     if (!this.shows(px, py)) return null;
     const { P } = this, z = this.toDisk(px, py), k = ((1 - (z[0] ** 2 + z[1] ** 2)) / 2) * this.R; // (px per hyperbolic unit there: a disk step dz is 2·dz/(1 − |z|²) hyperbolic)
@@ -171,17 +172,28 @@ export class HyperView {
       for (const { axis, at } of this.axisCopies(kind)) {
         const d = hdist(z, at);
         // (a ring's line grabs the ring just inside it)
-        P.radii[kind].forEach((r, layer) => { if (Math.abs(d - r) < bestD) { bestD = Math.abs(d - r); best = { axis, layer, center: at }; } });
+        P.radii[kind].forEach((r, layer) => { if (Math.abs(d - r) < bestD) { bestD = Math.abs(d - r); best = { axis, layer, center: at, px: bestD * k }; } });
       }
     }
     return best;
   }
-  // the tile whose middle a point is on (the part a tap turns): its axis, or null
-  tileAt(px, py) {
-    if (!this.shows(px, py) || !this.P.radii.face.length) return null;
-    const z = this.toDisk(px, py), r = 0.3 * this.P.G.Ri;
-    const hit = this.axisCopies("face").find(({ at }) => hdist(z, at) < r);
-    return hit ? hit.axis : null;
+  // The turning point (a tile's, corner's or edge's middle) a point is on, the part a tap turns:
+  // its axis, or null. Each point's zone is the same share of the way to the nearest other kind
+  // of point (a tile's middle to an edge's, an edge's to a corner), and well inside its first
+  // circle; the nearest point wins.
+  middleAt(px, py) { const hit = this.middleHit(px, py); return hit ? hit.axis : null; }
+  // the same, with how far the point is from it: { axis, px }, or null
+  middleHit(px, py) {
+    if (!this.shows(px, py)) return null;
+    const { P } = this, { G } = P, z = this.toDisk(px, py), zone0 = 0.45 * Math.min(G.Ri, G.edgeLength / 2);
+    const k = ((1 - (z[0] ** 2 + z[1] ** 2)) / 2) * this.R; // (px per hyperbolic unit there)
+    let best = null;
+    for (const kind of ["face", "vertex", "edge"]) {
+      if (!P.radii[kind].length) continue;
+      const zone = Math.min(zone0, 0.55 * P.radii[kind][0]);
+      for (const { axis, at } of this.axisCopies(kind)) { const d = hdist(z, at); if (d < zone && (!best || d < best.d)) best = { axis, d }; }
+    }
+    return best ? { axis: best.axis, px: best.d * k } : null;
   }
   // the piece under a point, and where that copy is ({ i, m }), or null
   pieceAt(px, py, state) {

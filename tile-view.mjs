@@ -105,6 +105,8 @@ export class TileView {
   circleAt(px, py, tol = 10) { return this.shows(px, py) ? circleNear(this.P, this.toPlane(px, py), tol / this.scale) : null; }
   // the turning point whose middle a point is on (the part a click turns), or null
   tileAt(px, py) { return this.shows(px, py) ? axisNear(this.P, this.toPlane(px, py)) : null; }
+  // what a press there takes (see pressAt): { circle } or { middle } or {}
+  pressAt(px, py, tol = 10) { return this.shows(px, py) ? pressAt(this.P, this.toPlane(px, py), tol / this.scale) : {}; }
   // the piece under a point (state: where everything is now), or null
   pieceAt(px, py, state) { return this.shows(px, py) ? pieceNear(this.P, state, this.toPlane(px, py), this.ctx) : null; }
   // whether a point (CSS px) is on the drawn tiles
@@ -533,13 +535,23 @@ export function circleNear(P, p, tol) {
 }
 // the turning point whose middle p is on (well inside its first circle: the part a click
 // turns), or null
-export function axisNear(P, p) {
+export function axisNear(P, p) { const hit = axisHit(P, p); return hit ? hit.axis : null; }
+// the same, with how far p is from it: { axis, d }, or null
+export function axisHit(P, p) {
   let best = null;
   P.axes.forEach((ax, axis) => {
     const d = Math.sqrt(nearestCopy(P, ax.center, p).dd), zone = Math.min(0.25, 0.55 * ax.radii[0]);
     if (d < zone && (!best || d < best.d)) best = { axis, d };
   });
-  return best ? best.axis : null;
+  return best;
+}
+// What a press at p takes: the circle whose line it's by (within tol), to drag, or the turning
+// point whose middle it's on, to turn; where both are near, as round a corner with other circles'
+// lines close by, whichever is nearer. { circle } or { middle } (an axis), or {}.
+export function pressAt(P, p, tol) {
+  const c = circleNear(P, p, tol), m = axisHit(P, p);
+  if (c && (!m || c.d <= m.d)) return { circle: c };
+  return m ? { middle: m.axis } : {};
 }
 export const tileNear = axisNear;
 // the piece under p (state: where everything is now), or null; ctx: any 2D context, for

@@ -792,7 +792,7 @@
       TILE_PRESETS, TILE_PARAMS, TILE_CUT_RANGE, TILINGS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves,
       piecesInLayer as tilePiecesInLayer, signedTurn, snapTiles, nearestCopy, tileSnapCandidates, tileRegularTrims, tileStats, tileDesign, tileCount, tileRadiusCap,
     } from "./tiles.mjs";
-    import { TileView, faceColor, circleNear, axisNear, pieceNear } from "./tile-view.mjs";
+    import { TileView, faceColor, circleNear, axisNear, pieceNear, pressAt } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
@@ -2342,7 +2342,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           drag = piece !== null ? { mode: "paint", x: e.clientX, y: e.clientY, piece } : { mode: "orbit", x: e.clientX, y: e.clientY };
           return;
         }
-        const c = p && e.button === 0 ? circleNear(P, p, 0.07) : null, mid = p && !c ? axisNear(P, p) : null;
+        const press = p ? pressAt(P, p, 0.07) : {}, c = e.button === 0 ? press.circle || null : null, mid = !c && press.middle !== undefined ? press.middle : null;
         if (c) {
           flush();
           drag = { mode: "tpress", x: e.clientX, y: e.clientY };
@@ -2920,9 +2920,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         tilePointer = p ? { at: p, real: false, cursor: "" } : null;
         return;
       }
-      const c = p && circleNear(P, p, 0.07);
+      const press = p ? pressAt(P, p, 0.07) : {}, c = press.circle || null; // (as a press would take it)
       tileHover = c ? { axis: c.axis, layer: c.layer } : null;
-      canvas.style.cursor = c ? "grab" : p && axisNear(P, p) !== null ? "pointer" : "";
+      canvas.style.cursor = c ? "grab" : press.middle !== undefined ? "pointer" : "";
       tilePointer = p ? { at: p, real: false, cursor: canvas.style.cursor } : null; // (its copies show the same)
     }
     function drawTiles() {
@@ -3020,7 +3020,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         return;
       }
       const z = hyperView.toDisk(e.clientX, e.clientY);
-      const c = e.button === 0 ? hyperView.circleAt(e.clientX, e.clientY) : null;
+      // (a press by a circle's line drags it, one on a tile's, corner's or edge's middle turns that
+      // one: where both are near, as round a corner, whichever is nearer)
+      const mid = hyperView.middleHit(e.clientX, e.clientY);
+      let c = e.button === 0 ? hyperView.circleAt(e.clientX, e.clientY) : null;
+      if (c && mid && mid.px < c.px) c = null;
       try { plane.setPointerCapture(e.pointerId); } catch {}
       if (c) {
         flush();
@@ -3030,8 +3034,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         tilePointer = { at: z, real: true, cursor: "grabbing" };
         return;
       }
-      const mid = hyperView.tileAt(e.clientX, e.clientY);
-      if (mid !== null && (e.button === 0 || e.button === 2)) { turnTile({ axis: mid, layer: 0, q: e.button === 0 ? -1 : 1 }); return; }
+      if (mid && (e.button === 0 || e.button === 2)) { turnTile({ axis: mid.axis, layer: 0, q: e.button === 0 ? -1 : 1 }); return; }
       if (e.button === 0 && hyperView.shows(e.clientX, e.clientY)) { hpan = { id: e.pointerId, last: z }; plane.style.cursor = "move"; }
     });
     plane.addEventListener("pointermove", (e) => {
@@ -3051,9 +3054,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         plane.style.cursor = piece === null ? "" : "pointer";
         return;
       }
-      const c = hyperView.circleAt(e.clientX, e.clientY);
+      // (as a press would take it: the nearer of a circle's line and a turning point's middle)
+      const mid = hyperView.middleHit(e.clientX, e.clientY);
+      let c = hyperView.circleAt(e.clientX, e.clientY);
+      if (c && mid && mid.px < c.px) c = null;
       tileHover = c ? { axis: c.axis, layer: c.layer } : null;
-      plane.style.cursor = c ? "grab" : hyperView.tileAt(e.clientX, e.clientY) !== null ? "pointer" : hyperView.shows(e.clientX, e.clientY) ? "move" : "";
+      plane.style.cursor = c ? "grab" : mid ? "pointer" : hyperView.shows(e.clientX, e.clientY) ? "move" : "";
       tilePointer = hyperView.shows(e.clientX, e.clientY) ? { at: z, real: true, cursor: plane.style.cursor } : null;
     });
     function endHyperDrag(e) {
@@ -3097,7 +3103,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (piece !== null && e.button === 0) toggleType(piece);
           return;
         }
-        const c = e.button === 0 ? tileView.circleAt(e.clientX, e.clientY) : null;
+        const hit = tileView.pressAt(e.clientX, e.clientY), c = e.button === 0 ? hit.circle || null : null;
         if (c) {
           try { plane.setPointerCapture(e.pointerId); } catch {}
           flush();
@@ -3107,8 +3113,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           tilePointer = { at: tileView.toPlane(e.clientX, e.clientY), real: true, cursor: "grabbing" }; // (its copies close their hands too)
           return;
         }
-        const mid = tileView.tileAt(e.clientX, e.clientY);
-        if (mid !== null && (e.button === 0 || e.button === 2)) turnTile({ axis: mid, layer: 0, q: e.button === 0 ? 1 : -1 });
+        const mid = hit.middle ?? (e.button === 2 ? tileView.tileAt(e.clientX, e.clientY) : null);
+        if (mid !== null && mid !== undefined && (e.button === 0 || e.button === 2)) turnTile({ axis: mid, layer: 0, q: e.button === 0 ? 1 : -1 });
         return;
       }
       if (!isPlanar() || pdrag) return;
@@ -3134,9 +3140,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           tilePointer = tileView.shows(e.clientX, e.clientY) ? { at, real: true, cursor: plane.style.cursor } : null;
           return;
         }
-        const c = tileView.circleAt(e.clientX, e.clientY);
+        const hit = tileView.pressAt(e.clientX, e.clientY), c = hit.circle || null; // (as a press would take it)
         tileHover = c ? { axis: c.axis, layer: c.layer } : null;
-        plane.style.cursor = c ? "grab" : tileView.tileAt(e.clientX, e.clientY) !== null ? "pointer" : "";
+        plane.style.cursor = c ? "grab" : hit.middle !== undefined ? "pointer" : "";
         // its copies show the same (none while it's off the tiles, in the space around them)
         tilePointer = tileView.shows(e.clientX, e.clientY) ? { at, real: true, cursor: plane.style.cursor } : null;
         return;
