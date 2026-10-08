@@ -352,8 +352,11 @@
       background: linear-gradient(to right, var(--panel-2) 0 var(--center), var(--border) var(--center) 100%);
     }
     .tw-marks, .tw-handles { position: absolute; left: 8px; right: 8px; top: 0; bottom: 0; }
-    .tw-marks { pointer-events: none; }
-    .tw-marks span { position: absolute; top: 7px; width: 1px; height: 16px; background: var(--muted); opacity: .7; }
+    /* (marks over the handles: a mark under one was hidden, so a handle sitting a hair off a mark
+       looked like it had none. The negative of what's under them: light on the rail, dark on a
+       handle) */
+    .tw-marks { pointer-events: none; z-index: 1; mix-blend-mode: difference; } /* (on the layer: its z-index isolates what's inside it) */
+    .tw-marks span { position: absolute; top: 7px; width: 1px; height: 16px; background: #fff; opacity: .7; }
     .tw-marks .tw-zero { top: 5px; height: 20px; background: var(--faint); opacity: 1; }
     .tw-handle {
       position: absolute; top: 7px; width: 16px; height: 16px; margin-left: -8px; padding: 0;

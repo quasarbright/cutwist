@@ -213,6 +213,31 @@ test("a design from a link: its handle is where its value is, and a grab doesn't
   expect(Math.abs((await value()) - before)).toBeLessThan(0.05);
 });
 
+// (a handle sitting a hair off a mark hid it, so the ruler looked to have no mark where the pieces
+// change: the octagons' corner circle, its first mark a quarter pixel from the handle)
+test("a mark under a handle shows through it", async ({ page }) => {
+  const design = { rule: "hyper", N: 8, M: 3, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [0.36267365202504137] }, { on: "edge", depths: [] }], blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  await settled(page);
+  const ruler = page.locator(".tw-rblock").filter({ hasText: "corners" }).filter({ hasText: "+ cut" }), handle = ruler.locator(".tw-handle").first();
+  await handle.focus();
+  // (the mark under it: the nearest one)
+  const mark = ruler.locator(".tw-marks span:not(.tw-zero)").first();
+  await expect(mark).toBeAttached({ timeout: 15000 });
+  await page.mouse.move(5, 5);
+  const [h, m] = [await handle.boundingBox(), await mark.boundingBox()];
+  expect(Math.abs(m.x - (h.x + h.width / 2))).toBeLessThan(h.width / 2); // (it is under the handle)
+  // (down the mark's line, through the handle's middle, the pixels are darker than the handle's beside it)
+  const shot = await page.screenshot({ clip: { x: Math.round(m.x) - 3, y: Math.round(h.y + h.height / 2), width: 7, height: 1 } });
+  const px = await page.evaluate(async (b64) => {
+    const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, img.width, 1).data, lum = (i) => d[4 * i] + d[4 * i + 1] + d[4 * i + 2];
+    return { mid: lum(Math.floor(img.width / 2)), side: lum(0) };
+  }, shot.toString("base64"));
+  expect(px.mid).toBeLessThan(px.side - 60);
+});
+
 // (with no circles there are no pieces, and nothing works out tile 0's cuts: drawing it threw)
 test("a design with no circles draws: just the tiles", async ({ page }) => {
   const design = { rule: "hyper", N: 12, M: 3, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] };
