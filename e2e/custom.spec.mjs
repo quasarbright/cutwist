@@ -35,6 +35,17 @@ test("a share link opens the same design in the editor", async ({ page }) => {
   await noErrors(errors);
 });
 
+// (only the 16 candidates nearest a handle were checked, so a ruler's far marks never showed: a
+// cube's corner cut with a face cut has 19)
+test("a ruler shows every mark, however far from its handle", async ({ page }) => {
+  const design = { rule: "custom", solid: "cube", cuts: [{ on: "face", depths: [0.3] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [] }], truncate: {}, blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  const expected = await page.evaluate(async (design) => (await import("./puzzle.mjs")).snapDepths({ name: "x", size: 2, ...design }, { s: 1, i: 0 }).length, design);
+  expect(expected).toBeGreaterThan(16);
+  await page.locator(".tw-rblock").filter({ hasText: "corners" }).locator(".tw-handle").first().focus();
+  await expect.poll(() => page.locator(".tw-rblock").filter({ hasText: "corners" }).locator(".tw-marks span:not(.tw-zero)").count(), { timeout: 30000 }).toBe(expected);
+});
+
 test("a broken share link falls back to the default puzzle", async ({ page }) => {
   const errors = await open(page, "?p=not-a-design");
   expect((await info(page)).title).toBe("3×3×3 cube");

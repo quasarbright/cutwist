@@ -499,8 +499,9 @@ export function* hyperCountBreaks(P, kind, i, lo, hi, marks = [], samples = 48, 
     const stack = [[xs[k], cs[k], xs[k + 1], cs[k + 1]]];
     while (stack.length) {
       const [a, ca, b, cb] = stack.pop();
-      if (ca < 0 || cb < 0) continue; // (the edge of what fits, not a change in the pieces)
-      if (b - a < 1e-3) {
+      // (an end where the design doesn't fit, −1: the edge of what fits isn't a mark, but a real
+      // change can be between it and the other end, as just under the ruler's top)
+      if (b - a < 1e-3 && ca >= 0 && cb >= 0) {
         const inside = marks.filter((m) => m > a && m < b);
         if (inside.length === 1) {
           // (either side by as much as a radius snaps onto a mark: right at one, crossings closer
@@ -510,7 +511,7 @@ export function* hyperCountBreaks(P, kind, i, lo, hi, marks = [], samples = 48, 
           if (below === ca && above === cb) { yield { at: m }; continue; }
         }
       }
-      if (b - a < hair) { yield { at: (a + b) / 2 }; continue; }
+      if (b - a < hair) { if (ca >= 0 && cb >= 0) yield { at: (a + b) / 2 }; continue; }
       const m = (a + b) / 2, cm = count(m);
       yield {};
       if (cm !== cb) stack.push([m, cm, b, cb]);

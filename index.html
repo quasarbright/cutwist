@@ -1496,9 +1496,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // Snapping: snaps[r][i] lists the depths handle i of ruler r can snap to (see snapDepths).
     // They depend on the solid, its truncations and every cut, so they're recomputed after
     // each edit, one candidate per tick so the page stays responsive. snapJob cancels a stale
-    // run. Only the SNAP_NEAREST candidates nearest each handle get checked (a heavily
-    // truncated design can have thousands), and the selected handle's go first, since its
-    // marks are the ones showing.
+    // run. The SNAP_NEAREST candidates nearest each handle are checked first (a heavily
+    // truncated design can have thousands), the selected handle's before the others', since its
+    // marks are the ones showing; then all the rest, so no mark is missing however far from its
+    // handle (only the nearest were ever checked, and a ruler's far marks never showed).
     let snapping = true, snaps = [], snapJob = 0;
     let loadFrame = 0; // (a dragged handle's rebuild, waiting for the next frame: see loadSoon)
     let rulerDragging = false; // (a handle's being dragged: its ruler isn't rebuilt under it)
@@ -1513,8 +1514,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const kept = (r, i) => keep && keep[0] === r && keep[1] === i;
       snaps = RULERS.map((R, r) => R.values().map((_, i) => (kept(r, i) ? (snaps[r] && snaps[r][i]) || [] : [])));
       showSnaps();
-      // (work: [ruler, handle, a depth to check, or null for a truncation's regular faces])
-      const work = [];
+      // (work: [ruler, handle, a depth to check, or null for a truncation's regular faces, or a
+      // hyperbolic handle's count changes]; later: the candidates past each handle's nearest)
+      const work = [], later = [];
       RULERS.forEach((R, r) => R.values().forEach((v, i) => {
         if (kept(r, i)) return;
         const t = R.target(i);
@@ -1537,11 +1539,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           return;
         }
         if (t.trim) work.push([r, i, null]);
-        const near = alignedDepthCandidates(spec, t).sort((a, b) => Math.abs(a - R.depth(v)) - Math.abs(b - R.depth(v))).slice(0, SNAP_NEAREST);
-        for (const f of near) work.push([r, i, f]);
+        const all = alignedDepthCandidates(spec, t).sort((a, b) => Math.abs(a - R.depth(v)) - Math.abs(b - R.depth(v)));
+        for (const f of all.slice(0, SNAP_NEAREST)) work.push([r, i, f]);
+        for (const f of all.slice(SNAP_NEAREST)) later.push([r, i, f]);
       }));
       if (isCircleDesign()) showSnaps();
-      work.sort((a, b) => (b[0] === sel.r && b[1] === sel.i) - (a[0] === sel.r && a[1] === sel.i));
+      const selFirst = (a, b) => (b[0] === sel.r && b[1] === sel.i) - (a[0] === sel.r && a[1] === sel.i);
+      work.sort(selFirst);
+      work.push(...later.sort(selFirst));
       const step = () => {
         if (job !== snapJob || !work.length) return;
         if (work[0][2] && typeof work[0][2].next === "function") {
