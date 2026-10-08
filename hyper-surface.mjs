@@ -788,8 +788,11 @@ export function cutLayout(P, mesh, opts = {}) {
   if (!best) throw failed;
   return best;
 }
-function layHalves(P, mesh, loops, len, { top, outer: outerLoop }, { iterations = 2000, B = 1.8, holeScale = 2.5, untangling = {} }) {
-  const g = P.surface.genus, A = 1.4 + 1.3 * g, n = mesh.verts.length, T = mesh.tris.length;
+function layHalves(P, mesh, loops, len, { top, outer: outerLoop }, { iterations = 2000, untangling = {} }) {
+  // (the oval as long as the holes need, and as wide in proportion, and the holes' share of its
+  // length growing with how many: the same width for every number of holes, and the same share,
+  // left a long ribbon of small ones)
+  const g = P.surface.genus, A = 1.4 + 1.3 * g, B = 0.45 * A, holeScale = 1.25 * g, n = mesh.verts.length, T = mesh.tris.length;
   // each rim the way the top runs round it
   const next = new Map(), has = new Set();
   mesh.tris.forEach((t, i) => { if (top[i]) t.forEach((p, k) => has.add(`${p},${t[(k + 1) % 3]}`)); });
@@ -1106,7 +1109,9 @@ export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30,
   const shape = { A, B, circles, s: 1 }, { F } = pretzel(shape);
   let most = 0;
   for (let i = 0; i <= 200; i++) for (let j = 0; j <= 100; j++) most = Math.max(most, F(-A + (2 * A * i) / 200, -B + (2 * B * j) / 100)[0]);
-  shape.s = (thick * thick) / most;
+  // (thicker as the oval is wider, a little: in proportion, it swells over the holes)
+  const t = thick * Math.sqrt(Math.max(1, B / 1.8));
+  shape.s = (t * t) / most;
   const { out, project } = pretzel(shape);
   // ---- the start: each vertex up or down by the surface's height where it is
   const side = new Int8Array(n), onRim = new Set(rims.flat()), x = new Float64Array(3 * n);
