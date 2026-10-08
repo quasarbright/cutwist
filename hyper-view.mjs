@@ -19,6 +19,14 @@ const BLACK = "#1c1f27";
 const MIN_PX = 5; // (tiles smaller than this aren't drawn: the rim has thousands of them, slow to draw and too small to see)
 const PIECE_PX = 4; // (nor pieces on tiles smaller than this: just the tile's color)
 const abs = (z) => Math.hypot(z[0], z[1]);
+// the circle through three points ({ c, r }), or null if they're in a line
+function circleThrough(a, b, c) {
+  const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+  if (Math.abs(d) < 1e-12) return null;
+  const A = a[0] ** 2 + a[1] ** 2, B = b[0] ** 2 + b[1] ** 2, C = c[0] ** 2 + c[1] ** 2;
+  const x = (A * (b[1] - c[1]) + B * (c[1] - a[1]) + C * (a[1] - b[1])) / d, y = (A * (c[0] - b[0]) + B * (a[0] - c[0]) + C * (b[0] - a[0])) / d;
+  return { c: [x, y], r: Math.hypot(a[0] - x, a[1] - y) };
+}
 
 // The surface's tile colors, from a real twisty puzzle's palette (up to 12, 20, 30; past that hues
 // by the golden angle), each tile the one least like its neighbors' (tiles sharing an edge)
@@ -141,16 +149,48 @@ export class HyperView {
   recenter() { this.start = { m: Mb.I, e: 0 }; this.visible = null; }
   // One tile's picture, for the 3D view's texture: element e's dart at the middle of this (square,
   // offscreen) canvas, the tile out to its corners filling it, and just the tiles big enough to
-  // reach into it. Returns px per disk unit (a point p of e's frame is at the middle + p·that).
+  // reach into it. Just the colors: the 3D view draws the lines itself (see tileLines). Returns px
+  // per disk unit (a point p of e's frame is at the middle + p·that).
   drawTileAt(P, e, state, turn, look) {
+    this.atTile(P, e, 6);
+    this.bare = true;
+    this.draw(state, turn, look);
+    return this.R;
+  }
+  atTile(P, e, fraction) {
     const size = this.canvas.width;
     this.layout(P, { left: 0, top: 0, right: size, bottom: size });
     this.origin = { x: 0, y: 0 };
     this.R = size / 2 / abs(P.G.corners[0]);
-    this.minPx = size / 6;
+    this.minPx = size / fraction;
     this.start = { m: Mb.I, e }; this.visible = null;
-    this.draw(state, turn, look);
-    return this.R;
+  }
+  // The lines on element e's tile, in its dart's frame (the disk with that dart at the middle):
+  // every circle around every copy of a turning point that reaches the tile ({ c, r }: a circle in
+  // the disk), the tile's own edges (each a circle too), and every copy of a turning point near
+  // it ({ axis, at }), for turning the lines in a turning ring.
+  // (The tiles around too, and lines a way past the tile: a turning ring brings what's beside the
+  // tile into it.)
+  tileLines(P, e) {
+    this.atTile(P, e, 60);
+    // (as far as the tile's corners and the biggest ring's width past them: all a turn can bring in)
+    const { G } = P, ring = Math.max(0, ...["face", "vertex", "edge"].flatMap((k) => P.radii[k]));
+    // (near: reaching the tile itself, all a still picture needs; listed first)
+    const reach = Math.tanh((G.Rv + 2 * ring) / 2), within = (d) => ({ c, r }) => abs(c) - r < d && r - abs(c) < d;
+    const meets = within(reach), near = within(Math.tanh(G.Rv / 2) * 1.02);
+    const cuts = [], edges = [], copies = [];
+    for (const kind of ["face", "vertex", "edge"]) for (const { axis, at } of this.axisCopies(kind)) {
+      copies.push({ axis, at });
+      for (const r of P.radii[kind]) { const circle = diskCircle(at, r); if (meets(circle)) cuts.push(circle); }
+    }
+    // (each tile's edges: the circle through an edge's ends and middle, where the tile is)
+    for (const d of this.listVisible().tiles) for (let k = 0; k < G.N; k++) {
+      if (!this.firstSide(d.m, k)) continue;
+      const circle = circleThrough(...[G.corners[k], G.mids[k], G.corners[(k + 1) % G.N]].map((p) => Mb.apply(d.m, p)));
+      if (circle && meets(circle)) edges.push(circle);
+    }
+    const first = (list) => [...list.filter(near), ...list.filter((q) => !near(q))];
+    return { cuts: first(cuts), edges: first(edges), nearCuts: cuts.filter(near).length, nearEdges: edges.filter(near).length, copies };
   }
 
   // ---- hit testing (CSS px) ----
@@ -276,12 +316,12 @@ export class HyperView {
       this.disk(cx);
       this.paintTiles(cx);
       this.paint(cx, state, (i) => still(i) && !P.pieces[i].black, null, "fill");
-      this.tileEdges(cx);
+      if (!this.bare) this.tileEdges(cx);
       this.paint(cx, state, (i) => still(i) && P.pieces[i].black, null, "fill");
       if (steady) this.paint(cx, state, (i) => steady.has(i) && still(i), null, "light", look.litAlpha ?? 0.34);
       this.cache.key = key;
     }
-    if (!this.lines || this.lines.key !== place) {
+    if (!this.bare && (!this.lines || this.lines.key !== place)) {
       const cx = this.layer("lines");
       this.clipDisk(cx);
       this.circleLines(cx);
@@ -294,7 +334,8 @@ export class HyperView {
     ctx.save();
     this.clipDisk(ctx);
     const blit = (c) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, 0, 0); ctx.restore(); };
-    if (moving) {
+    if (moving && this.bare) this.paint(ctx, state, (i) => moving.has(i), turn, "fill");
+    else if (moving) {
       this.paint(ctx, state, (i) => moving.has(i), turn, "fill");
       this.paint(ctx, state, (i) => moving.has(i) && !P.pieces[i].black, turn, "edges");
       ctx.save(); this.ringPath(ctx, turn, true); ctx.clip("evenodd"); blit(this.lines.canvas); ctx.restore();
@@ -302,7 +343,7 @@ export class HyperView {
       this.paint(ctx, state, (i) => moving.has(i), turn, "cuts");
       this.innerRing(ctx, turn);
       ctx.restore();
-    } else blit(this.lines.canvas);
+    } else if (!this.bare) blit(this.lines.canvas);
     if (look.lit && !steady) this.paint(ctx, state, (i) => look.lit.has(i), turn, "light", look.litAlpha ?? 0.34);
     if (look.hover) this.drawRings(ctx, look.hover);
     if (look.pointer) this.drawPointers(ctx, look.pointer);
@@ -473,6 +514,8 @@ export class HyperView {
           for (const poly of shape.loops) this.trace(ctx, poly, m);
           if (mode === "light") { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = "#fff"; ctx.fill("evenodd"); ctx.restore(); continue; }
           ctx.fillStyle = pc.black ? BLACK : hyperColor(P, pc.faces[k]); ctx.fill("evenodd");
+          // (no lines over the joins, as for the 3D view's texture: each a little wider, so no hairline gap shows between)
+          if (this.bare) { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.stroke(); ctx.strokeStyle = BODY; }
         }
       });
     }

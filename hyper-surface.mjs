@@ -543,7 +543,7 @@ export function embedPlate(P, mesh, { thick = 0.55, round = 0.6, ...layout } = {
 // point lifted by the plate's profile (see height). The profile is worked out at every fine point,
 // so the rounded rims are as fine as the rest. Returns { pos (x y z per vertex), tris, tile (per
 // triangle), local (per triangle, its corners' points on that tile, in the disk, for painting) }.
-export function plateSurface(P, mesh, { levels = 2, smoothing = 8, thick = 0.55, round = 0.6, ...layout } = {}) {
+export function plateSurface(P, mesh, { levels = 2, smoothing = globalThis.SMOOTHING ?? 40, thick = 0.55, round = 0.6, ...layout } = {}) {
   const { xz: xz0, top: top0, rims, turned } = plateLayout(P, mesh, layout);
   if (turned) throw new Error(`${turned} triangles came out turned over`);
   const per = mesh.tris.length / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at));
@@ -578,7 +578,9 @@ export function plateSurface(P, mesh, { levels = 2, smoothing = 8, thick = 0.55,
       if (!made.has(k)) { made.set(k, xz.length / 2); xz.push((xz[2 * p] + xz[2 * q]) / 2, (xz[2 * p + 1] + xz[2 * q + 1]) / 2); }
       return made.get(k);
     };
-    const half = (u, w) => [(u[0] + w[0]) / 2, (u[1] + w[1]) / 2];
+    // (a new corner's point on its tile halfway along the hyperbolic line between, so a tile's edge
+    // stays on the curved edge painted on it: halfway in the disk, it zigzags across the painted one)
+    const half = (u, w) => along(u, w, 0.5);
     const next = [], nextTop = [], nextTile = [], nextLocal = [];
     tris.forEach(([a, b, c], i) => {
       const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a), [la, lb, lc] = local[i], lab = half(la, lb), lbc = half(lb, lc), lca = half(lc, la);
@@ -605,15 +607,32 @@ export function plateSurface(P, mesh, { levels = 2, smoothing = 8, thick = 0.55,
   // the profile: up (or down) by how far from the nearest rim, a quarter circle rounding over it
   const segs = cycles.flatMap((c) => c.map((v, k) => { const w = c[(k + 1) % c.length]; return [xz[2 * v], xz[2 * v + 1], xz[2 * w], xz[2 * w + 1]]; }));
   tris.forEach((t, i) => t.forEach((v) => { if (!onRim.has(v)) side[v] = top[i] ? 1 : -1; }));
+  let dist = new Float64Array(n);
   for (let v = 0; v < n; v++) {
+    if (!side[v]) continue;
     const x = xz[2 * v], z = xz[2 * v + 1];
     let d = Infinity;
-    if (side[v]) for (const [ax, az, bx, bz] of segs) {
+    for (const [ax, az, bx, bz] of segs) {
       const dx = bx - ax, dz = bz - az, s = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
       d = Math.min(d, Math.hypot(x - ax - s * dx, z - az - s * dz));
     }
-    const t = side[v] ? Math.min(1, d / round) : 0;
-    pos.set([x, side[v] * thick * Math.sqrt(1 - (1 - t) ** 2), z], 3 * v);
+    dist[v] = Math.min(d, round);
+  }
+  // (the distance evened out a little, the rims held at 0: it creases where the nearest stretch of
+  // rim changes, and more where the rim bends sharply, and the creases showed as dents)
+  for (let it = 0; it < 12; it++) {
+    const was = dist;
+    dist = Float64Array.from(was);
+    for (let v = 0; v < n; v++) {
+      if (!side[v]) continue;
+      let s = 0;
+      for (const w of nbrs[v]) s += was[w];
+      dist[v] = (was[v] + s / nbrs[v].size) / 2;
+    }
+  }
+  for (let v = 0; v < n; v++) {
+    const t = side[v] ? Math.min(1, dist[v] / round) : 0;
+    pos.set([xz[2 * v], side[v] * thick * Math.sqrt(1 - (1 - t) ** 2), xz[2 * v + 1]], 3 * v);
   }
   return { pos, tris, tile, local };
 }

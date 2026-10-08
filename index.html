@@ -2676,7 +2676,72 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // and its own square of the texture, where HyperView.drawTileAt paints it
     const hyperCell = document.createElement("canvas"), hyperCellView = new HyperView(hyperCell);
     const hyperMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.55, metalness: 0 });
+    // The lines aren't in the texture: stretched over the surface, more here than there, they came
+    // out thick and blurred in places and thin in others. The shader draws them, each a circle in
+    // the tile's disk (the circles and the tiles' edges: tileLines), as many screen px wide
+    // wherever it is: from how far the point is from each circle, in screen px by how fast the
+    // point's place in the disk changes across the screen. In a turning ring, the lines turned
+    // back with it (the point's place turned the other way about the ring's middle).
+    const hyperLines = {
+      uLines: { value: null }, uLineCount: { value: new Float32Array(64) }, uLineAll: { value: new Float32Array(64) }, uRings: { value: null }, uRingCount: { value: new Float32Array(64) },
+      uTurn: { value: 0 }, uTheta: { value: 0 }, uRingIn: { value: 0 }, uRingOut: { value: 0 }, uInk: { value: new THREE.Color(0x0a0b0e) },
+    };
+    let hyperCopies = []; // (per tile: every copy of a turning point near it, { axis, at })
+    hyperMat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, hyperLines);
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute vec2 aDisk;\nattribute float aTile;\nvarying vec2 vDisk;\nflat varying float vTile;")
+        .replace("#include <uv_vertex>", "#include <uv_vertex>\nvDisk = aDisk; vTile = aTile;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+          uniform highp sampler2D uLines; uniform highp sampler2D uRings;
+          uniform float uLineCount[64]; uniform float uLineAll[64]; uniform float uRingCount[64];
+          uniform float uTurn, uTheta, uRingIn, uRingOut; uniform vec3 uInk;
+          varying vec2 vDisk; flat varying float vTile;
+          vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+          vec2 cdiv(vec2 a, vec2 b) { return vec2(a.x * b.x + a.y * b.y, a.y * b.x - a.x * b.y) / dot(b, b); }
+          // (where a point in a turning ring was before the turn: moved so the ring's middle is at
+          // the disk's, turned back, moved back)
+          vec2 unturned(vec2 p, int t) {
+            if (uTurn < 0.5) return p;
+            int n = int(uRingCount[t]);
+            for (int k = 0; k < 32; k++) {
+              if (k >= n) break;
+              vec2 a = texelFetch(uRings, ivec2(k, t), 0).xy, ca = vec2(a.x, -a.y);
+              vec2 w = cdiv(p - a, vec2(1.0, 0.0) - cmul(ca, p));
+              float r = length(w);
+              if (r >= uRingIn && r < uRingOut) {
+                vec2 v = cmul(w, vec2(cos(uTheta), -sin(uTheta)));
+                return cdiv(v + a, vec2(1.0, 0.0) + cmul(ca, v));
+              }
+            }
+            return p;
+          }`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+          {
+            int t = int(vTile + 0.5);
+            vec2 q = unturned(vDisk, t), qx = dFdx(q), qy = dFdy(q);
+            int n = int(q == vDisk ? uLineCount[t] : uLineAll[t]); // (in a turning ring: the lines from past the tile too)
+            float ink = 0.0;
+            for (int i = 0; i < 1024; i++) {
+              if (i >= n) break;
+              vec4 L = texelFetch(uLines, ivec2(i, t), 0);
+              vec2 d = q - L.xy;
+              float l = max(length(d), 1e-9);
+              vec2 u = d / l;
+              float px = abs(l - L.z) / max(length(vec2(dot(u, qx), dot(u, qy))), 1e-9);
+              float w = L.w > 0.5 ? 0.5 : 1.0; // (a tile's edge, a circle: half their widths, px)
+              ink = max(ink, 1.0 - smoothstep(w - 0.5, w + 0.6, px));
+            }
+            diffuseColor.rgb = mix(diffuseColor.rgb, uInk, 0.92 * ink);
+          }`);
+    };
     let hyperAtlas = null; // { cols, size }
+    const floatTexture = (data, w, h) => {
+      const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.FloatType);
+      t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+      return t;
+    };
     function buildHyperSurface() {
       const shape = hyperShape(), T = shape.mesh.tiles.length;
       const { pos, tris, tile, local } = shape.surface;
@@ -2692,7 +2757,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (sized like the torus: its long way across about as wide)
       let reach = 0;
       for (let v = 0; v < pos.length; v += 3) reach = Math.max(reach, Math.abs(pos[v]), Math.abs(pos[v + 2]));
-      const k = 1.35 / reach, p = [], n = [], uv = [], idx = [], own = new Map();
+      const k = 1.35 / reach, p = [], n = [], uv = [], disk = [], tileOf = [], idx = [], own = new Map();
       // (each tile its own copy of each of its vertices: the same point, its own place in the texture)
       tris.forEach((t, i) => t.forEach((v, c) => {
         const key = tile[i] * pos.length + v;
@@ -2702,6 +2767,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           p.push(k * pos[3 * v], k * pos[3 * v + 1], k * pos[3 * v + 2]);
           n.push(normals[3 * v], normals[3 * v + 1], normals[3 * v + 2]);
           uv.push((cx + x * scale) / texCanvas.width, 1 - (cy - y * scale) / texCanvas.height); // (the canvas's top row is the texture's top)
+          disk.push(x, y); tileOf.push(tile[i]);
         }
         idx.push(own.get(key));
       }));
@@ -2709,7 +2775,25 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       geo.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
       geo.setAttribute("normal", new THREE.Float32BufferAttribute(n, 3));
       geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      geo.setAttribute("aDisk", new THREE.Float32BufferAttribute(disk, 2));
+      geo.setAttribute("aTile", new THREE.Float32BufferAttribute(tileOf, 1));
       geo.setIndex(idx);
+      // the lines, a row of circles per tile ({ c, r } and 1 for a tile's edge): a float texture
+      const lines = P.H.coset.face.reps.map((e) => hyperCellView.tileLines(P, e));
+      hyperCopies = lines.map((l) => l.copies);
+      const width = Math.min(1024, Math.max(1, ...lines.map((l) => l.cuts.length + l.edges.length))), data = new Float32Array(width * T * 4);
+      // (the ones reaching the tile first, then the rest, which only a turning ring needs)
+      lines.forEach(({ cuts, edges, nearCuts, nearEdges }, t) => {
+        const all = [...cuts.slice(0, nearCuts).map((q) => [q, 0]), ...edges.slice(0, nearEdges).map((q) => [q, 1]),
+          ...cuts.slice(nearCuts).map((q) => [q, 0]), ...edges.slice(nearEdges).map((q) => [q, 1])].slice(0, width);
+        all.forEach(([{ c, r }, edge], i) => data.set([c[0], c[1], r, edge], 4 * (t * width + i)));
+        hyperLines.uLineCount.value[t] = Math.min(all.length, nearCuts + nearEdges);
+        hyperLines.uLineAll.value[t] = all.length;
+      });
+      hyperLines.uLines.value?.dispose();
+      hyperLines.uLines.value = floatTexture(data, width, T);
+      hyperLines.uRings.value ??= floatTexture(new Float32Array(32 * 64 * 4), 32, 64);
+      hyperLines.uRings.value.userData.key = null; // (a new surface, new copies)
       if (surfaceTexture) surfaceTexture.dispose();
       surfaceTexture = new THREE.CanvasTexture(texCanvas);
       surfaceTexture.colorSpace = THREE.SRGBColorSpace;
@@ -2722,13 +2806,34 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     // the texture: every tile painted again when the state, the turn or what's lit changes
     function hyperSurfaceTexture(turn, look) {
+      // (the lines' turn: the ring, its middles near each tile, how far round)
+      const u = hyperLines;
+      u.uTurn.value = turn && turn.theta ? 1 : 0;
+      if (turn) {
+        const radii = P.axes[turn.axis].radii, ringKey = `${turn.axis}`;
+        u.uTheta.value = turn.theta;
+        u.uRingOut.value = Math.tanh(radii[turn.layer] / 2);
+        u.uRingIn.value = turn.layer ? Math.tanh(radii[turn.layer - 1] / 2) : 0;
+        if (u.uRings.value.userData.key !== ringKey) {
+          const data = u.uRings.value.image.data;
+          data.fill(0);
+          hyperCopies.forEach((copies, t) => {
+            // (the nearest: the ones whose ring can reach the tile)
+            const mine = copies.filter((c) => c.axis === turn.axis).sort((a, b) => Math.hypot(...a.at) - Math.hypot(...b.at)).slice(0, 32);
+            mine.forEach(({ at }, k) => data.set([at[0], at[1], 0, 0], 4 * (t * 32 + k)));
+            u.uRingCount.value[t] = mine.length;
+          });
+          u.uRings.value.userData.key = ringKey;
+          u.uRings.value.needsUpdate = true;
+        }
+      }
       const key = [state.join(), turn ? `${turn.axis}:${turn.layer}:${turn.theta.toFixed(4)}` : "", look.hover ? `${look.hover.axis}:${look.hover.layer}` : "",
         look.lit ? [...look.lit].join(".") + ":" + (look.litAlpha ?? 0).toFixed(2) : ""].join("|");
       if (key === texKey) return;
       texKey = key;
       const ctx = texCanvas.getContext("2d"), { cols, size } = hyperAtlas;
       P.H.coset.face.reps.forEach((e, t) => {
-        hyperCellView.drawTileAt(P, e, state, turn, { ...look, pointer: null });
+        hyperCellView.drawTileAt(P, e, state, turn, { ...look, pointer: null, hover: null }); // (the turning ring's white outline, stretched, read as a seam)
         ctx.drawImage(hyperCell, (t % cols) * size, Math.floor(t / cols) * size);
       });
       surfaceTexture.needsUpdate = true;
