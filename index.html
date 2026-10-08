@@ -801,6 +801,7 @@
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
+    import { surfaceMesh as hyperSurfaceMesh, embedPlate } from "./hyper-surface.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1198,10 +1199,25 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // share a layout: a flat view and a 3D surface (isFlat).
     const isPlanar = () => !!P && P.kind === "planar";
     const isTiles = () => !!P && P.kind === "tiles";
-    // (a hyperbolic tile puzzle, hyper.mjs: drawn in the Poincaré disk, with no 3D view)
+    // (a hyperbolic tile puzzle, hyper.mjs: drawn in the Poincaré disk; in 3D too when it's a
+    // two-holed surface, once that's laid out: see hyperShape)
     const isHyper = () => !!P && P.kind === "hyper";
     function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles" || P.kind === "hyper"); } // (hoisted: the camera asks before this line runs)
-    const has3D = () => !isHyper();
+    const has3D = () => !isHyper() || !!hyperShape(false);
+    // A two-holed hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel): its mesh and
+    // where each vertex is, or null (another genus, or it came out folded). Laid out once per
+    // surface, which takes a second or so; `make` false only asks (undefined: not laid out yet).
+    function hyperShape(make = true) {
+      if (!isHyper() || P.surface.genus !== 2) return null;
+      const cache = (hyperShape.cache ||= new Map()), key = `${P.N}-${P.M}-${P.spec.surface | 0}`;
+      if (!cache.has(key)) {
+        if (!make) return undefined;
+        let shape = null;
+        try { const mesh = hyperSurfaceMesh(P); shape = { mesh, pos: embedPlate(P, mesh) }; } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
+        cache.set(key, shape);
+      }
+      return cache.get(key);
+    }
     const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : isTiles() ? applyTileMove(P, s, m) : isHyper() ? applyHyperMove(P, s, m) : applyMove(P, s, m));
     const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : isTiles() ? inverseTileMove(P, m) : isHyper() ? inverseHyperMove(P, m) : inverseMove(P, m));
     const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isTiles() ? isTileSolved(P, s) : isHyper() ? isHyperSolved(P, s) : isSolved(P, s));
@@ -1985,6 +2001,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
 
     // resetView: point the camera at the new solid's corner (on switching puzzles, not sizes)
     let puzzleName = ""; // the full title, numbers and all ("3×3×3 cube"): the test hook reports it
+    // Which views show: a sliding or tile-turning puzzle draws flat on its own 2D canvas, and the
+    // 3D scene shows just its surface (with resetView, turned to its starting view)
+    function showViews(resetView) {
+      $("c").hidden = isFlat() && (!view3D || !has3D());
+      $("plane").hidden = !isFlat() || (!viewFlat && has3D());
+      $("planarViews").hidden = !isFlat() || !has3D(); // (most hyperbolic surfaces have no 3D view to switch to)
+      surfaceGroup.visible = isFlat() && has3D();
+      if (isFlat() && has3D()) {
+        edgeHints = null;
+        buildSurface();
+        if (resetView) root.quaternion.copy(surfaceView());
+      }
+    }
     function load(resetView = true) {
       let spec = currentSpec();
       if (spec.rule === "tiles") { // (too few tiles for a circle to fit: a preset grows to the nearest size that fits)
@@ -2017,23 +2046,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       anim = null; queue = []; scrambled = false; scrambledState = null;
       history.reset(); renderAlgorithms(); // algorithms belong to this puzzle
       timer.clear(); renderTimer();
-      // a sliding or tile-turning puzzle draws flat on its own 2D canvas, and the 3D scene
-      // shows just its surface
-      $("c").hidden = isFlat() && (!view3D || !has3D());
-      $("plane").hidden = !isFlat() || (!viewFlat && has3D());
       $("planarControls").hidden = !isPlanar(); // (labels, a picture: the sliding grids')
-      $("planarViews").hidden = !isFlat() || !has3D(); // (the hyperbolic disk has no 3D view to switch to)
       document.body.classList.toggle("nx-planar", isFlat()); // (the view options)
       $("refPlane").hidden = !isFlat();
       if (puzzleGroup) puzzleGroup.visible = !isFlat();
-      surfaceGroup.visible = isFlat() && has3D();
       tileHover = null; tdrag = null; tilePointer = null; hpan = null;
       if (isHyper() && resetView) hyperView.recenter();
-      if (isFlat() && has3D()) {
-        edgeHints = null;
-        buildSurface();
-        if (resetView) root.quaternion.copy(surfaceView());
-      }
+      showViews(resetView);
       renderShapeChoice();
       planeBox = "";
       placeCamera();
@@ -2335,6 +2354,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (pointers.size > 2) return;
       aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
+      if (isHyper()) { drag = { mode: "orbit", x: e.clientX, y: e.clientY }; return; } // (the hyperbolic surface in 3D: turns are made on the disk)
       if (isTiles()) {
         // the 3D torus: press a circle to drag it round, click a tile's middle to turn it;
         // anywhere else (or shift) turns the view
@@ -2389,6 +2409,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (!pointers.size) aimAt(e.clientX, e.clientY); // (hovering; never mid-drag)
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
         if (isTiles()) { hoverTiles3D(e.clientX, e.clientY); return; }
+        if (isHyper()) return;
         // no button down: while blacking out, light up the kind of piece under the pointer
         if (painting && isCustom()) {
           const hit = pick(e.clientX, e.clientY);
@@ -2524,12 +2545,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function viewRegions() {
       planeView.showArrows = !phone.matches; // (on a phone, no arrow buttons: the grid gets their room)
       const r = safeRect(), w = r.right - r.left, h = r.bottom - r.top;
-      if (!has3D()) return { flat: r, surface: null }; // (the hyperbolic disk: no 3D view)
+      if (!has3D()) return { flat: r, surface: null }; // (a hyperbolic disk with no 3D view: all but the two-holed surfaces)
       if (!(viewFlat && view3D)) return { flat: viewFlat ? r : null, surface: view3D ? r : null };
       if (w >= h && !phone.matches) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
       // (stacked: the grid gets the height its width calls for, up to 65%; the surface, wider
       // than it is tall, the rest)
-      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, (isTiles() ? tileView : planeView).heightFor(P, w)));
+      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, (isHyper() ? hyperView : isTiles() ? tileView : planeView).heightFor(P, w)));
       return { flat: { ...r, bottom: m }, surface: { ...r, top: m } };
     }
     function cameraRegion() { return isFlat() && view3D && has3D() ? viewRegions().surface : null; }
@@ -2648,8 +2669,68 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const solvedCanvas = document.createElement("canvas"), solvedView = new PlanarView(solvedCanvas);
     let solvedTexture = null, solvedKey = "";
     const solvedMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.5, metalness: 0 });
+    // The two-holed hyperbolic surface: hyperShape's mesh, each tile with its own copies of its
+    // vertices (their normals from the shared ones, so it shades smooth across the tiles' edges)
+    // and its own square of the texture, where HyperView.drawTileAt paints it
+    const hyperCell = document.createElement("canvas"), hyperCellView = new HyperView(hyperCell);
+    const hyperMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.55, metalness: 0 });
+    let hyperAtlas = null; // { cols, size }
+    function buildHyperSurface() {
+      const { mesh, pos } = hyperShape(), T = mesh.tiles.length, per = mesh.tris.length / T;
+      const shared = new THREE.BufferGeometry();
+      shared.setAttribute("position", new THREE.BufferAttribute(Float32Array.from(pos), 3));
+      shared.setIndex(mesh.tris.flat()); shared.computeVertexNormals();
+      const normals = shared.getAttribute("normal").array;
+      shared.dispose();
+      const cols = Math.ceil(Math.sqrt(T)), rows = Math.ceil(T / cols), size = Math.min(512, Math.floor(Math.min(4096, renderer.capabilities.maxTextureSize) / Math.max(cols, rows)));
+      texCanvas.width = cols * size; texCanvas.height = rows * size;
+      hyperCell.width = hyperCell.height = size;
+      const scale = size / 2 / Math.hypot(...P.G.corners[0]); // (drawTileAt's px per disk unit)
+      // (sized like the torus: its long way across about as wide)
+      let reach = 0;
+      for (let v = 0; v < pos.length; v += 3) reach = Math.max(reach, Math.abs(pos[v]), Math.abs(pos[v + 2]));
+      const k = 1.35 / reach, p = [], n = [], uv = [], idx = [];
+      mesh.tiles.forEach(({ at }, t) => {
+        const own = new Map(), cx = (t % cols) * size + size / 2, cy = Math.floor(t / cols) * size + size / 2;
+        for (const [v, [x, y]] of at) {
+          own.set(v, p.length / 3);
+          p.push(k * pos[3 * v], k * pos[3 * v + 1], k * pos[3 * v + 2]);
+          n.push(normals[3 * v], normals[3 * v + 1], normals[3 * v + 2]);
+          uv.push((cx + x * scale) / texCanvas.width, 1 - (cy - y * scale) / texCanvas.height); // (the canvas's top row is the texture's top)
+        }
+        for (let i = t * per; i < (t + 1) * per; i++) idx.push(...mesh.tris[i].map((v) => own.get(v)));
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(n, 3));
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      if (surfaceTexture) surfaceTexture.dispose();
+      surfaceTexture = new THREE.CanvasTexture(texCanvas);
+      surfaceTexture.colorSpace = THREE.SRGBColorSpace;
+      surfaceTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      hyperMat.map = surfaceTexture; hyperMat.needsUpdate = true;
+      hyperAtlas = { cols, size };
+      texKey = "";
+      surfaceMesh = new THREE.Mesh(geo, hyperMat);
+      surfaceGroup.add(surfaceMesh);
+    }
+    // the texture: every tile painted again when the state, the turn or what's lit changes
+    function hyperSurfaceTexture(turn, look) {
+      const key = [state.join(), turn ? `${turn.axis}:${turn.layer}:${turn.theta.toFixed(4)}` : "", look.hover ? `${look.hover.axis}:${look.hover.layer}` : "",
+        look.lit ? [...look.lit].join(".") + ":" + (look.litAlpha ?? 0).toFixed(2) : ""].join("|");
+      if (key === texKey) return;
+      texKey = key;
+      const ctx = texCanvas.getContext("2d"), { cols, size } = hyperAtlas;
+      P.H.coset.face.reps.forEach((e, t) => {
+        hyperCellView.drawTileAt(P, e, state, turn, { ...look, pointer: null });
+        ctx.drawImage(hyperCell, (t % cols) * size, Math.floor(t / cols) * size);
+      });
+      surfaceTexture.needsUpdate = true;
+    }
     function buildSurface() {
-      if (surfaceMesh) { surfaceGroup.remove(surfaceMesh); surfaceMesh.geometry.dispose(); }
+      if (surfaceMesh) { surfaceGroup.remove(surfaceMesh); surfaceMesh.geometry.dispose(); surfaceMesh = null; }
+      if (isHyper()) { buildHyperSurface(); return; }
       const [cols, rows] = isTiles() ? [Math.ceil(Math.sqrt(P.tiles.length) * 2), Math.ceil(Math.sqrt(P.tiles.length) * 2)] : [P.W, P.H]; // (whole numbers: the grid's steps)
       const nu = Math.min(400, Math.max(120, cols * 16)), nv = Math.min(400, Math.max(120, rows * 16));
       const pos = new Float32Array((nu + 1) * (nv + 1) * 3), uv = new Float32Array((nu + 1) * (nv + 1) * 2), idx = [];
@@ -2682,7 +2763,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (isTiles()) t.wrapS = t.wrapT = THREE.RepeatWrapping; // (the turn shader reads across the edges)
         return t;
       };
-      if (surfaceTexture) { surfaceTexture.dispose(); solvedTexture.dispose(); } // (a new size needs new textures)
+      if (surfaceTexture) { surfaceTexture.dispose(); solvedTexture?.dispose(); } // (a new size needs new textures)
       surfaceTexture = texture(texCanvas);
       solvedTexture = texture(solvedCanvas);
       const mat = isTiles() ? tileMat : surfaceMat;
@@ -2710,7 +2791,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // Boy's surface seen straight down its axis of threefold symmetry: the dome over the
       // triple point, with the three lobes curling around it; the figure 8 from above its
       // ring; the Roman surface turned so its lobes and pinches show)
-      const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0], klein8: [0.6, 0], roman: [0.55, 0.8] }[shapeId()];
+      const tilt = isHyper() ? [0.7, 0] : { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0], klein8: [0.6, 0], roman: [0.55, 0.8] }[shapeId()];
       return new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
     }
     // Which shape a planar puzzle's surface is drawn as (SURFACE_SHAPES: the Klein bottle as a
@@ -2740,7 +2821,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }));
     }
     function renderSurface(region, slide, look) {
-      if (isTiles()) tileSurface(slide, look);
+      if (isHyper()) hyperSurfaceTexture(slide, look);
+      else if (isTiles()) tileSurface(slide, look);
       else {
         const hints = slide ? null : edgeHints; // (none while a line moves)
         const key = state.join(",") + "|" + [look.labels, look.reflectLabels, look.textures, look.picture ? look.picture.img.src : ""].join()
@@ -2769,7 +2851,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       lightFor(camera);
       renderer.setScissorTest(false);
-      if (!isTiles()) renderSolvedSurface(look); // (a tile puzzle's card is always flat: see drawTiles)
+      if (isPlanar()) renderSolvedSurface(look); // (a tile puzzle's card is always flat: see drawTiles, drawHyper)
     }
     // The corner card, with the 3D view on: the solved surface, turned the same way as the
     // main view, drawn into the card's square with the card's camera (like the 3D puzzles').
@@ -2999,16 +3081,27 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       anim.theta = tdrag.theta;
     }
     function drawHyper() {
+      // (a two-holed surface: laid out in 3D just after the disk first shows, then its 3D view on)
+      if (hyperShape(false) === undefined && !hyperShape.waiting) {
+        hyperShape.waiting = setTimeout(() => {
+          hyperShape.waiting = null;
+          if (!isHyper() || !hyperShape()) return;
+          showViews(true); planeBox = ""; placeCamera();
+        }, 50);
+      }
       const reg = viewRegions();
-      plane.hidden = false;
-      canvas.hidden = true;
       const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta, axis: anim.axis, layer: anim.layer } : null;
       // (lit: blacking out, the kind of piece under the pointer; otherwise an algorithm's pieces)
       const lit = hoverType !== null ? new Set(P.pieces.flatMap((pc, i) => (pc.type === hoverType ? [i] : []))) : algLit;
       const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit, litAlpha: hoverType !== null ? 0.34 : litPulse(), litSteady: hoverType !== null, pointer: tilePointer };
-      placePlane(reg.flat);
-      hyperView.layout(P, reg.flat);
-      hyperView.draw(state, turn, look);
+      plane.hidden = !reg.flat;
+      canvas.hidden = !reg.surface;
+      if (reg.flat) {
+        placePlane(reg.flat);
+        hyperView.layout(P, reg.flat);
+        hyperView.draw(state, turn, look);
+      }
+      if (reg.surface && surfaceMesh) renderSurface(reg.surface, turn, look);
       placeSplit();
       const card = $("refPlane"), dpr = pixelRatio();
       card.hidden = false;
@@ -3342,6 +3435,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (!viewFlat) q.set("flat", "off");
         if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off");
         if (textureChoice !== null && textureChoice !== P.faces.length >= TEXTURE_MIN_FACES) q.set("textures", textureChoice ? "on" : "off");
+      } else if (isHyper()) {
+        if (!viewFlat) q.set("flat", "off");
+        if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off");
       } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
@@ -4482,7 +4578,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
             ? { hyper: true, N: P.N, M: P.M, surface: P.spec.surface | 0, tiles: P.tiles, genus: P.surface.genus, pieces: P.n,
                 axes: P.axes.map((a) => ({ kind: a.kind, order: a.order, layers: a.radii.length })),
                 kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}), hover: tileHover && tileHover.axis,
-                sizes: hyperSurfaces(hyperFileFor(P.spec)).map((s) => s.tiles), panned: hyperView.start ? hyperView.start.e !== 0 || Math.hypot(...mobius.apply(hyperView.start.m, [0, 0])) > 1e-6 : false }
+                sizes: hyperSurfaces(hyperFileFor(P.spec)).map((s) => s.tiles), panned: hyperView.start ? hyperView.start.e !== 0 || Math.hypot(...mobius.apply(hyperView.start.m, [0, 0])) > 1e-6 : false,
+                surface3D: has3D(), views: { flat: viewFlat, surface: view3D } }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,

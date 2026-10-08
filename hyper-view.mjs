@@ -95,6 +95,7 @@ export class HyperView {
     this.origin = { x: 0, y: 0 };
     this.start = null; // the view's start dart: { m (cover → disk), e }
     this.cache = null;
+    this.minPx = MIN_PX; // (tiles smaller than this, in px across, aren't drawn)
   }
   heightFor(P, w) { return w; }
   layout(P, safe) {
@@ -117,7 +118,7 @@ export class HyperView {
   listVisible() {
     if (this.visible && this.visible.key === this.viewKey()) return this.visible;
     const { P } = this, { G, H } = P;
-    const big = (c, d) => { const s = abs(Mb.apply(d.m, G.corners[0]) .map((x, i) => x - c[i])); return s * this.R > MIN_PX || abs(c) < 0.2; };
+    const big = (c, d) => { const s = abs(Mb.apply(d.m, G.corners[0]) .map((x, i) => x - c[i])); return s * this.R > this.minPx || abs(c) < 0.2; };
     let tiles = darts(G, H, this.start, big);
     // (re-center: the tile nearest the middle becomes the start)
     const nearest = tiles.reduce((b, d) => (abs(Mb.apply(d.m, [0, 0])) < abs(Mb.apply(b.m, [0, 0])) ? d : b), tiles[0]);
@@ -138,6 +139,19 @@ export class HyperView {
     this.visible = null;
   }
   recenter() { this.start = { m: Mb.I, e: 0 }; this.visible = null; }
+  // One tile's picture, for the 3D view's texture: element e's dart at the middle of this (square,
+  // offscreen) canvas, the tile out to its corners filling it, and just the tiles big enough to
+  // reach into it. Returns px per disk unit (a point p of e's frame is at the middle + p·that).
+  drawTileAt(P, e, state, turn, look) {
+    const size = this.canvas.width;
+    this.layout(P, { left: 0, top: 0, right: size, bottom: size });
+    this.origin = { x: 0, y: 0 };
+    this.R = size / 2 / abs(P.G.corners[0]);
+    this.minPx = size / 6;
+    this.start = { m: Mb.I, e }; this.visible = null;
+    this.draw(state, turn, look);
+    return this.R;
+  }
 
   // ---- hit testing (CSS px) ----
   // every visible copy of each axis point: { axis (index), at (disk) }, for one kind

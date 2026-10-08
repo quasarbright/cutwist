@@ -212,24 +212,27 @@ function untangle(tris, ref, xz, free, { lambda = 1, rounds = 40, steps = 200 } 
   const dot = (p, q) => { let s = 0; for (let j = 0; j < p.length; j++) s += p[j] * q[j]; return s; };
   const axpy = (p, a, q) => { for (let j = 0; j < p.length; j++) p[j] += a * q[j]; };
   // L-BFGS (a few pairs) with a backtracking line search
+  const L = xz.length, X2 = new Float64Array(L), d = new Float64Array(L);
   const lbfgs = (eps) => {
-    const g = new Float64Array(xz.length), g2 = new Float64Array(xz.length), S = [], Y = [], mem = 8;
+    const g = new Float64Array(L), g2 = new Float64Array(L), S = [], Y = [], mem = 8;
     let E = energy(xz, eps, g);
     for (let it = 0; it < steps; it++) {
-      const d = Float64Array.from(g, (x) => -x), al = [];
+      const al = [];
+      for (let j = 0; j < L; j++) d[j] = -g[j];
       for (let j = S.length - 1; j >= 0; j--) { const a = dot(S[j], d) / dot(Y[j], S[j]); al[j] = a; axpy(d, -a, Y[j]); }
       if (S.length) { const y = Y.at(-1), s = S.at(-1), gam = dot(s, y) / dot(y, y); for (let j = 0; j < d.length; j++) d[j] *= gam; }
       for (let j = 0; j < S.length; j++) { const b = dot(Y[j], d) / dot(Y[j], S[j]); axpy(d, al[j] - b, S[j]); }
       let slope = dot(g, d);
       if (slope >= 0) { for (let j = 0; j < d.length; j++) d[j] = -g[j]; slope = dot(g, d); S.length = Y.length = 0; }
-      let t = 1, E2, X2;
+      let t = 1, E2;
       for (let tries = 0; tries < 30; tries++, t /= 2) {
-        X2 = Float64Array.from(xz); axpy(X2, t, d);
+        for (let j = 0; j < L; j++) X2[j] = xz[j] + t * d[j];
         E2 = energy(X2, eps, g2);
         if (E2 <= E + 1e-4 * t * slope) break;
       }
       if (!(E2 < E)) break;
-      const s = Float64Array.from(X2, (x, j) => x - xz[j]), y = Float64Array.from(g2, (x, j) => x - g[j]);
+      const s = new Float64Array(L), y = new Float64Array(L);
+      for (let j = 0; j < L; j++) { s[j] = X2[j] - xz[j]; y[j] = g2[j] - g[j]; }
       if (dot(s, y) > 1e-12) { S.push(s); Y.push(y); if (S.length > mem) { S.shift(); Y.shift(); } }
       xz.set(X2); g.set(g2);
       const done = E - E2 < 1e-9 * Math.abs(E);
@@ -486,10 +489,19 @@ export function plateLayout(P, mesh, { iterations = 2000, A = 4, B = 1.8, holeSc
     }
   });
   const inside = [...topVerts].filter((v) => !pinned[v]);
-  for (let it = 0; it < iterations; it++) for (const v of inside) {
-    let x = 0, z = 0, sum = 0;
-    for (const w of nb.get(v)) { const k = weight.get(`${v},${w}`); x += k * xz[2 * w]; z += k * xz[2 * w + 1]; sum += k; }
-    xz[2 * v] += 1.8 * (x / sum - xz[2 * v]); xz[2 * v + 1] += 1.8 * (z / sum - xz[2 * v + 1]);
+  // (each inside vertex's neighbors and their shares of it, flat, for speed)
+  const start = new Int32Array(inside.length + 1), near = [], share = [];
+  inside.forEach((v, i) => {
+    const ws = [...nb.get(v)], ks = ws.map((w) => weight.get(`${v},${w}`)), sum = ks.reduce((a, b) => a + b);
+    ws.forEach((w, j) => { near.push(w); share.push(ks[j] / sum); });
+    start[i + 1] = near.length;
+  });
+  const nearA = Int32Array.from(near), shareA = Float64Array.from(share);
+  for (let it = 0; it < iterations; it++) for (let i = 0; i < inside.length; i++) {
+    const v = inside[i];
+    let x = 0, z = 0;
+    for (let j = start[i]; j < start[i + 1]; j++) { const w = nearA[j], k = shareA[j]; x += k * xz[2 * w]; z += k * xz[2 * w + 1]; }
+    xz[2 * v] += 1.8 * (x - xz[2 * v]); xz[2 * v + 1] += 1.8 * (z - xz[2 * v + 1]);
   }
   for (const v of topVerts) [xz[2 * v], xz[2 * v + 1]] = open([xz[2 * v], xz[2 * v + 1]], upperRim.has(v));
   // Opened, triangles crushed against the slits turn over, and the tiles near the holes come out
@@ -506,9 +518,10 @@ export function plateLayout(P, mesh, { iterations = 2000, A = 4, B = 1.8, holeSc
 
 // The surface in space as a pretzel (plateLayout's plate, thick): positions (Float64Array, x y z
 // per vertex; the plate in x and z, y up), the top up and the bottom down by how far each point is
-// from the nearest rim, rounding over at the rims.
+// from the nearest rim, rounding over at the rims. Throws if the layout has triangles turned over.
 export function embedPlate(P, mesh, { thick = 0.55, round = 0.6, ...layout } = {}) {
-  const { xz, top, rims } = plateLayout(P, mesh, layout), n = mesh.verts.length;
+  const { xz, top, rims, turned } = plateLayout(P, mesh, layout), n = mesh.verts.length;
+  if (turned) throw new Error(`${turned} triangles came out turned over`);
   const segs = rims.flatMap((run) => run.map((v, k) => { const w = run[(k + 1) % run.length]; return [xz[2 * v], xz[2 * v + 1], xz[2 * w], xz[2 * w + 1]]; }));
   const height = (x, z) => {
     let d = Infinity;

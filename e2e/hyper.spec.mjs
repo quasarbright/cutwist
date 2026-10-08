@@ -24,6 +24,40 @@ test("the Klein quartic opens from the shelf: 24 heptagons, a piece per tile, ed
   await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a tile's middle · drag elsewhere to slide");
 });
 
+test("the six octagons, a two-holed surface, show in 3D beside the disk too, and turns paint it", async ({ page }) => {
+  await open(page, "?puzzle=hyper-octagons&N=8&M=3&surface=0");
+  await settled(page);
+  // (laid out just after the disk first shows)
+  await expect.poll(async () => (await info(page)).surface3D, { timeout: 15_000 }).toBe(true);
+  expect((await info(page)).views).toEqual({ flat: true, surface: true });
+  await expect(page.locator("#plane")).toBeVisible();
+  await expect(page.locator("#c")).toBeVisible();
+  const box = await page.locator("#plane").boundingBox(), vw = page.viewportSize().width;
+  expect(box.x + box.width, "the disk on the left, the surface on the right").toBeLessThan(vw * 0.6);
+  const before = await page.locator("#c").screenshot();
+  await turn(page, [0, 0, 1]);
+  await page.waitForTimeout(100);
+  expect(Buffer.compare(before, await page.locator("#c").screenshot()), "the surface repainted").not.toBe(0);
+  await page.click(".nx-viewbtn");
+  await page.locator("#view3D").uncheck();
+  await expect(page.locator("#c")).toBeHidden();
+  await expect.poll(async () => (await page.locator("#plane").boundingBox()).width, { message: "the disk has the room to itself" }).toBeGreaterThan(box.width);
+});
+
+// (the stacked layout asked the sliding grid's view how tall the disk wants to be: NaN, a canvas 0 px high)
+test("on a phone, the 3D view goes under the disk, and the link keeps it on", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await open(page, "?puzzle=hyper-octagons&N=8&M=3&surface=0&3d=on");
+  await settled(page);
+  await expect.poll(async () => (await info(page)).surface3D, { timeout: 15_000 }).toBe(true);
+  expect((await info(page)).views).toEqual({ flat: true, surface: true });
+  await expect(page.locator("#c")).toBeVisible();
+  const disk = await page.locator("#plane").evaluate((c) => ({ w: c.width, h: c.height, box: c.getBoundingClientRect().height }));
+  expect(disk.h, "the disk's canvas has pixels").toBeGreaterThan(100);
+  expect(disk.box).toBeGreaterThan(100);
+  expect(page.url()).toContain("3d=on");
+});
+
 test("a link opens it straight away, with its numbers", async ({ page }) => {
   await open(page, "?puzzle=hyper-octagons&N=8&M=3&surface=1");
   const s = await settled(page);
