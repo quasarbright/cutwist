@@ -356,7 +356,7 @@
        looked like it had none. The negative of what's under them: light on the rail, dark on a
        handle) */
     .tw-marks { pointer-events: none; z-index: 1; mix-blend-mode: difference; } /* (on the layer: its z-index isolates what's inside it) */
-    .tw-marks span { position: absolute; top: 7px; width: 1px; height: 16px; background: #fff; opacity: .7; }
+    .tw-marks span { position: absolute; top: 7px; width: 1px; height: 16px; margin-left: -0.5px; background: #fff; opacity: .7; }
     .tw-marks .tw-zero { top: 5px; height: 20px; background: var(--faint); opacity: 1; }
     .tw-handle {
       position: absolute; top: 7px; width: 16px; height: 16px; margin-left: -8px; padding: 0;
@@ -801,7 +801,7 @@
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
-    import { surfaceMesh as hyperSurfaceMesh, embedPlate } from "./hyper-surface.mjs";
+    import { surfaceMesh as hyperSurfaceMesh, plateSurface } from "./hyper-surface.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1213,7 +1213,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (!cache.has(key)) {
         if (!make) return undefined;
         let shape = null;
-        try { const mesh = hyperSurfaceMesh(P); shape = { mesh, pos: embedPlate(P, mesh) }; } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
+        try { const mesh = hyperSurfaceMesh(P); shape = { mesh, surface: plateSurface(P, mesh) }; } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
         cache.set(key, shape);
       }
       return cache.get(key);
@@ -1662,8 +1662,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         }
         // (marks past the ruler's ends aren't reachable: the range can end before the snaps' search)
         const [lo, hi] = R.range;
+        // (not the one a snapped handle sits on: its ring already says so)
+        const on = sel.r === r && isSnapped(r, sel.i) ? values[sel.i] : null;
         if (snapping && sel.r === r)
-          for (const f of ((snaps[r] || [])[sel.i] || []).filter((f) => f >= lo && f <= hi)) {
+          for (const f of ((snaps[r] || [])[sel.i] || []).filter((f) => f >= lo && f <= hi && (on === null || Math.abs(f - on) > 1e-6 * (hi - lo)))) {
             const m = document.createElement("span");
             m.style.left = pctIn(R.range, f) + "%";
             el.marks.append(m);
@@ -2676,30 +2678,33 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const hyperMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.55, metalness: 0 });
     let hyperAtlas = null; // { cols, size }
     function buildHyperSurface() {
-      const { mesh, pos } = hyperShape(), T = mesh.tiles.length, per = mesh.tris.length / T;
+      const shape = hyperShape(), T = shape.mesh.tiles.length;
+      const { pos, tris, tile, local } = shape.surface;
       const shared = new THREE.BufferGeometry();
       shared.setAttribute("position", new THREE.BufferAttribute(Float32Array.from(pos), 3));
-      shared.setIndex(mesh.tris.flat()); shared.computeVertexNormals();
+      shared.setIndex(tris.flat()); shared.computeVertexNormals();
       const normals = shared.getAttribute("normal").array;
       shared.dispose();
-      const cols = Math.ceil(Math.sqrt(T)), rows = Math.ceil(T / cols), size = Math.min(512, Math.floor(Math.min(4096, renderer.capabilities.maxTextureSize) / Math.max(cols, rows)));
+      const cols = Math.ceil(Math.sqrt(T)), rows = Math.ceil(T / cols), size = Math.min(768, Math.floor(Math.min(4096, renderer.capabilities.maxTextureSize) / Math.max(cols, rows)));
       texCanvas.width = cols * size; texCanvas.height = rows * size;
       hyperCell.width = hyperCell.height = size;
       const scale = size / 2 / Math.hypot(...P.G.corners[0]); // (drawTileAt's px per disk unit)
       // (sized like the torus: its long way across about as wide)
       let reach = 0;
       for (let v = 0; v < pos.length; v += 3) reach = Math.max(reach, Math.abs(pos[v]), Math.abs(pos[v + 2]));
-      const k = 1.35 / reach, p = [], n = [], uv = [], idx = [];
-      mesh.tiles.forEach(({ at }, t) => {
-        const own = new Map(), cx = (t % cols) * size + size / 2, cy = Math.floor(t / cols) * size + size / 2;
-        for (const [v, [x, y]] of at) {
-          own.set(v, p.length / 3);
+      const k = 1.35 / reach, p = [], n = [], uv = [], idx = [], own = new Map();
+      // (each tile its own copy of each of its vertices: the same point, its own place in the texture)
+      tris.forEach((t, i) => t.forEach((v, c) => {
+        const key = tile[i] * pos.length + v;
+        if (!own.has(key)) {
+          const [x, y] = local[i][c], cx = (tile[i] % cols) * size + size / 2, cy = Math.floor(tile[i] / cols) * size + size / 2;
+          own.set(key, p.length / 3);
           p.push(k * pos[3 * v], k * pos[3 * v + 1], k * pos[3 * v + 2]);
           n.push(normals[3 * v], normals[3 * v + 1], normals[3 * v + 2]);
           uv.push((cx + x * scale) / texCanvas.width, 1 - (cy - y * scale) / texCanvas.height); // (the canvas's top row is the texture's top)
         }
-        for (let i = t * per; i < (t + 1) * per; i++) idx.push(...mesh.tris[i].map((v) => own.get(v)));
-      });
+        idx.push(own.get(key));
+      }));
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
       geo.setAttribute("normal", new THREE.Float32BufferAttribute(n, 3));

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildHyper } from "./hyper.mjs";
-import { surfaceMesh, plateLayout, embedPlate, eulerOf } from "./hyper-surface.mjs";
+import { surfaceMesh, plateLayout, plateSurface, embedPlate, eulerOf } from "./hyper-surface.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
 const build = (N, M, surface = 0) => buildHyper({ rule: "hyper", N, M, surface, cuts: [], blackout: [] }, file(N, M));
@@ -35,6 +35,15 @@ test("every two-holed surface lies flat with none turned over (but {6,6}'s two h
     const P = build(N, M);
     assert.equal(P.surface.genus, 2, `{${N},${M}}`);
     assert.equal(plateLayout(P, surfaceMesh(P)).turned, 0, `{${N},${M}}`);
+  }
+});
+
+test("the finer surface for drawing has nothing turned over either, and its rims sit at the middle height", () => {
+  for (const [N, M] of [[8, 3], [4, 6], [3, 8]]) {
+    const P = build(N, M), mesh = surfaceMesh(P), { pos, tris } = plateSurface(P, mesh), xz = Float64Array.from({ length: (2 * pos.length) / 3 }, (_, i) => pos[3 * (i >> 1) + (i & 1 ? 2 : 0)]);
+    const up = (t) => t.some((v) => pos[3 * v + 1] > 1e-9), signs = (side) => new Set(tris.filter((t) => up(t) === side).map((t) => Math.sign(turning(xz, t))));
+    assert.equal(signs(true).size, 1, `{${N},${M}}: the top's triangles all run round one way`);
+    assert.equal(signs(false).size, 1, `{${N},${M}}: and the bottom's`);
   }
 });
 

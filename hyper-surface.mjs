@@ -537,6 +537,87 @@ export function embedPlate(P, mesh, { thick = 0.55, round = 0.6, ...layout } = {
   return pos;
 }
 
+// The plate in space, finer, for drawing: plateLayout's flat layout with each triangle split in
+// four, `levels` times (each rim's new points on a smooth curve through its old ones, by the
+// four-point rule: 9/16 each of an edge's ends less 1/16 each of the next ones on), then every
+// point lifted by the plate's profile (see height). The profile is worked out at every fine point,
+// so the rounded rims are as fine as the rest. Returns { pos (x y z per vertex), tris, tile (per
+// triangle), local (per triangle, its corners' points on that tile, in the disk, for painting) }.
+export function plateSurface(P, mesh, { levels = 2, smoothing = 8, thick = 0.55, round = 0.6, ...layout } = {}) {
+  const { xz: xz0, top: top0, rims, turned } = plateLayout(P, mesh, layout);
+  if (turned) throw new Error(`${turned} triangles came out turned over`);
+  const per = mesh.tris.length / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at));
+  let xz = Array.from(xz0), tris = mesh.tris.map((t) => [...t]), top = Array.from(top0), cycles = rims.map((r) => [...r]);
+  let tile = tris.map((_, i) => Math.floor(i / per)), local = tris.map((t, i) => t.map((v) => at[tile[i]].get(v)));
+  const ek = (p, q) => (p < q ? `${p},${q}` : `${q},${p}`);
+  // (which way round a triangle on the top runs, laid flat; one on the bottom the other way)
+  const turning = ([a, b, c]) => (xz[2 * b] - xz[2 * a]) * (xz[2 * c + 1] - xz[2 * a + 1]) - (xz[2 * b + 1] - xz[2 * a + 1]) * (xz[2 * c] - xz[2 * a]);
+  const way = Math.sign(turning(tris[top.indexOf(1)]));
+  const fine = (i) => turning(tris[i]) * (top[i] ? way : -way) > 0;
+  // (a point moved only if none of its triangles turns over; else put back)
+  const tryMove = (v, x, z, around) => {
+    const was = [xz[2 * v], xz[2 * v + 1]];
+    xz[2 * v] = x; xz[2 * v + 1] = z;
+    if (around[v].every(fine)) return true;
+    [xz[2 * v], xz[2 * v + 1]] = was;
+    return false;
+  };
+  const trisAt = () => { const at = Array.from({ length: xz.length / 2 }, () => []); tris.forEach((t, i) => t.forEach((v) => at[v].push(i))); return at; };
+  for (let l = 0; l < levels; l++) {
+    const made = new Map(), curve = [];
+    // (each rim's edges first: their new points halfway, to go onto the curve once the triangles are split)
+    cycles = cycles.map((c) => c.flatMap((v, k) => {
+      const L = c.length, [a, b, d, e] = [c[(k - 1 + L) % L], v, c[(k + 1) % L], c[(k + 2) % L]], m = xz.length / 2;
+      xz.push((xz[2 * b] + xz[2 * d]) / 2, (xz[2 * b + 1] + xz[2 * d + 1]) / 2);
+      curve.push([m, ...[0, 1].map((j) => (9 * (xz[2 * b + j] + xz[2 * d + j]) - xz[2 * a + j] - xz[2 * e + j]) / 16)]);
+      made.set(ek(b, d), m);
+      return [v, m];
+    }));
+    const mid = (p, q) => {
+      const k = ek(p, q);
+      if (!made.has(k)) { made.set(k, xz.length / 2); xz.push((xz[2 * p] + xz[2 * q]) / 2, (xz[2 * p + 1] + xz[2 * q + 1]) / 2); }
+      return made.get(k);
+    };
+    const half = (u, w) => [(u[0] + w[0]) / 2, (u[1] + w[1]) / 2];
+    const next = [], nextTop = [], nextTile = [], nextLocal = [];
+    tris.forEach(([a, b, c], i) => {
+      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a), [la, lb, lc] = local[i], lab = half(la, lb), lbc = half(lb, lc), lca = half(lc, la);
+      next.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+      nextLocal.push([la, lab, lca], [lab, lb, lbc], [lca, lbc, lc], [lab, lbc, lca]);
+      for (let k = 0; k < 4; k++) { nextTile.push(tile[i]); nextTop.push(top[i]); }
+    });
+    tris = next; top = nextTop; tile = nextTile; local = nextLocal;
+    const around = trisAt();
+    for (const [m, x, z] of curve) tryMove(m, x, z, around);
+  }
+  const onRim = new Set(cycles.flat()), n = xz.length / 2, side = new Int8Array(n), pos = new Float64Array(3 * n);
+  // (then each point but the rims' moved halfway to the average of its neighbors, a few times: the
+  // layout bends sharply at the coarse mesh's points, kinks the split carries on, and this evens
+  // them out. Each face's own neighbors only: the two lie over each other.)
+  const nbrs = Array.from({ length: n }, () => new Set()), around = trisAt();
+  tris.forEach((t) => { for (const [p, q] of [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]) { nbrs[p].add(q); nbrs[q].add(p); } });
+  for (let it = 0; it < smoothing; it++) for (let v = 0; v < n; v++) {
+    if (onRim.has(v)) continue;
+    let x = 0, z = 0;
+    for (const w of nbrs[v]) { x += xz[2 * w]; z += xz[2 * w + 1]; }
+    tryMove(v, (xz[2 * v] + x / nbrs[v].size) / 2, (xz[2 * v + 1] + z / nbrs[v].size) / 2, around);
+  }
+  // the profile: up (or down) by how far from the nearest rim, a quarter circle rounding over it
+  const segs = cycles.flatMap((c) => c.map((v, k) => { const w = c[(k + 1) % c.length]; return [xz[2 * v], xz[2 * v + 1], xz[2 * w], xz[2 * w + 1]]; }));
+  tris.forEach((t, i) => t.forEach((v) => { if (!onRim.has(v)) side[v] = top[i] ? 1 : -1; }));
+  for (let v = 0; v < n; v++) {
+    const x = xz[2 * v], z = xz[2 * v + 1];
+    let d = Infinity;
+    if (side[v]) for (const [ax, az, bx, bz] of segs) {
+      const dx = bx - ax, dz = bz - az, s = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+      d = Math.min(d, Math.hypot(x - ax - s * dx, z - az - s * dz));
+    }
+    const t = side[v] ? Math.min(1, d / round) : 0;
+    pos.set([x, side[v] * thick * Math.sqrt(1 - (1 - t) ** 2), z], 3 * v);
+  }
+  return { pos, tris, tile, local };
+}
+
 // V − E + F of a mesh
 export function eulerOf({ verts, tris }) {
   const edges = new Set();
