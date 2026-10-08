@@ -1666,6 +1666,22 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         } else { el.info.textContent = R.max === 1 ? values[0].toFixed(3) : `${n} ${R.noun}${n > 1 ? "s" : ""}`; el.info.className = "tw-rinfo tw-dim"; }
       });
     }
+    // Every handle (and mark) where its value is in its ruler's range now. A hyperbolic ruler's range
+    // comes from the built puzzle, which can change under it: a design from a link has its rulers
+    // laid out before its surface is in, against a stand-in range, and grabbing a handle there
+    // jumped it. In place, so a handle being dragged or nudged keeps its focus.
+    function placeHandles() {
+      rulerEls.forEach((el, r) => {
+        const R = RULERS[r], values = R.values();
+        [...el.handles.children].forEach((h, i) => {
+          if (values[i] === undefined) return;
+          h.style.left = pctIn(R.range, values[i]) + "%";
+          h.setAttribute("aria-valuemin", R.range[0]);
+          h.setAttribute("aria-valuemax", R.range[1]);
+        });
+      });
+      showSnaps();
+    }
     // A ruler's deepest handle (what its remove takes when none of its handles is selected): a
     // circle's the biggest (it cuts the most), a solid's cut the nearest the center (0; the surface
     // is 1)
@@ -2036,7 +2052,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("customize").hidden = !!spec.noCustom; // (the editor can't express a cuboid, a prism or a sliding puzzle)
       if (!isPlanar()) renderTexturesButton();
       if (!isCustom()) setPainting(false);
-      if (isCustom()) showStats();
+      if (isCustom()) { showStats(); placeHandles(); } // (the rulers' ranges can change with the puzzle)
       $("bRestore").hidden = !(isCustom() && custom.blackout.length);
       if (hoverType !== null && !isFlat()) setHover(hoverType); // meshes were rebuilt
       algLit = null; algsShown.clear(); // (an algorithm's highlight belonged to the old puzzle)

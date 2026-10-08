@@ -177,6 +177,28 @@ test("each ruler's remove takes its deepest circle when none of its own is selec
   expect(await faces()).toEqual([Math.min(...before)]);
 });
 
+// (the rulers were laid out when the link was read, before the surface's puzzle was built, so a
+// handle sat against the wrong range, and grabbing it jumped it to where the right one put it)
+test("a design from a link: its handle is where its value is, and a grab doesn't move it", async ({ page }) => {
+  const design = { rule: "hyper", N: 9, M: 4, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [1.2725492333018065] }, { on: "edge", depths: [] }], blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  await settled(page);
+  const value = () => page.evaluate(() => JSON.parse(atob(new URLSearchParams(location.search).get("design").replace(/-/g, "+").replace(/_/g, "/"))).cuts.find((c) => c.on === "vertex").depths[0]);
+  const before = await value();
+  // (the cut ruler, not the corners' truncation one, which a hyperbolic design hides)
+  const handle = page.locator(".tw-rblock").filter({ hasText: "corners" }).filter({ hasText: "+ cut" }).locator(".tw-handle").first();
+  const box = await handle.boundingBox(), x = box.x + box.width / 2;
+  await page.mouse.move(x, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x + 1, box.y + box.height / 2);
+  // (the handle stays under the pointer, at the value it had)
+  const now = await handle.boundingBox();
+  expect(Math.abs(now.x + now.width / 2 - (x + 1))).toBeLessThan(4);
+  await page.mouse.up();
+  await settled(page);
+  expect(Math.abs((await value()) - before)).toBeLessThan(0.05);
+});
+
 // (with no circles there are no pieces, and nothing works out tile 0's cuts: drawing it threw)
 test("a design with no circles draws: just the tiles", async ({ page }) => {
   const design = { rule: "hyper", N: 12, M: 3, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] };
