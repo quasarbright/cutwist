@@ -31,6 +31,13 @@ test("a surface of two octagons, each glued to itself at its corners, shows in 3
   expect((await info(page)).tiles).toBe(2);
 });
 
+test("a three-holed surface shows in 3D, a pretzel of three holes", async ({ page }) => {
+  await open(page, "?puzzle=hyper-octagons&N=4&M=6&surface=1");
+  await settled(page);
+  await expect.poll(async () => (await info(page)).surface3D, { timeout: 30_000 }).toBe(true);
+  expect((await info(page)).genus).toBe(3);
+});
+
 test("the six octagons, a two-holed surface, show in 3D beside the disk too, and turns paint it", async ({ page }) => {
   await open(page, "?puzzle=hyper-octagons&N=8&M=3&surface=0");
   await settled(page);

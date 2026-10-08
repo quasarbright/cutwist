@@ -2859,9 +2859,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const key = [state.join(), turn ? `${turn.axis}:${turn.layer}:${turn.theta.toFixed(4)}` : "", look.hover ? `${look.hover.axis}:${look.hover.layer}` : "",
         look.lit ? [...look.lit].join(".") + ":" + (look.litAlpha ?? 0).toFixed(2) : ""].join("|");
       if (key === texKey) return;
+      // (only the turn's angle changed: just the tiles a copy of the turning ring reaches, by its
+      // radius and the tile's out to its corners)
+      const still = key.replace(/:[-\d.]+\|/, "|"), only = turn && still === texKey.replace(/:[-\d.]+\|/, "|");
       texKey = key;
       const ctx = texCanvas.getContext("2d"), { cols, size } = hyperAtlas;
+      const reach = turn && P.axes[turn.axis].radii[turn.layer] + 2 * Math.atanh(Math.hypot(...P.G.corners[0])) + 0.05;
       P.H.coset.face.reps.forEach((e, t) => {
+        if (only && !hyperCopies[t].some((c) => c.axis === turn.axis && 2 * Math.atanh(Math.min(Math.hypot(...c.at), 0.999999)) < reach)) return;
         hyperCellView.drawTileAt(P, e, state, turn, { ...look, pointer: null, hover: null }); // (the turning ring's white outline, stretched, read as a seam)
         ctx.drawImage(hyperCell, (t % cols) * size, Math.floor(t / cols) * size);
       });

@@ -10,8 +10,9 @@ import { fileURLToPath } from "node:url";
 import { buildHyper, hyperSurfaces } from "../hyper.mjs";
 import { surfaceMesh, meshDetail, implicitShape, implicitSurface, turnedOver, packShape, unpackShape } from "../hyper-surface.mjs";
 
-// (more holes than two: cutLayout doesn't yet lay most out with nothing turned over)
-export const MAX_TILES = 64, MAX_GENUS = 2;
+// (past five holes the pretzel is a long ribbon of them; and some surfaces of three or more holes
+// cutLayout doesn't lay out with nothing turned over, so they get no shape)
+export const MAX_TILES = 64, MAX_GENUS = 5;
 
 // One surface's shape: laid flat by its half turn if it has one (two holes: the plate comes out
 // symmetric), else cut along loops round its handles (cutLayout); sampled more finely if that turns
