@@ -472,6 +472,52 @@ export function fragmentCount(P, radii) {
   for (let a = 0; a < circles.length; a++) for (let b = a + 1; b < circles.length; b++) count += crossings(circles[a], circles[b]).filter((z) => inTile0(G, z)).length;
   return count;
 }
+// How many pieces there'd be with circle i of a kind at radius r and the rest as they are (-1:
+// that doesn't fit), worked out as the build does, without blacking out or snapping.
+export function hyperPieceCountAt(P, kind, i, r) {
+  const radii = Object.fromEntries(KINDS.map((k) => [k, [...P.radii[k]]]));
+  radii[kind][i] = r;
+  radii[kind] = [...new Set(radii[kind])].sort((a, b) => a - b);
+  if (r >= P.cap[kind] || !fits(P, radii)) return -1;
+  const Q = { G: P.G, H: P.H, tiles: P.tiles, cap: P.cap, spec: { ...P.spec, blackout: [] }, radii };
+  findPieces(Q);
+  return Q.n;
+}
+// The radii from lo to hi where circle i's pieces count changes, as marks for its ruler. Counts at
+// evenly spaced radii first (so a change that undoes itself between two of them is still seen
+// once they're close enough), then each stretch whose ends differ halved, keeping both halves
+// that differ, till it's a hair wide. Most changes are at one of the marks worked out from the
+// geometry (marks: hyperSnapCandidates's): once a stretch is narrow with one of those in it, and
+// the count just either side of it is the stretch's ends', that's the change, at the mark's exact
+// radius. A generator, a count per step, for the page to run a little at a time: yields { at }
+// for each change found (a change can be found twice), and {} after the other counts.
+export function* hyperCountBreaks(P, kind, i, lo, hi, marks = [], samples = 48, hair = 1e-9) {
+  const count = (r) => hyperPieceCountAt(P, kind, i, r), xs = [], cs = [];
+  for (let k = 0; k <= samples; k++) { xs.push(lo + ((hi - lo) * k) / samples); cs.push(count(xs[k])); yield {}; }
+  for (let k = 0; k < samples; k++) {
+    if (cs[k] === cs[k + 1]) continue;
+    const stack = [[xs[k], cs[k], xs[k + 1], cs[k + 1]]];
+    while (stack.length) {
+      const [a, ca, b, cb] = stack.pop();
+      if (ca < 0 || cb < 0) continue; // (the edge of what fits, not a change in the pieces)
+      if (b - a < 1e-3) {
+        const inside = marks.filter((m) => m > a && m < b);
+        if (inside.length === 1) {
+          // (either side by as much as a radius snaps onto a mark: right at one, crossings closer
+          // than the arrangement tells apart are one point, so the count changes a hair past it)
+          const m = inside[0], below = count(m - 1e-5), above = count(m + 1e-5);
+          yield {};
+          if (below === ca && above === cb) { yield { at: m }; continue; }
+        }
+      }
+      if (b - a < hair) { yield { at: (a + b) / 2 }; continue; }
+      const m = (a + b) / 2, cm = count(m);
+      yield {};
+      if (cm !== cb) stack.push([m, cm, b, cb]);
+      if (cm !== ca) stack.push([a, ca, m, cm]);
+    }
+  }
+}
 // the biggest radius circle i of a kind (i past the end: a new one) can have and still be worked
 // out, given the others: under the surface's limit and the budget
 export function hyperRadiusLimit(P, kind, i, radii = P.radii) {

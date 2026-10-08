@@ -795,7 +795,7 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates, hyperRadiusLimit,
+      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
 
@@ -1526,8 +1526,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         }
         if (isHyperDesign()) {
           // (the same, worked out hyperbolically on the built surface; its radii sorted, so a
-          // handle's index there is where its value is)
-          if (!t.trim && isHyper()) snaps[r][i] = hyperSnapCandidates(P, CUT_KINDS[t.s], P.radii[CUT_KINDS[t.s]].findIndex((x) => Math.abs(x - v) < 1e-5));
+          // handle's index there is where its value is. Then, a little at a time, every radius
+          // where the pieces count changes, whatever the geometry above found)
+          if (!t.trim && isHyper()) {
+            const kind = CUT_KINDS[t.s], at = P.radii[kind].findIndex((x) => Math.abs(x - v) < 1e-5);
+            if (at < 0) return;
+            snaps[r][i] = hyperSnapCandidates(P, kind, at);
+            work.push([r, i, hyperCountBreaks(P, kind, at, 0.05, hyperRulerMax(kind), snaps[r][i].slice())]);
+          }
           return;
         }
         if (t.trim) work.push([r, i, null]);
@@ -1538,6 +1544,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       work.sort((a, b) => (b[0] === sel.r && b[1] === sel.i) - (a[0] === sel.r && a[1] === sel.i));
       const step = () => {
         if (job !== snapJob || !work.length) return;
+        if (work[0][2] && typeof work[0][2].next === "function") {
+          // (a hyperbolic handle's count changes: counts for a few ms a tick, a mark for each new one)
+          const [r, i, gen] = work[0], until = performance.now() + 12;
+          let done = false;
+          while (performance.now() < until) {
+            const { value, done: end } = gen.next();
+            if (end) { done = true; break; }
+            if (value.at !== undefined && !snaps[r][i].some((m) => Math.abs(m - value.at) < 1e-6)) { snaps[r][i].push(value.at); showSnaps(); }
+          }
+          if (done) work.shift();
+          setTimeout(step, 0);
+          return;
+        }
         const [r, i, f] = work.shift(), R = RULERS[r], t = R.target(i);
         // (marks are where the ruler shows them: a truncation's by what it takes off)
         if (f === null) {
@@ -1631,7 +1650,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         });
         // the readout: this ruler's selected value if the selection is here, else a count
         const n = values.length, here = sel.r === r && n;
-        el.remove.hidden = !here;
+        // (remove: the selected one if it's here, else the deepest, see deepest)
+        el.remove.hidden = !n;
+        el.remove.title = here ? `remove the selected ${R.noun} (Delete)` : `remove the deepest ${R.noun}`;
         el.add.hidden = n >= R.max;
         if (!n) { el.info.textContent = R.max === 1 ? "off" : "none"; el.info.className = "tw-rinfo tw-dim"; }
         else if (here) {
@@ -1639,6 +1660,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           el.info.className = "tw-rinfo" + (isSnapped(r, sel.i) ? " is-snapped" : "");
         } else { el.info.textContent = R.max === 1 ? values[0].toFixed(3) : `${n} ${R.noun}${n > 1 ? "s" : ""}`; el.info.className = "tw-rinfo tw-dim"; }
       });
+    }
+    // A ruler's deepest handle (what its remove takes when none of its handles is selected): a
+    // circle's the biggest (it cuts the most), a solid's cut the nearest the center (0; the surface
+    // is 1)
+    function deepest(r) {
+      const values = RULERS[r].values();
+      return values.reduce((b, v, i) => ((isCircleDesign() ? v > values[b] : v < values[b]) ? i : b), 0);
     }
     function select(r, i) {
       if (sel.r === r && sel.i === i) return;
@@ -1748,7 +1776,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const name = make("span", "tw-rname", { textContent: R.label, title: R.title });
         const info = make("span", "tw-rinfo");
         const remove = make("button", "tw-link", { textContent: "remove", title: `remove the selected ${R.noun} (Delete)` });
-        remove.onclick = () => removeValue(r, sel.i);
+        remove.onclick = () => removeValue(r, sel.r === r ? sel.i : deepest(r));
         const add = make("button", "tw-link", { textContent: R.max === 1 ? "+ truncate" : "+ cut", title: R.max === 1 ? R.title : `add another cut ${ON_NAMES[CUT_KINDS[r - 2]]}` });
         add.onclick = () => addValue(r);
         head.append(name, info, remove, add);
@@ -1948,7 +1976,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (spec.rule === "hyper" && !hyperFileFor(spec)) {
         // (its surfaces aren't in yet: fetch them, then come back; the puzzle showing stays till then)
-        fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); }).catch((err) => console.error(err));
+        fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); if (isCustom()) computeSnaps(); }).catch((err) => console.error(err));
         return;
       }
       let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
@@ -4529,7 +4557,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     if (currentSpec().rule === "hyper") await fetchHyper(currentSpec().N, currentSpec().M).catch((err) => { console.error(err); presetIdx = 0; paramVals = {}; });
     renderParams();
     load();
-    if (isCustom()) nxCustomize(true); // (a share link opens in the editor)
+    // (a share link opens in the editor, with its rulers' marks worked out on the puzzle just built:
+    // applyURL's were before there was one)
+    if (isCustom()) { nxCustomize(true); computeSnaps(); }
     requestAnimationFrame(frame);
   </script>
 </body>

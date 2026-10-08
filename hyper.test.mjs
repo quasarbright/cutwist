@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount } from "./hyper.mjs";
+import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount, hyperCountBreaks, hyperPieceCountAt, hyperRadiusLimit, hyperSnapCandidates } from "./hyper.mjs";
 import { faceHas, inPolygon } from "./tiles.mjs";
 import { fragmentShapes } from "./hyper-view.mjs";
 
@@ -130,6 +130,22 @@ test("a preset stepped onto another tiling gets a circle just past the corners, 
   }
   // (on its own tiling, the preset's own circle)
   assert.equal(buildHyper(p, file(8, 3)).spec.cuts[0].depths[0], p.cuts[0].depths[0]);
+});
+
+// The ruler's marks include every radius where the pieces count changes (the geometry's marks
+// missed some): checked against a fine scan of the count
+test("count breaks: every change in the pieces count along a ruler is found", () => {
+  for (const [N, M, s, cuts, kind] of [[9, 9, 0, [{ on: "face", depths: [1.2] }], "face"], [8, 3, 0, [{ on: "face", depths: [0.9] }, { on: "vertex", depths: [0.4] }], "face"]]) {
+    const P = buildHyper({ rule: "hyper", N, M, surface: s, cuts, blackout: [] }, file(N, M)), hi = hyperRadiusLimit(P, kind, 0), marks = hyperSnapCandidates(P, kind, 0);
+    const found = [...hyperCountBreaks(P, kind, 0, 0.05, hi, marks)].filter((v) => v.at !== undefined).map((v) => v.at);
+    const steps = 300, w = (hi - 0.05) / steps;
+    let prev = hyperPieceCountAt(P, kind, 0, 0.05);
+    for (let k = 1; k <= steps; k++) {
+      const r = 0.05 + w * k, n = hyperPieceCountAt(P, kind, 0, r);
+      if (n !== prev && n >= 0 && prev >= 0) assert.ok(found.some((f) => f > r - w - 1e-9 && f < r + 1e-9), `{${N},${M}}: the count changes ${prev} → ${n} by ${r}, no mark found there (${found})`);
+      prev = n;
+    }
+  }
 });
 
 test("the circle limits stored with the surfaces are the ones worked out from scratch", () => {

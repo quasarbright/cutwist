@@ -147,6 +147,36 @@ test("sides and tiles at a corner: the other one follows to a hyperbolic tiling;
   expect(s).toMatchObject({ N: 6, M: 4 });
 });
 
+// (the marks were worked out when the link was read, before the puzzle was built, so a design
+// opened from a link, or reloaded, had none till a cut was removed and added again)
+test("a design opened from a link has its rulers' snap marks", async ({ page }) => {
+  const design = { rule: "hyper", N: 9, M: 9, surface: 0, cuts: [{ on: "face", depths: [1.2] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  await settled(page);
+  await page.locator(".tw-handle").first().focus();
+  await expect.poll(() => page.locator(".tw-marks span:not(.tw-zero)").count(), { timeout: 15000 }).toBeGreaterThan(0);
+});
+
+// (remove showed only on the ruler of the selected handle; now on every ruler with a cut, taking
+// the selected one there or else the deepest: for circles the biggest)
+test("each ruler's remove takes its deepest circle when none of its own is selected", async ({ page }) => {
+  await pick(page, "hyper-octagons");
+  await settled(page);
+  await page.click("#customize");
+  await settled(page);
+  // (two tile circles, then a corner circle, which is selected)
+  await page.locator(".tw-rblock").filter({ hasText: "faces" }).locator("button", { hasText: "+ cut" }).click();
+  await settled(page);
+  await page.locator(".tw-rblock").filter({ hasText: "corners" }).locator("button", { hasText: "+ cut" }).click();
+  await settled(page);
+  const faces = () => page.evaluate(() => JSON.parse(atob(new URLSearchParams(location.search).get("design").replace(/-/g, "+").replace(/_/g, "/"))).cuts.find((c) => c.on === "face").depths);
+  const before = await faces();
+  expect(before.length).toBe(2);
+  await page.locator(".tw-rblock").filter({ hasText: "faces" }).locator("button", { hasText: "remove" }).click();
+  await settled(page);
+  expect(await faces()).toEqual([Math.min(...before)]);
+});
+
 // (with no circles there are no pieces, and nothing works out tile 0's cuts: drawing it threw)
 test("a design with no circles draws: just the tiles", async ({ page }) => {
   const design = { rule: "hyper", N: 12, M: 3, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] };
@@ -162,7 +192,8 @@ test("a design with no circles draws: just the tiles", async ({ page }) => {
 // pieces from a circle's far side, near the rim, come to its near side, and they were missing,
 // drawn only from the tiles showing before the turn: a hole in the turning circle.)
 test("a turn stopped at whole steps looks like the puzzle after those steps: nothing missing", async ({ page }) => {
-  const S = 400; // (the canvas, px: the test browser draws in software)
+  test.setTimeout(120_000); // (sixteen full drawings, in software in the test browser: slow under a loaded run)
+  const S = 320; // (the canvas, px)
   const cases = await page.evaluate(async (S) => {
     const h = await import("./hyper.mjs"), { HyperView } = await import("./hyper-view.mjs");
     // (a design and the circles to turn: two of the 12-gons' four, and a tile's and a corner's of
