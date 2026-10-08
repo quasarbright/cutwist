@@ -1,37 +1,57 @@
-// Writes regular-maps/shapes/N-M-k.json: for each two-holed puzzle surface (k: its index among the
-// tiling's puzzle surfaces), its shape in space for the 3D view, hyper-surface.mjs's implicitShape:
-// the pretzel's numbers, and where the vertices of its mesh (surfaceMesh, split twice) sit on it.
-// Laying the tiles on the pretzel takes most of a minute per surface, so it's done here once; the
-// page reads the file when the 3D view is wanted (implicitSurface).
-// Run: node data/add-shapes.mjs
+// Writes regular-maps/shapes/N-M-k.json: for each puzzle surface with holes (k: its index among the
+// tiling's puzzle surfaces) of up to MAX_TILES tiles, its shape in space for the 3D view,
+// hyper-surface.mjs's implicitShape: the pretzel's numbers, how finely its tiles are sampled, and
+// where the vertices of its mesh (surfaceMesh, split twice) sit on the pretzel. Laying the tiles on
+// takes up to minutes per surface, so it's done here once; the page reads the file when the 3D view
+// is wanted (implicitSurface).
+// Run: node data/add-shapes.mjs [N-M or N-M-k …] (just those; all by default)
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildHyper, hyperSurfaces } from "../hyper.mjs";
-import { surfaceMesh, implicitShape, implicitSurface, turnedOver, packShape, unpackShape } from "../hyper-surface.mjs";
+import { surfaceMesh, meshDetail, implicitShape, implicitSurface, turnedOver, packShape, unpackShape } from "../hyper-surface.mjs";
 
-export function addShapes(dir = new URL("../regular-maps/", import.meta.url)) {
-  const out = new URL("shapes/", dir), made = [];
+// (more holes than two: cutLayout doesn't yet lay most out with nothing turned over)
+export const MAX_TILES = 64, MAX_GENUS = 2;
+
+// One surface's shape: laid flat by its half turn if it has one (two holes: the plate comes out
+// symmetric), else cut along loops round its handles (cutLayout); sampled more finely if that turns
+// triangles over. Returns the file's contents, or throws.
+export function shapeFor(P) {
+  const tries = [];
+  for (const k of [0, 2, 4].map((d) => meshDetail(P) + d)) for (const layout of P.surface.genus === 2 ? ["plate", "cut"] : ["cut"]) {
+    try {
+      const mesh = surfaceMesh(P, k, k), made = implicitShape(P, mesh, { layout });
+      if (!made.at.every(Number.isFinite)) throw new Error("lost its way (not a number)");
+      const kept = packShape(made), turned = turnedOver(implicitSurface(mesh, unpackShape(kept)), kept.shape);
+      if (turned) throw new Error(`${turned} triangles turned over`);
+      return { rings: k, perEdge: k, layout, ...kept };
+    } catch (e) { tries.push(`${layout} at ${k}: ${e.message}`); }
+  }
+  throw new Error(tries.join("; "));
+}
+
+export function addShapes(only = [], dir = new URL("../regular-maps/", import.meta.url)) {
+  const out = new URL("shapes/", dir), done = [];
   mkdirSync(out, { recursive: true });
   for (const f of readdirSync(dir).filter((f) => /^\d+-\d+\.json$/.test(f))) {
     const file = JSON.parse(readFileSync(new URL(f, dir), "utf8"));
     hyperSurfaces(file).forEach((s, k) => {
-      if (s.genus !== 2) return;
-      const name = `${file.N}-${file.M}-${k}`, t = performance.now();
+      const name = `${file.N}-${file.M}-${k}`;
+      if (s.genus < 2 || s.genus > MAX_GENUS || s.tiles > MAX_TILES || (only.length && !only.some((o) => name === o || name.startsWith(`${o}-`)))) return;
+      const t = performance.now();
       try {
-        const P = buildHyper({ rule: "hyper", N: file.N, M: file.M, surface: k, cuts: [], blackout: [] }, file), mesh = surfaceMesh(P);
-        const made = implicitShape(P, mesh);
-        if (!made.at.every(Number.isFinite)) throw new Error("lost its way (not a number)");
-        const kept = packShape(made), turned = turnedOver(implicitSurface(mesh, unpackShape(kept)), kept.shape);
-        if (turned) throw new Error(`${turned} triangles turned over`);
+        const P = buildHyper({ rule: "hyper", N: file.N, M: file.M, surface: k, cuts: [], blackout: [] }, file), kept = shapeFor(P);
         writeFileSync(new URL(`${name}.json`, out), JSON.stringify({
-          how: "The surface in 3D: a pretzel, y² = s·(1 − (x/A)² − (z/B)²)·Π((x − cx)² + (z − cz)² − r²)/r² over its holes [cx, cz, r], and at: where the vertices of hyper-surface.mjs's surfaceMesh (6 rings, 6 points an edge), split twice by loopSurface (not smooth), sit on it (x y z each, int16 of most, base64).",
+          how: "The surface in 3D: a pretzel, y² = s·(1 − (x/A)² − (z/B)²)·Π(1 − r²/((x − cx)² + (z − cz)²)) over its holes [cx, cz, r], and at: where the vertices of hyper-surface.mjs's surfaceMesh (rings, perEdge), split twice by loopSurface (not smooth), sit on it (x y z each, int16 of most, base64).",
           ...kept,
         }));
-        made.push(`${name} (${Math.round(performance.now() - t)} ms)`);
-      } catch (e) { made.push(`${name}: none (${e.message})`); }
+        done.push(`${name}: genus ${s.genus}, ${s.tiles} tiles, ${kept.layout} at ${kept.rings} (${Math.round(performance.now() - t)} ms)`);
+      } catch (e) { done.push(`${name}: none (${e.message})`); }
     });
   }
-  return made;
+  // (the list the page reads first, so it asks only for shapes there are)
+  writeFileSync(new URL("index.json", out), JSON.stringify(readdirSync(out).filter((f) => /^\d+-\d+-\d+\.json$/.test(f)).map((f) => f.replace(/\.json$/, "")).sort()));
+  return done;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) for (const line of addShapes()) console.log(line);
+if (process.argv[1] === fileURLToPath(import.meta.url)) for (const line of addShapes(process.argv.slice(2))) console.log(line);

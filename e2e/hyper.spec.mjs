@@ -24,6 +24,13 @@ test("the Klein quartic opens from the shelf: 24 heptagons, a piece per tile, ed
   await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a tile's middle · drag elsewhere to slide");
 });
 
+test("a surface of two octagons, each glued to itself at its corners, shows in 3D too", async ({ page }) => {
+  await open(page, "?puzzle=hyper-octagons&N=8&M=4&surface=0");
+  await settled(page);
+  await expect.poll(async () => (await info(page)).surface3D, { timeout: 30_000 }).toBe(true);
+  expect((await info(page)).tiles).toBe(2);
+});
+
 test("the six octagons, a two-holed surface, show in 3D beside the disk too, and turns paint it", async ({ page }) => {
   await open(page, "?puzzle=hyper-octagons&N=8&M=3&surface=0");
   await settled(page);

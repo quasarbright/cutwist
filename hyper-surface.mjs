@@ -37,12 +37,21 @@ function meshKey(P, rings, perEdge) {
   };
 }
 
+// How finely to sample the tiles for the 3D view (rings and points an edge alike): about 2000
+// points in all, so a surface of few tiles gets enough for its rims to have room between them; even,
+// and at least 4.
+export function meshDetail(P) {
+  return Math.max(4, 2 * Math.round(Math.sqrt(2000 / (P.H.coset.face.reps.length * P.G.N)) / 2));
+}
+
 // The surface's mesh. P: a built hyperbolic puzzle (its G, H). rings: from a tile's middle out to
 // its edge; perEdge: samples along each edge. Returns { verts: [{ key }], tris: [[a, b, c]] (tile
-// by tile, the same number each), tiles: [{ tile, dart, at: [[vertex, its point in the disk]] }],
-// index: key → vertex, rings, perEdge }.
+// by tile, the same number each), local (per triangle, its corners' points in the disk), tiles:
+// [{ tile, dart, at: [[vertex, a point of it in the disk]] }], index: key → vertex, rings, perEdge }.
+// (On a surface of a few tiles, a tile's corners and edges are glued to each other, and one vertex
+// is at more than one place round the same tile: a triangle's own points are in local.)
 export function surfaceMesh(P, rings = 6, perEdge = 6) {
-  const { G, H } = P, N = G.N, reps = H.coset.face.reps, index = new Map(), verts = [], tris = [], tiles = [];
+  const { G, H } = P, N = G.N, reps = H.coset.face.reps, index = new Map(), verts = [], tris = [], local = [], tiles = [];
   const id = (key) => { if (!index.has(key)) { index.set(key, verts.length); verts.push({ key }); } return index.get(key); };
   const B = N * perEdge, name = meshKey(P, rings, perEdge);
   // (tile 0's edge points, in order round it: corner k, then along the edge to corner k + 1)
@@ -52,13 +61,14 @@ export function surfaceMesh(P, rings = 6, perEdge = 6) {
     const at = [], key = (a, b) => name(t, a, b);
     const point = (a, b) => (a === 0 ? [0, 0] : along([0, 0], edgePts[b], a / rings));
     const v = (a, b) => { const i = id(key(a, b % B)); at.push([i, point(a, b % B)]); return i; };
+    const tri = (...corners) => { tris.push(corners.map(([a, b]) => v(a, b))); local.push(corners.map(([a, b]) => point(a, b % B))); };
     for (let b = 0; b < B; b++) {
-      tris.push([v(0, 0), v(1, b), v(1, b + 1)]);
-      for (let a = 1; a < rings; a++) tris.push([v(a, b), v(a + 1, b), v(a + 1, b + 1)], [v(a, b), v(a + 1, b + 1), v(a, b + 1)]);
+      tri([0, 0], [1, b], [1, b + 1]);
+      for (let a = 1; a < rings; a++) { tri([a, b], [a + 1, b], [a + 1, b + 1]); tri([a, b], [a + 1, b + 1], [a, b + 1]); }
     }
     tiles.push({ tile: t, dart: h, at: [...new Map(at).entries()] });
   });
-  return { verts, tris, tiles, index, rings, perEdge };
+  return { verts, tris, local, tiles, index, rings, perEdge };
 }
 
 // The surface moved by its symmetry z (an element of the turn group: each dart d to z·d), as a map
@@ -127,11 +137,11 @@ function squarePlan(P, mesh, still) {
 const hyperbolic = (p, q) => Math.acosh(1 + (2 * ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2)) / ((1 - p[0] ** 2 - p[1] ** 2) * (1 - q[0] ** 2 - q[1] ** 2)));
 // Each mesh edge's length on the surface (from a tile it's on), by edge key "p,q" (p < q)
 function edgeLengths(mesh) {
-  const per = mesh.tris.length / mesh.tiles.length, local = mesh.tiles.map((t) => new Map(t.at)), out = new Map();
-  mesh.tris.forEach((t, i) => {
-    const at = local[Math.floor(i / per)];
-    for (const [p, q] of [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]) out.set(p < q ? `${p},${q}` : `${q},${p}`, hyperbolic(at.get(p), at.get(q)));
-  });
+  const out = new Map();
+  mesh.tris.forEach((t, i) => t.forEach((p, k) => {
+    const q = t[(k + 1) % 3];
+    out.set(p < q ? `${p},${q}` : `${q},${p}`, hyperbolic(mesh.local[i][k], mesh.local[i][(k + 1) % 3]));
+  }));
   return out;
 }
 // The shortest way (by `cost` of each step) from any of `from` to the first vertex `done` says is
@@ -481,24 +491,562 @@ export function plateLayout(P, mesh, { iterations = 2000, A = 4, B = 1.8, holeSc
   });
   // (the lower halves: their images, mirrored)
   for (const v of onRim) if (!pinned[v]) { const w = turn[v]; xz[2 * v] = xz[2 * w]; xz[2 * v + 1] = -xz[2 * w + 1]; pinned[v] = 1; }
-  // each neighbor weighed by its mean value: the tangents of half the angles beside the edge, over
-  // its length, from the triangles' own shapes on their tiles (all weighed alike, the triangles
-  // crush flat against the axis)
-  const per = mesh.tris.length / mesh.tiles.length, local = mesh.tiles.map((t) => new Map(t.at)), weight = new Map();
+  // each neighbor weighed by its mean value (meanValueWeights), all moved to their neighbors'
+  // weighed average (tutte; all weighed alike, the triangles crush flat against the axis)
+  const inside = [...topVerts].filter((v) => !pinned[v]);
+  tutte(inside, (v) => [...nb.get(v)], meanValueWeights(mesh, mesh.local), xz, iterations);
+  for (const v of topVerts) [xz[2 * v], xz[2 * v + 1]] = open([xz[2 * v], xz[2 * v + 1]], upperRim.has(v));
+  // Opened, triangles crushed against the slits turn over, and the tiles near the holes come out
+  // small: then all but the rims moved to make each triangle as near its own shape and size as
+  // they can be, none turned over.
+  const topIndex = mesh.tris.map((_, i) => i).filter((i) => top[i]), free = new Uint8Array(n);
+  for (const v of inside) free[v] = 1;
+  for (const path of best.paths) for (const v of path) if (!onRim.has(v)) free[v] = 1;
+  const turned = untangle(topIndex.map((i) => mesh.tris[i]), topIndex.map((i) => mesh.local[i]), xz, free);
+  // the bottom: the top's images, mirrored
+  mesh.tris.forEach((t, i) => { if (!top[i]) for (const v of t) if (!topVerts.has(v)) { const w = turn[v]; xz[2 * v] = xz[2 * w]; xz[2 * v + 1] = -xz[2 * w + 1]; } });
+  return { xz, top, rims: runs, turned };
+}
+
+// ---- any number of holes
+
+const ek = (p, q) => (p < q ? `${p},${q}` : `${q},${p}`);
+// a heap of [key, item], least key first
+function minHeap() {
+  const h = [];
+  return {
+    get size() { return h.length; },
+    push(k, x) { h.push([k, x]); for (let i = h.length - 1; i > 0; ) { const j = (i - 1) >> 1; if (h[j][0] <= h[i][0]) break; [h[i], h[j]] = [h[j], h[i]]; i = j; } },
+    pop() {
+      const top = h[0], last = h.pop();
+      if (h.length) { h[0] = last; for (let i = 0; ; ) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < h.length && h[l][0] < h[m][0]) m = l; if (r < h.length && h[r][0] < h[m][0]) m = r; if (m === i) break; [h[i], h[m]] = [h[m], h[i]]; i = m; } }
+      return top;
+    },
+  };
+}
+
+// Which way round the surface a loop goes, up to adding loops that bound something (homology, mod
+// 2): each edge marked with bits, one per way round (2g of them), so that a loop's edges' marks
+// added up (xor) are 0 just when the loop cuts the surface in two. (A tree of the vertices, a tree
+// of the triangles across the other edges, and the 2g edges in neither each a way round: one bit.
+// The triangles' tree's edges, its leaves first, marked so each triangle's sides add up to 0.)
+// Returns { edge: "p,q" → index, marks (W words an edge), W }.
+function homologyMarks(mesh) {
+  const { tris } = mesh, n = mesh.verts.length, edge = new Map(), ends = [], trisOf = [];
+  tris.forEach((t, i) => t.forEach((p, k) => {
+    const q = t[(k + 1) % 3], key = ek(p, q);
+    if (!edge.has(key)) { edge.set(key, ends.length); ends.push([p, q]); trisOf.push([]); }
+    trisOf[edge.get(key)].push(i);
+  }));
+  const E = ends.length, inTree = new Uint8Array(E), at = Array.from({ length: n }, () => []);
+  ends.forEach(([p, q], e) => { at[p].push(e); at[q].push(e); });
+  const seen = new Uint8Array(n), queue = [0];
+  seen[0] = 1;
+  for (let i = 0; i < queue.length; i++) for (const e of at[queue[i]]) {
+    const w = ends[e][0] === queue[i] ? ends[e][1] : ends[e][0];
+    if (!seen[w]) { seen[w] = 1; inTree[e] = 1; queue.push(w); }
+  }
+  const inCo = new Uint8Array(E), up = new Int32Array(tris.length).fill(-1), order = [0], tSeen = new Uint8Array(tris.length);
+  tSeen[0] = 1;
+  const sides = (i) => tris[i].map((p, k) => edge.get(ek(p, tris[i][(k + 1) % 3])));
+  for (let j = 0; j < order.length; j++) for (const e of sides(order[j])) {
+    if (inTree[e] || inCo[e]) continue;
+    const o = trisOf[e].find((t) => t !== order[j]);
+    if (!tSeen[o]) { tSeen[o] = 1; inCo[e] = 1; up[o] = e; order.push(o); }
+  }
+  const left = [];
+  for (let e = 0; e < E; e++) if (!inTree[e] && !inCo[e]) left.push(e);
+  const W = Math.max(1, Math.ceil(left.length / 32)), marks = new Uint32Array(E * W);
+  left.forEach((e, k) => { marks[e * W + (k >> 5)] |= 1 << (k & 31); });
+  for (let j = order.length - 1; j > 0; j--) {
+    const f = order[j], e = up[f];
+    for (const o of sides(f)) if (o !== e) for (let w = 0; w < W; w++) marks[e * W + w] ^= marks[o * W + w];
+  }
+  return { edge, marks, W };
+}
+
+// g loops round the handles, each as short as it can be (by length on the surface), none meeting
+// another or next to it, and together not cutting the surface apart: cut along them all, it's a
+// sphere with 2g holes. (Each the shortest loop through a vertex, over every vertex: two shortest
+// ways from it that part at once and an edge joining their ends, going round a way the loops before
+// don't, by their marks.) Returns [[vertex, …] round each loop].
+function handleLoops(mesh, g, len) {
+  const n = mesh.verts.length, nbrs = neighbors(mesh), { edge, marks, W } = homologyMarks(mesh);
+  const blocked = new Uint8Array(n), basis = [], loops = [];
+  const reduce = (x) => {
+    for (const { row, bit } of basis) if ((x[bit >> 5] >>> (bit & 31)) & 1) for (let w = 0; w < W; w++) x[w] ^= row[w];
+    return x;
+  };
+  const dist = new Float64Array(n), parent = new Int32Array(n), branch = new Int32Array(n), cls = new Uint32Array(n * W), done = new Uint8Array(n);
+  for (let k = 0; k < g; k++) {
+    let best = null;
+    for (let s = 0; s < n; s++) {
+      if (blocked[s]) continue;
+      dist.fill(Infinity); done.fill(0);
+      dist[s] = 0; parent[s] = -1; branch[s] = -1; cls.fill(0, s * W, s * W + W);
+      const heap = minHeap(), reached = [];
+      heap.push(0, s);
+      while (heap.size) {
+        const [d, v] = heap.pop();
+        if (done[v]) continue;
+        if (best && 2 * d > best.L) break;
+        done[v] = 1; reached.push(v);
+        for (const w of nbrs[v]) {
+          if (blocked[w] || done[w]) continue;
+          const e = d + len(v, w);
+          if (e < dist[w]) {
+            dist[w] = e; parent[w] = v; branch[w] = v === s ? w : branch[v];
+            const m = edge.get(ek(v, w));
+            for (let j = 0; j < W; j++) cls[w * W + j] = cls[v * W + j] ^ marks[m * W + j];
+            heap.push(e, w);
+          }
+        }
+      }
+      for (const u of reached) for (const v of nbrs[u]) {
+        if (v < u || !done[v] || parent[v] === u || parent[u] === v || branch[u] === branch[v]) continue;
+        const L = dist[u] + dist[v] + len(u, v);
+        if (best && L >= best.L) continue;
+        const m = edge.get(ek(u, v)), x = new Uint32Array(W);
+        for (let j = 0; j < W; j++) x[j] = cls[u * W + j] ^ cls[v * W + j] ^ marks[m * W + j];
+        if (!reduce(x).some((w) => w)) continue;
+        const way = [];
+        for (let a = u; a >= 0; a = parent[a]) way.unshift(a);
+        for (let b = v; b !== s; b = parent[b]) way.push(b);
+        best = { L, way, x };
+      }
+    }
+    if (!best) throw new Error(`no loop round handle ${k + 1}`);
+    const word = best.x.findIndex((w) => w);
+    basis.push({ row: best.x, bit: word * 32 + 31 - Math.clz32(best.x[word]) });
+    loops.push(best.way);
+    for (const v of best.way) { blocked[v] = 1; for (const w of nbrs[v]) blocked[w] = 1; }
+  }
+  return loops;
+}
+
+// The surface cut by its handle loops (a sphere with 2g holes), parted into a top and a bottom,
+// each a sphere with g + 1 holes, like a pretzel's above and below its middle: the top grown from
+// one side of every loop, the bottom from the other, each joined up first by shortest ways between
+// its loops (so each comes out one piece), and every other triangle to whichever is nearer. Where
+// they meet is the last rim, the outside's. Returns { top (per triangle 1 or 0), outer [vertex, …] }.
+function splitByLoops(mesh, loops) {
+  const { tris } = mesh, T = tris.length, pt = (i, v) => mesh.local[i][tris[i].indexOf(v)];
+  const cut = new Set(loops.flatMap((l) => l.map((v, k) => ek(v, l[(k + 1) % l.length]))));
+  const trisOf = new Map();
+  tris.forEach((t, i) => t.forEach((p, k) => { const key = ek(p, t[(k + 1) % 3]); (trisOf.get(key) ?? trisOf.set(key, []).get(key)).push(i); }));
+  // (across each edge but the loops', the triangle there and how far: middle to the edge's middle,
+  // each in its own tile)
+  const mid = (i) => { const p = tris[i].map((v) => pt(i, v)); return [(p[0][0] + p[1][0] + p[2][0]) / 3, (p[0][1] + p[1][1] + p[2][1]) / 3]; };
+  const across = tris.map((t, i) => t.flatMap((p, k) => {
+    const q = t[(k + 1) % 3], key = ek(p, q);
+    if (cut.has(key)) return [];
+    const o = trisOf.get(key).find((j) => j !== i), half = (j) => along(pt(j, p), pt(j, q), 0.5);
+    return [[o, hyperbolic(mid(i), half(i)) + hyperbolic(half(o), mid(o))]];
+  }));
+  // (each loop's two sides: round each of its vertices, from the next vertex on to the one before,
+  // the triangles on its left; the rest on its right)
+  const fanOf = new Map();
+  tris.forEach((t, i) => t.forEach((v, k) => (fanOf.get(v) ?? fanOf.set(v, new Map()).get(v)).set(t[(k + 1) % 3], [t[(k + 2) % 3], i])));
+  const seed = [];
+  loops.forEach((l) => {
+    const L = [], R = [];
+    l.forEach((v, k) => {
+      const fan = fanOf.get(v), next = l[(k + 1) % l.length], before = l[(k - 1 + l.length) % l.length];
+      let x = next, on = L;
+      do { const [y, i] = fan.get(x); if (x === before) on = R; on.push(i); x = y; } while (x !== next);
+    });
+    seed.push([new Set(L), new Set(R)]);
+  });
+  // (shortest ways over the triangles from `from`, through those ok says)
+  const label = new Int8Array(T), grow = (from, ok) => {
+    const d = new Float64Array(T).fill(Infinity), back = new Int32Array(T).fill(-1), heap = minHeap();
+    for (const i of from) { d[i] = 0; heap.push(0, i); }
+    while (heap.size) {
+      const [di, i] = heap.pop();
+      if (di > d[i]) continue;
+      for (const [o, w] of across[i]) if (di + w < d[o] && ok(o)) { d[o] = di + w; back[o] = i; heap.push(d[o], o); }
+    }
+    return { d, back };
+  };
+  const vertsOf = (sets) => { const out = new Set(); for (const s of sets) for (const i of s) for (const v of tris[i]) out.add(v); return out; };
+  // the top: one side of each loop (the first's left, then whichever side of a loop is nearest),
+  // joined up by shortest ways keeping off the other sides
+  const topSet = new Set(seed[0][0]), botSet = new Set(seed[0][1]), others = seed.slice(1);
+  while (others.length) {
+    const theirs = new Set(others.flatMap(([a, b]) => [...a, ...b])), botV = vertsOf([botSet]);
+    const { d, back } = grow([...topSet], (o) => theirs.has(o) || !tris[o].some((v) => botV.has(v)));
+    let pick = null;
+    others.forEach(([a, b], j) => { for (const [s, k] of [[a, 0], [b, 1]]) for (const i of s) if (!pick || d[i] < pick.d) pick = { d: d[i], i, j, k }; });
+    if (!pick || !isFinite(pick.d)) throw new Error("the top can't be joined up");
+    for (let i = back[pick.i]; i >= 0 && !topSet.has(i); i = back[i]) topSet.add(i);
+    const [a, b] = others.splice(pick.j, 1)[0];
+    for (const i of pick.k ? b : a) topSet.add(i);
+    for (const i of pick.k ? a : b) botSet.add(i);
+  }
+  // the bottom joined up too, keeping off the top
+  const botParts = (() => {
+    const parts = [], left = new Set(botSet);
+    while (left.size) {
+      const first = left.values().next().value, part = new Set([first]), q = [first];
+      left.delete(first);
+      for (let h = 0; h < q.length; h++) for (const [o] of across[q[h]]) if (left.has(o)) { left.delete(o); part.add(o); q.push(o); }
+      parts.push(part);
+    }
+    return parts;
+  })();
+  const bot = new Set(botParts[0]);
+  for (const part of botParts.slice(1)) {
+    const topV = vertsOf([topSet]), { d, back } = grow([...bot], (o) => !tris[o].some((v) => topV.has(v)) || part.has(o));
+    let end = -1;
+    for (const i of part) if (end < 0 || d[i] < d[end]) end = i;
+    if (!isFinite(d[end])) throw new Error("the bottom can't be joined up");
+    for (let i = end; i >= 0 && !bot.has(i); i = back[i]) bot.add(i);
+    for (const i of part) bot.add(i);
+  }
+  // every other triangle to the nearer
+  for (const i of topSet) label[i] = 1;
+  for (const i of bot) label[i] = 2;
+  {
+    const d = new Float64Array(T).fill(Infinity), heap = minHeap();
+    for (let i = 0; i < T; i++) if (label[i]) { d[i] = 0; heap.push(0, i); }
+    while (heap.size) {
+      const [di, i] = heap.pop();
+      if (di > d[i]) continue;
+      for (const [o, w] of across[i]) if (di + w < d[o]) { d[o] = di + w; label[o] = label[i]; heap.push(d[o], o); }
+    }
+  }
+  // (a vertex where the top and bottom meet more than once round it: its triangles all to one, so
+  // where they meet is one line through it; the loops' sides kept)
+  const onLoop = new Set(loops.flat()), seeded = new Set(seed.flatMap(([a, b]) => [...a, ...b]));
+  const changesAt = (v) => {
+    const fan = fanOf.get(v), ring = [], x0 = fan.keys().next().value;
+    let x = x0;
+    do { const [y, i] = fan.get(x); ring.push(label[i]); x = y; } while (x !== x0);
+    return { ring, changes: ring.filter((l, k) => l !== ring[(k + 1) % ring.length]).length };
+  };
+  for (let pass = 0; pass < 20; pass++) {
+    let pinched = 0;
+    for (const [v, fan] of fanOf) {
+      if (onLoop.has(v)) continue;
+      const { ring, changes } = changesAt(v);
+      if (changes <= 2) continue;
+      pinched++;
+      const most = ring.filter((l) => l === 1).length * 2 >= ring.length ? 1 : 2;
+      for (const [, [, i]] of fan) if (!seeded.has(i)) label[i] = most;
+    }
+    if (!pinched) break;
+  }
+  // (where they meet made shorter: a triangle with two of its three neighbors on the other side
+  // goes over, unless that pinches it; the nearest-to rule leaves it a long zigzag, and the halves
+  // laid flat from that wind round each other)
+  for (let pass = 0; pass < 200; pass++) {
+    let moved = 0;
+    for (let i = 0; i < T; i++) {
+      if (seeded.has(i)) continue;
+      const other = 3 - label[i];
+      if (across[i].filter(([o]) => label[o] === other).length < 2) continue;
+      label[i] = other;
+      if (tris[i].some((v) => !onLoop.has(v) && changesAt(v).changes > 2)) label[i] = 3 - other;
+      else moved++;
+    }
+    if (!moved) break;
+  }
+  // the outside's rim: where they meet, the top on its left
+  const top = Uint8Array.from(label, (l) => (l === 1 ? 1 : 0)), next = new Map();
+  tris.forEach((t, i) => { if (top[i]) t.forEach((p, k) => {
+    const q = t[(k + 1) % 3], key = ek(p, q);
+    if (!cut.has(key) && trisOf.get(key).some((j) => !top[j])) next.set(p, q);
+  }); });
+  if (!next.size) throw new Error("the top is everything");
+  const start = next.keys().next().value, outer = [start];
+  for (let v = next.get(start); v !== start; v = next.get(v)) { if (v === undefined || outer.length > next.size) throw new Error("the outside's rim isn't one loop"); outer.push(v); }
+  if (outer.length !== next.size) throw new Error(`the top and bottom meet in more than one loop (${next.size} edges, ${outer.length} round one)`);
+  return { top, outer };
+}
+
+// A surface with g ≥ 2 holes laid flat as a plate's top and bottom, like plateLayout but needing no
+// symmetry: handleLoops' loops the holes' rims and splitByLoops' meeting the outside's, then each
+// half laid out much as plateLayout lays its top (bridges along the axis from the outside to each
+// hole and back out, the two disks they leave laid flat round half an oval each with the holes
+// slits, the slits opened to circles, untangled). The two halves share their rims, so a rim's
+// vertices are put once; each half has its own bridges, between the same points. Returns { xz,
+// top, rims (the outside's first, as the top runs round them), turned }.
+// (On the six octagons and every two-holed surface this lays out with nothing turned over; on
+// three holes, some yet turn over hundreds.)
+export function cutLayout(P, mesh, { iterations = 2000, B = 1.8, holeScale = 2.5, untangling = {} } = {}) {
+  const g = P.surface.genus, A = 1.4 + 1.3 * g, n = mesh.verts.length, T = mesh.tris.length;
+  const lengths = edgeLengths(mesh), len = (p, q) => lengths.get(ek(p, q));
+  const loops = handleLoops(mesh, g, len), { top, outer: outerLoop } = splitByLoops(mesh, loops);
+  // each rim the way the top runs round it
+  const next = new Map(), has = new Set();
+  mesh.tris.forEach((t, i) => { if (top[i]) t.forEach((p, k) => has.add(`${p},${t[(k + 1) % 3]}`)); });
+  mesh.tris.forEach((t, i) => { if (top[i]) t.forEach((p, k) => { const q = t[(k + 1) % 3]; if (!has.has(`${q},${p}`)) next.set(p, q); }); });
+  const runs = [outerLoop, ...loops].map((rim) => { const run = [rim[0]]; for (let v = next.get(rim[0]); v !== rim[0]; v = next.get(v)) run.push(v); return run; });
+  const onRim = new Set(runs.flat()), [outer, ...holes] = runs;
+  // ---- each half: its triangles round each vertex, in order, and its neighbors
+  const halfOf = (side) => {
+    const at = new Map(), nb = [];
+    mesh.tris.forEach((t, i) => { if (!!top[i] !== side) return; t.forEach((v, k) => { (at.get(v) ?? at.set(v, []).get(v)).push(t); (nb[v] ??= new Set()).add(t[(k + 1) % 3]).add(t[(k + 2) % 3]); }); });
+    const nbArr = [];
+    for (const [v] of at) nbArr[v] = [...nb[v]];
+    const fan = (v) => {
+      const nx = new Map();
+      for (const t of at.get(v)) { const j = t.indexOf(v); nx.set(t[(j + 1) % 3], t[(j + 2) % 3]); }
+      const heads = new Set(nx.values()), first = [...nx.keys()].find((k) => !heads.has(k)) ?? nx.keys().next().value, order = [first];
+      while (nx.has(order.at(-1)) && nx.get(order.at(-1)) !== first) order.push(nx.get(order.at(-1)));
+      return order;
+    };
+    return { side, at, nbArr, fan, verts: new Set(at.keys()), idx: mesh.tris.map((_, i) => i).filter((i) => !!top[i] === side) };
+  };
+  const halves = [halfOf(true), halfOf(false)];
+  // (each half a sphere with g + 1 holes: V − E + F = 1 − g)
+  for (const h of halves) {
+    const edges = new Set();
+    for (const i of h.idx) mesh.tris[i].forEach((p, k) => edges.add(ek(p, mesh.tris[i][(k + 1) % 3])));
+    const chi = h.verts.size - edges.size + h.idx.length;
+    if (chi !== 1 - g) throw new Error(`the ${h.side ? "top" : "bottom"} isn't a sphere with ${g + 1} holes (V − E + F = ${chi})`);
+  }
+  // (a way along a rim, by length: where each vertex is along it, from its first)
+  const arcAt = (run) => { const at = [0]; for (let k = 1; k <= run.length; k++) at.push(at[k - 1] + len(run[k - 1], run[k % run.length])); return at; };
+  const opposite = (run, v) => {
+    const at = arcAt(run), i = run.indexOf(v), want = (at[i] + at.at(-1) / 2) % at.at(-1);
+    let best = 0;
+    for (let k = 0; k < run.length; k++) if (Math.abs(at[k] - want) < Math.abs(at[best] - want)) best = k;
+    return run[best];
+  };
+  // ---- the bridges: from the outside's left end to the nearest hole, out its far side to the next
+  // nearest, …, and from the last back to the outside's right end; each leaving its rim straight.
+  // On the top and the bottom both, between the same points: each next hole and where on it, the
+  // nearest by the two ways together (by the top's alone, the bottom's ways wind round the holes
+  // to get there, and its triangles come out laid over them).
+  const router = (h, gap) => {
+    const nearRim = within(h.nbArr, [...onRim], gap), avoid = new Set(), paths = [];
+    const straightFrom = (s) => {
+      const f = h.fan(s), way = [s, f[Math.floor(f.length / 2)]];
+      for (let k = 0; k < gap; k++) { const f2 = h.fan(way.at(-1)), i = f2.indexOf(way.at(-2)); way.push(f2[(i + Math.floor(f2.length / 2)) % f2.length]); }
+      return way;
+    };
+    const clear = (way) => !way.slice(1).some((v) => onRim.has(v) || avoid.has(v));
+    // (every target the shortest way reaches from s: target → { cost, path })
+    const reach = (s, targets) => {
+      const out = new Map(), a = straightFrom(s);
+      if (!clear(a)) return out;
+      const stubs = new Map();
+      for (const t of targets) { const b = straightFrom(t); if (clear(b)) (stubs.get(b.at(-1)) ?? stubs.set(b.at(-1), []).get(b.at(-1))).push(b); }
+      const from = a.at(-1), dist = new Map([[from, 0]]), back = new Map(), heap = minHeap(), done = new Set();
+      heap.push(0, from);
+      while (heap.size) {
+        const [d, v] = heap.pop();
+        if (done.has(v)) continue;
+        done.add(v);
+        for (const b of stubs.get(v) ?? []) {
+          const way = [v];
+          for (let x = v; back.has(x); x = back.get(x)) way.unshift(back.get(x));
+          const path = [...a, ...way.slice(1), ...[...b].reverse().slice(1)], t = b[0];
+          if (!out.has(t)) out.set(t, { cost: d + lengthOf(a) + lengthOf(b), path });
+        }
+        for (const w of h.nbArr[v]) {
+          if (done.has(w) || !(stubs.has(w) || (!onRim.has(w) && !avoid.has(w) && !nearRim.has(w)))) continue;
+          const e = d + len(v, w);
+          if (e < (dist.get(w) ?? Infinity)) { dist.set(w, e); back.set(w, v); heap.push(e, w); }
+        }
+      }
+      return out;
+    };
+    const commit = (path) => { paths.push(path); for (const v of path) { avoid.add(v); for (const w of h.nbArr[v] ?? []) avoid.add(w); } };
+    return { reach, commit, paths };
+  };
+  const lengthOf = (way) => way.slice(1).reduce((s, v, k) => s + len(way[k], v), 0);
+  // (plans from 16 places round the outside, each next hole picked by both halves' ways or by the
+  // top's alone: neither always lays out with nothing turned over, so the shortest few are tried)
+  const plans = [], at0 = arcAt(outer);
+  for (let gap = 2; gap >= 0; gap--) for (let c = 0; c < 16; c++) for (const both of [true, false]) {
+    const want = (c / 16) * at0.at(-1);
+    let k0 = 0;
+    for (let k = 0; k < outer.length; k++) if (Math.abs(at0[k] - want) < Math.abs(at0[k0] - want)) k0 = k;
+    const L0 = outer[k0], R0 = opposite(outer, L0), up = router(halves[0], gap), down = router(halves[1], gap), order = [], sides = [];
+    let from = L0, okAll = true, total = 0;
+    const left = holes.map((_, i) => i);
+    while (left.length && okAll) {
+      const targets = left.flatMap((i) => holes[i]), a = up.reach(from, targets), b = down.reach(from, targets);
+      let pick = null;
+      for (const [t, x] of a) { const y = b.get(t), cost = x.cost + (both ? y?.cost : 0); if (y && (!pick || cost < pick.cost)) pick = { t, cost, x, y }; }
+      if (!pick) { okAll = false; break; }
+      up.commit(pick.x.path); down.commit(pick.y.path); total += pick.x.cost + pick.y.cost;
+      const i = left.find((j) => holes[j].includes(pick.t));
+      left.splice(left.indexOf(i), 1); order.push(i);
+      sides.push([pick.t, (from = opposite(holes[i], pick.t))]);
+    }
+    if (!okAll) continue;
+    const a = up.reach(from, [R0]).get(R0), b = down.reach(from, [R0]).get(R0);
+    if (!a || !b) continue;
+    up.commit(a.path); down.commit(b.path); total += a.cost + b.cost;
+    plans.push({ total, top: up.paths, bottom: down.paths, order, sides: [[L0, R0], ...sides] });
+  }
+  if (!plans.length) throw new Error("no bridges across the halves");
+  plans.sort((a, b) => a.total - b.total);
+  let laid = null;
+  for (const plan of plans.slice(0, 16)) {
+    for (const slit of [true, false]) {
+      let got;
+      try { got = layWith(plan, slit); } catch { break; }
+      if (!laid || got.turned < laid.turned) laid = got;
+      if (!laid.turned) break;
+    }
+    if (laid && !laid.turned) break;
+  }
+  if (!laid) throw new Error("no bridges pair the halves' disks alike");
+  return { xz: laid.xz, top, rims: runs, turned: laid.turned };
+  // (laid out by a plan: Tutte against slits, each disk convex so nothing in it folds, though
+  // what's beside a slit crushes flat onto it; or with the holes round, which can fold where the
+  // ways round the holes wind)
+  function layWith(best, slit) {
+  // ---- the disks each half's rims and bridges leave; the upper ones: the outside's half from its
+  // left end to its right as the top runs, and the hole halves beside the same disk
+  const trisOf = new Map();
+  mesh.tris.forEach((t, i) => t.forEach((p, k) => { const key = ek(p, t[(k + 1) % 3]); (trisOf.get(key) ?? trisOf.set(key, []).get(key)).push(i); }));
+  const diskIds = (h, paths) => {
+    const cutAlso = new Set([...runs.flatMap((w) => w.map((v, k) => ek(v, w[(k + 1) % w.length]))), ...paths.flatMap((w) => w.slice(1).map((v, k) => ek(w[k], v)))]);
+    const disk = new Int32Array(T).fill(-1);
+    for (const i0 of h.idx) {
+      if (disk[i0] >= 0) continue;
+      const q = [i0]; disk[i0] = i0;
+      for (let j = 0; j < q.length; j++) mesh.tris[q[j]].forEach((p, k) => {
+        const key = ek(p, mesh.tris[q[j]][(k + 1) % 3]);
+        if (!cutAlso.has(key)) for (const o of trisOf.get(key)) if (!!top[o] === h.side && disk[o] < 0) { disk[o] = i0; q.push(o); }
+      });
+    }
+    const of = (p, q) => disk[trisOf.get(ek(p, q)).find((i) => !!top[i] === h.side)];
+    return Object.assign(of, { disk });
+  };
+  const split = (run, [l, r]) => {
+    const from = run.indexOf(l), turned = [...run.slice(from), ...run.slice(0, from)], k = turned.indexOf(r);
+    return [turned.slice(0, k + 1), [...turned.slice(k), l].reverse()];
+  };
+  const topDisk = diskIds(halves[0], best.top), botDisk = diskIds(halves[1], best.bottom);
+  const [arc, arcBelow] = split(outer, best.sides[0]), chain = best.order.map((i) => holes[i]);
+  const holeHalves = chain.map((run, i) => split(run, best.sides[i + 1]));
+  const upperHalves = holeHalves.map((hh) => hh.find((x) => topDisk(x[0], x[1]) === topDisk(arc[0], arc[1])));
+  if (upperHalves.some((x) => !x)) throw new Error("a hole's halves are both on one disk of the top");
+  for (const x of upperHalves) if (botDisk(x[0], x[1]) !== botDisk(arc[0], arc[1])) throw new Error("the bottom's disks pair the rims' halves otherwise than the top's");
+  const lowerHalves = holeHalves.map((hh, i) => hh.find((x) => x !== upperHalves[i]));
+  for (const [disk, what, h] of [[topDisk, "top", halves[0]], [botDisk, "bottom", halves[1]]]) {
+    const pieces = new Set(h.idx.map((i) => disk.disk[i])).size;
+    if (pieces !== 2) throw new Error(`the ${what}'s bridges cut it in ${pieces}`);
+    if (disk(arc[0], arc[1]) === disk(arcBelow[0], arcBelow[1])) throw new Error(`the ${what}'s bridges leave it in one piece`);
+    // (every edge of each half beside its disk)
+    for (const [halvesOf, side, name] of [[lowerHalves, arcBelow, "lower"], [upperHalves, arc, "upper"], [[arc], arc, "upper"], [[arcBelow], arcBelow, "lower"]])
+      for (const x of halvesOf) for (let k = 1; k < x.length; k++) if (disk(x[k - 1], x[k]) !== disk(side[0], side[1])) throw new Error(`the ${what}'s ${name} disk misses part of a rim's ${name} half`);
+  }
+  const upperRim = new Set(upperHalves.flat());
+  // ---- laid flat: the axis shared out by length (bridge, slit, bridge, …) as plateLayout does
+  const xz = new Float64Array(2 * n), pinned = new Uint8Array(n);
+  const shares = (way) => { const at = [0]; for (let k = 1; k < way.length; k++) at.push(at[k - 1] + len(way[k - 1], way[k])); return at.map((x) => x / at.at(-1)); };
+  const place = (way, f) => shares(way).forEach((s, i) => { const v = way[i]; [xz[2 * v], xz[2 * v + 1]] = f(s); pinned[v] = 1; });
+  const pieces = best.top.flatMap((path, k) => [lengthOf(path), ...(k < chain.length ? [holeScale * lengthOf(upperHalves[k])] : [])]);
+  const total = pieces.reduce((a, b) => a + b), stops = [-A];
+  for (const l of pieces) stops.push(stops.at(-1) + (2 * A * l) / total);
+  const slits = chain.map((_, i) => [stops[2 * i + 1], stops[2 * i + 2]]), open = slitOpener(slits);
+  chain.forEach((_, i) => {
+    const [lo, hi] = slits[i], at = (s) => [(lo + hi) / 2 - ((hi - lo) / 2) * Math.cos(Math.PI * s), 0];
+    place(upperHalves[i], at); place(lowerHalves[i], at);
+  });
+  const onAxis = (x0, x1, s) => {
+    const X0 = open([x0, 0])[0], X = X0 + s * (open([x1, 0])[0] - X0);
+    let lo = x0, hi = x1;
+    for (let k = 0; k < 50; k++) { const m = (lo + hi) / 2; if (open([m, 0])[0] < X) lo = m; else hi = m; }
+    return [(lo + hi) / 2, 0];
+  };
+  for (const paths of [best.top, best.bottom]) paths.forEach((path, k) => place(path, (s) => onAxis(stops[2 * k], stops[2 * k + 1], s)));
+  const oval = Array.from({ length: 721 }, (_, j) => [-A * Math.cos((Math.PI * j) / 720), -B * Math.sin((Math.PI * j) / 720)]), ovalAt = [0];
+  oval.forEach((p, j) => { if (j) { const a = open(oval[j - 1]), b = open(p); ovalAt.push(ovalAt[j - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); } });
+  const onOval = (s, flip) => {
+    const want = s * ovalAt.at(-1), j = Math.max(1, ovalAt.findIndex((l) => l >= want)), t = (want - ovalAt[j - 1]) / (ovalAt[j] - ovalAt[j - 1] || 1);
+    return [oval[j - 1][0] + t * (oval[j][0] - oval[j - 1][0]), flip * (oval[j - 1][1] + t * (oval[j][1] - oval[j - 1][1]))];
+  };
+  place(arc, (s) => onOval(s, 1)); place(arcBelow, (s) => onOval(s, -1));
+  // each half's inside: Tutte, by plateLayout's weights; then each half untangled
+  const local = mesh.local, weight = meanValueWeights(mesh, local), free = new Uint8Array(n);
+  const nbrsOf = (v) => [...(halves[0].verts.has(v) ? halves[0] : halves[1]).nbArr[v]];
+  if (slit) {
+    // Each disk laid out round a circle first (Tutte: nothing folds, the circle round everywhere),
+    // then the circle taken onto the disk's half oval along rays from a point inside it. (Straight
+    // onto the half oval, an edge between two points of the axis, a bridge's and a rim's, crushes
+    // everything past it flat onto the axis, and opened that folds over.)
+    const upper = new Uint8Array(n), upTop = topDisk(arc[0], arc[1]), upBot = botDisk(arc[0], arc[1]);
+    const members = new Map();
+    mesh.tris.forEach((t, i) => {
+      const id = top[i] ? topDisk.disk[i] : botDisk.disk[i], up = top[i] ? id === upTop : id === upBot;
+      const m = members.get(`${top[i]}:${id}`) ?? members.set(`${top[i]}:${id}`, { up, verts: new Set() }).get(`${top[i]}:${id}`);
+      for (const v of t) { m.verts.add(v); if (up) upper[v] = 1; }
+    });
+    const disk = new Float64Array(2 * n);
+    for (const { up, verts } of members.values()) {
+      const c = [0, (up ? -B : B) / 3];
+      // (where a ray from c at angle a leaves the half oval: the axis, or the oval)
+      const edgeAt = (a) => {
+        const d = [Math.cos(a), Math.sin(a)], qa = d[0] ** 2 / A ** 2 + d[1] ** 2 / B ** 2, qb = 2 * ((c[0] * d[0]) / A ** 2 + (c[1] * d[1]) / B ** 2), qc = c[0] ** 2 / A ** 2 + c[1] ** 2 / B ** 2 - 1;
+        let t = (-qb + Math.sqrt(qb * qb - 4 * qa * qc)) / (2 * qa);
+        if (d[1] !== 0 && (up ? d[1] > 0 : d[1] < 0)) t = Math.min(t, -c[1] / d[1]);
+        return t;
+      };
+      for (const v of verts) if (pinned[v]) { const a = Math.atan2(xz[2 * v + 1] - c[1], xz[2 * v] - c[0]); disk[2 * v] = Math.cos(a); disk[2 * v + 1] = Math.sin(a); }
+      const inside = [...verts].filter((v) => !pinned[v]);
+      tutte(inside, nbrsOf, weight, disk, iterations);
+      for (const v of inside) {
+        const r = Math.hypot(disk[2 * v], disk[2 * v + 1]), a = Math.atan2(disk[2 * v + 1], disk[2 * v]), t = edgeAt(a) * r;
+        xz[2 * v] = c[0] + t * Math.cos(a); xz[2 * v + 1] = c[1] + t * Math.sin(a);
+      }
+    }
+    for (let v = 0; v < n; v++) [xz[2 * v], xz[2 * v + 1]] = open([xz[2 * v], xz[2 * v + 1]], onRim.has(v) ? upperRim.has(v) : !!upper[v]);
+  } else {
+    for (const v of onRim) [xz[2 * v], xz[2 * v + 1]] = open([xz[2 * v], xz[2 * v + 1]], upperRim.has(v));
+    tutte([...halves[0].verts, ...halves[1].verts].filter((v) => !onRim.has(v)), nbrsOf, weight, xz, iterations);
+  }
+  let turned = 0;
+  for (const h of halves) {
+    free.fill(0);
+    for (const v of h.verts) if (!onRim.has(v)) free[v] = 1;
+    turned += untangle(h.idx.map((i) => mesh.tris[i]), h.idx.map((i) => local[i]), xz, free, untangling);
+  }
+  return { xz, turned };
+  }
+}
+
+// (the slits opened to circles one at a time, as plateLayout does: see there)
+function slitOpener(slits) {
+  const sqrt = (re, im) => { const m = Math.hypot(re, im), r = Math.sqrt((m + re) / 2), i = Math.sqrt(Math.max(0, (m - re) / 2)); return [r, im < 0 ? -i : i]; };
+  const opened = [];
+  for (const slit of slits) {
+    const [lo, hi] = slit.map((x) => opened.reduce((p, f) => f(p, false), [x, 0])[0]), mid = (lo + hi) / 2, r = (hi - lo) / 4;
+    opened.push(([x, z], up) => {
+      const zr = x - mid, [ar, ai] = sqrt(zr - 2 * r, z), [br, bi] = sqrt(zr + 2 * r, z);
+      let sr = ar * br - ai * bi, si = ar * bi + ai * br;
+      if (Math.abs(z) < 1e-12 && Math.abs(zr) < 2 * r && (si < 0) !== up) { sr = -sr; si = -si; }
+      return [mid + (zr + sr) / 2, (z + si) / 2];
+    });
+  }
+  return (p, up = false) => opened.reduce((q, f) => f(q, up), p);
+}
+// each edge (as "v,w") weighed by its mean value from v: the tangents of half the angles beside it
+// over its length, from the triangles' own shapes on their tiles
+function meanValueWeights(mesh, local) {
+  const weight = new Map();
   mesh.tris.forEach((t, i) => {
-    if (!top[i]) return;
-    const pts = t.map((v) => local[Math.floor(i / per)].get(v));
+    const pts = local[i];
     for (let k = 0; k < 3; k++) {
       const [a, b, c] = [0, 1, 2].map((j) => (k + j) % 3), u = [pts[b][0] - pts[a][0], pts[b][1] - pts[a][1]], w = [pts[c][0] - pts[a][0], pts[c][1] - pts[a][1]];
       const half = Math.tan(Math.abs(Math.atan2(u[0] * w[1] - u[1] * w[0], u[0] * w[0] + u[1] * w[1])) / 2);
       for (const o of [b, c]) { const key = `${t[a]},${t[o]}`; weight.set(key, (weight.get(key) ?? 0) + half / hyperbolic(pts[a], pts[o])); }
     }
   });
-  const inside = [...topVerts].filter((v) => !pinned[v]);
-  // (each inside vertex's neighbors and their shares of it, flat, for speed)
+  return weight;
+}
+// every vertex of `inside` moved to its neighbors' weighed average, over and over (the rest held)
+function tutte(inside, nbrsOf, weight, xz, iterations) {
   const start = new Int32Array(inside.length + 1), near = [], share = [];
   inside.forEach((v, i) => {
-    const ws = [...nb.get(v)], ks = ws.map((w) => weight.get(`${v},${w}`)), sum = ks.reduce((a, b) => a + b);
+    const ws = nbrsOf(v), ks = ws.map((w) => weight.get(`${v},${w}`)), sum = ks.reduce((a, b) => a + b);
     ws.forEach((w, j) => { near.push(w); share.push(ks[j] / sum); });
     start[i + 1] = near.length;
   });
@@ -509,36 +1057,28 @@ export function plateLayout(P, mesh, { iterations = 2000, A = 4, B = 1.8, holeSc
     for (let j = start[i]; j < start[i + 1]; j++) { const w = nearA[j], k = shareA[j]; x += k * xz[2 * w]; z += k * xz[2 * w + 1]; }
     xz[2 * v] += 1.8 * (x - xz[2 * v]); xz[2 * v + 1] += 1.8 * (z - xz[2 * v + 1]);
   }
-  for (const v of topVerts) [xz[2 * v], xz[2 * v + 1]] = open([xz[2 * v], xz[2 * v + 1]], upperRim.has(v));
-  // Opened, triangles crushed against the slits turn over, and the tiles near the holes come out
-  // small: then all but the rims moved to make each triangle as near its own shape and size as
-  // they can be, none turned over.
-  const topIndex = mesh.tris.map((_, i) => i).filter((i) => top[i]), free = new Uint8Array(n);
-  for (const v of inside) free[v] = 1;
-  for (const path of best.paths) for (const v of path) if (!onRim.has(v)) free[v] = 1;
-  const turned = untangle(topIndex.map((i) => mesh.tris[i]), topIndex.map((i) => mesh.tris[i].map((v) => local[Math.floor(i / per)].get(v))), xz, free);
-  // the bottom: the top's images, mirrored
-  mesh.tris.forEach((t, i) => { if (!top[i]) for (const v of t) if (!topVerts.has(v)) { const w = turn[v]; xz[2 * v] = xz[2 * w]; xz[2 * v + 1] = -xz[2 * w + 1]; } });
-  return { xz, top, rims: runs, turned };
 }
 
-// A two-holed surface in space, smooth by its making: a pretzel given by an equation,
-// y² = s·e(x, z)·h₁(x, z)·h₂(x, z), e > 0 inside an oval and each hᵢ > 0 outside a hole's circle
+// A surface with holes in space, smooth by its making: a pretzel given by an equation,
+// y² = s·e(x, z)·h₁(x, z)·h₂(x, z)…, e > 0 inside an oval and each hᵢ > 0 outside a hole's circle
 // (the plate's top and bottom: y = ±√(s·…), meeting where the product is 0, round over at the rims),
 // and the tiles laid on it. Laid out flat then lifted by a height, the tiles carried every kink of
 // the layout into the curves on the surface, and every crease of the height into dents; here the
 // shape is fixed and smooth, and only where each vertex sits on it is worked out:
-//   - start: plateLayout's plate, the oval and the holes fitted to its rims, each vertex lifted onto
-//     the top or bottom at its place (and the rims' onto the rims);
+//   - start: a plate (layout: "plate", plateLayout's, by the half turn; "cut", cutLayout's), the
+//     oval and the holes fitted to its rims, each vertex lifted onto the top or bottom at its place
+//     (and the rims' onto the rims);
 //   - then every vertex moved over the surface (put back onto it after each step) to the least of
 //     the same energy untangle uses, on the surface: each triangle as near its own shape, angles
 //     and size, as it can be, none turned over (here, run round against the way out of the surface).
 // Returns { pos (x y z per vertex), shape (the pretzel's numbers: see pretzel) }.
-export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30, steps = 300 } = {}) {
-  const { xz, top, rims } = plateLayout(P, mesh), n = mesh.verts.length, T = mesh.tris.length;
-  // ---- the shape: the oval and holes fitted to the layout's rims (the outside's the longest round)
-  const len = (r) => r.reduce((s, v, k) => s + Math.hypot(xz[2 * v] - xz[2 * r[(k + 1) % r.length]], xz[2 * v + 1] - xz[2 * r[(k + 1) % r.length] + 1]), 0);
-  const outer = rims.reduce((a, b) => (len(b) > len(a) ? b : a)), holes = rims.filter((r) => r !== outer);
+export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30, steps = 300, layout = "plate" } = {}) {
+  const { xz, top, rims, turned } = (layout === "plate" ? plateLayout : cutLayout)(P, mesh), n = mesh.verts.length;
+  if (turned) throw new Error(`${turned} triangles turned over laid flat`);
+  // ---- the shape: the oval and holes fitted to the layout's rims (the outside's the one reaching
+  // furthest out)
+  const reach = (r) => Math.max(...r.map((v) => Math.hypot(xz[2 * v], xz[2 * v + 1])));
+  const outer = rims.reduce((a, b) => (reach(b) > reach(a) ? b : a)), holes = rims.filter((r) => r !== outer);
   const A = Math.max(...outer.map((v) => Math.abs(xz[2 * v]))), B = Math.max(...outer.map((v) => Math.abs(xz[2 * v + 1])));
   const circles = holes.map((r) => {
     const cx = r.reduce((s, v) => s + xz[2 * v], 0) / r.length, cz = r.reduce((s, v) => s + xz[2 * v + 1], 0) / r.length;
@@ -554,8 +1094,7 @@ export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30,
   mesh.tris.forEach((t, i) => t.forEach((v) => { if (!onRim.has(v)) side[v] = top[i] ? 1 : -1; }));
   for (let v = 0; v < n; v++) x.set([xz[2 * v], side[v] * Math.sqrt(Math.max(0, shape.s * F(xz[2 * v], xz[2 * v + 1])[0])), xz[2 * v + 1]], 3 * v);
   project(x);
-  const per = T / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at)), local = mesh.tris.map((t, i) => t.map((v) => at[Math.floor(i / per)].get(v)));
-  settleOnSurface(mesh.tris, local, x, out, project, { lambda, rounds, steps });
+  settleOnSurface(mesh.tris, mesh.local, x, out, project, { lambda, rounds, steps });
   return { pos: x, shape };
 }
 
@@ -567,7 +1106,9 @@ export function pretzel({ A, B, circles, s }) {
   const F = (x, z) => {
     let f = 1 - (x / A) ** 2 - (z / B) ** 2, fx = (-2 * x) / (A * A), fz = (-2 * z) / (B * B);
     for (const [cx, cz, r] of circles) {
-      const q = ((x - cx) ** 2 + (z - cz) ** 2) / (r * r) - 1, qx = (2 * (x - cx)) / (r * r), qz = (2 * (z - cz)) / (r * r);
+      // (1 − r²/d²: 0 on the hole's circle, and levelling off to 1 away from it, so a small hole
+      // doesn't leave the rest of the plate crushed thin)
+      const d2 = Math.max((x - cx) ** 2 + (z - cz) ** 2, 1e-12), q = 1 - (r * r) / d2, k = (2 * r * r) / (d2 * d2), qx = k * (x - cx), qz = k * (z - cz);
       [f, fx, fz] = [f * q, fx * q + f * qx, fz * q + f * qz];
     }
     return [f, fx, fz];
@@ -668,8 +1209,8 @@ function settleOnSurface(tris, local, x, out, project, { lambda, rounds, steps }
 export function loopSurface(mesh, pos, levels = 2, smooth = true) {
   let X = Float64Array.from(pos), tris = mesh.tris.map((t) => [...t]), tile, local;
   if (mesh.tiles) {
-    const per = mesh.tris.length / mesh.tiles.length, at = mesh.tiles.map((t) => new Map(t.at));
-    tile = tris.map((_, i) => Math.floor(i / per)); local = tris.map((t, i) => t.map((v) => at[tile[i]].get(v)));
+    const per = mesh.tris.length / mesh.tiles.length;
+    tile = tris.map((_, i) => Math.floor(i / per)); local = mesh.local;
   } else ({ tile, local } = mesh);
   const ek = (p, q) => (p < q ? `${p},${q}` : `${q},${p}`);
   for (let l = 0; l < levels; l++) {
@@ -740,15 +1281,56 @@ export function unpackShape({ shape, most, at }) {
 export function implicitSurface(mesh, { at, shape }) {
   const fine = loopSurface(mesh, new Float64Array(3 * mesh.verts.length), 2, false);
   if (fine.pos.length !== at.length) throw new Error("the kept shape is for another mesh");
-  const { project, out } = pretzel(shape);
+  const { project, out, onto } = pretzel(shape);
   fine.pos = Float64Array.from(at);
   project(fine.pos);
+  splitLong(fine, onto);
   fine.normals = new Float64Array(fine.pos.length);
   for (let v = 0; v < fine.pos.length / 3; v++) {
     const [, gx, gy, gz] = out(fine.pos[3 * v], fine.pos[3 * v + 1], fine.pos[3 * v + 2]), l = Math.hypot(gx, gy, gz) || 1;
     fine.normals.set([gx / l, gy / l, gz / l], 3 * v);
   }
   return fine;
+}
+
+// The triangles much longer in space than most (where the tiles are stretched thin over the
+// pretzel, as round the end of the tube from one corner) split in two across their longest side,
+// again and again, the triangle on the other side of it split there too (first split across its
+// own longest side, if that's another: Rivara's, so the mesh stays whole and the triangles don't
+// get thinner); each new point on the pretzel (onto) and halfway along the side on its tile.
+// (Drawn flat, a stretched triangle is a facet on the silhouette and a kink in the lines.) In
+// place on { pos, tris, tile, local }.
+function splitLong(S, onto, factor = 3) {
+  const P = Array.from(S.pos), { tris, tile, local } = S, at = (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+  const len = (a, b) => Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]);
+  const lengths = [];
+  for (const t of tris) for (let k = 0; k < 3; k++) lengths.push(len(t[k], t[(k + 1) % 3]));
+  lengths.sort((a, b) => a - b);
+  const most = factor * lengths[lengths.length >> 1], sides = new Map();
+  const side = (a, b) => (a < b ? `${a},${b}` : `${b},${a}`);
+  const index = (i) => tris[i].forEach((a, k) => { const key = side(a, tris[i][(k + 1) % 3]); (sides.get(key) ?? sides.set(key, new Set()).get(key)).add(i); });
+  const unindex = (i) => tris[i].forEach((a, k) => sides.get(side(a, tris[i][(k + 1) % 3])).delete(i));
+  tris.forEach((_, i) => index(i));
+  const longest = (i) => { const t = tris[i]; let k = 0; for (let j = 1; j < 3; j++) if (len(t[j], t[(j + 1) % 3]) > len(t[k], t[(k + 1) % 3])) k = j; return k; };
+  // (triangle i cut from the corner across its side k, at the new point m: its two halves)
+  const halve = (i, k, m, lm) => {
+    const t = tris[i], L = local[i], [a, b, c] = [t[k], t[(k + 1) % 3], t[(k + 2) % 3]], [la, lb, lc] = [L[k], L[(k + 1) % 3], L[(k + 2) % 3]];
+    unindex(i);
+    tris[i] = [a, m, c]; local[i] = [la, lm, lc]; index(i);
+    tris.push([m, b, c]); local.push([lm, lb, lc]); tile.push(tile[i]); index(tris.length - 1);
+  };
+  const split = (i, depth = 0) => {
+    const k = longest(i), a = tris[i][k], b = tris[i][(k + 1) % 3], j = [...sides.get(side(a, b))].find((o) => o !== i);
+    if (depth < 50 && j !== undefined) { const kj = longest(j); if (side(tris[j][kj], tris[j][(kj + 1) % 3]) !== side(a, b)) { split(j, depth + 1); return split(i, depth + 1); } }
+    const m = P.length / 3, p = onto(at(a).map((x, d) => (x + at(b)[d]) / 2));
+    P.push(...p);
+    for (const o of j === undefined ? [i] : [i, j]) {
+      const t = tris[o], ko = t.findIndex((v, q) => side(v, t[(q + 1) % 3]) === side(a, b));
+      halve(o, ko, m, along(local[o][ko], local[o][(ko + 1) % 3], 0.5));
+    }
+  };
+  for (let i = 0; i < tris.length; i++) while (len(tris[i][longest(i)], tris[i][(longest(i) + 1) % 3]) > most) split(i);
+  S.pos = Float64Array.from(P);
 }
 
 // How many triangles of a surface on the pretzel run round the other way to most (turned over),

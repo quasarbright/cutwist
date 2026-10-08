@@ -1204,12 +1204,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const isHyper = () => !!P && P.kind === "hyper";
     function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles" || P.kind === "hyper"); } // (hoisted: the camera asks before this line runs)
     const has3D = () => !isHyper() || !!hyperShape();
-    // A two-holed hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel, the tiles laid
-    // on it ahead of time by data/add-shapes.mjs into regular-maps/shapes/): its mesh and the surface
-    // to draw, or null (another genus, or none kept for it); undefined while it's still to come.
-    // load() fetches it (once per surface) and calls done() when it's in.
+    // A hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel, the tiles laid on it ahead
+    // of time by data/add-shapes.mjs into regular-maps/shapes/, which index.json lists): its mesh and
+    // the surface to draw, or null (none kept for it); undefined while it's still to come. load()
+    // fetches it (once per surface) and calls done() when it's in.
     function hyperShape() {
-      if (!isHyper() || P.surface.genus !== 2) return null;
+      if (!isHyper()) return null;
       const got = (hyperShape.cache ||= new Map()).get(hyperShapeKey());
       return got === "loading" ? undefined : got;
     }
@@ -1218,10 +1218,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const key = hyperShapeKey(), cache = hyperShape.cache;
       if (cache.has(key)) return;
       cache.set(key, "loading");
-      fetch(`regular-maps/shapes/${key}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((kept) => {
+      hyperShape.index ??= fetch("regular-maps/shapes/index.json").then((r) => (r.ok ? r.json() : [])).catch(() => []);
+      hyperShape.index.then((keys) => (keys.includes(key) ? fetch(`regular-maps/shapes/${key}.json`).then((r) => (r.ok ? r.json() : null)) : null)).catch(() => null).then((kept) => {
         let shape = null;
         if (kept && isHyper() && hyperShapeKey() === key) try {
-          const mesh = hyperSurfaceMesh(P);
+          const mesh = hyperSurfaceMesh(P, kept.rings ?? 6, kept.perEdge ?? 6);
           shape = { mesh, surface: implicitSurface(mesh, unpackShape(kept)) };
         } catch (e) { console.warn(`no 3D view for {${P.N},${P.M}}:`, e.message); }
         if (kept && !shape && hyperShapeKey() !== key) { cache.delete(key); return; } // (another surface by now: fetch it again when asked)
@@ -2694,7 +2695,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // point's place in the disk changes across the screen. In a turning ring, the lines turned
     // back with it (the point's place turned the other way about the ring's middle).
     const hyperLines = {
-      uLines: { value: null }, uLineCount: { value: new Float32Array(64) }, uLineAll: { value: new Float32Array(64) }, uRings: { value: null }, uRingCount: { value: new Float32Array(64) },
+      uLines: { value: null }, uCounts: { value: null }, uRings: { value: null },
       uTurn: { value: 0 }, uTheta: { value: 0 }, uRingIn: { value: 0 }, uRingOut: { value: 0 }, uInk: { value: new THREE.Color(0x0a0b0e) },
     };
     let hyperCopies = []; // (per tile: every copy of a turning point near it, { axis, at })
@@ -2705,8 +2706,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         .replace("#include <uv_vertex>", "#include <uv_vertex>\nvDisk = aDisk; vTile = aTile;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
-          uniform highp sampler2D uLines; uniform highp sampler2D uRings;
-          uniform float uLineCount[64]; uniform float uLineAll[64]; uniform float uRingCount[64];
+          // (uLines: a row a tile, its lines; uCounts: per tile how many reach it, how many in all;
+          // uRings: a row a tile, the turning ring's middles near it, how many in texel 32)
+          uniform highp sampler2D uLines; uniform highp sampler2D uCounts; uniform highp sampler2D uRings;
           uniform float uTurn, uTheta, uRingIn, uRingOut; uniform vec3 uInk;
           varying vec2 vDisk; flat varying float vTile;
           vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
@@ -2715,7 +2717,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           // the disk's, turned back, moved back)
           vec2 unturned(vec2 p, int t) {
             if (uTurn < 0.5) return p;
-            int n = int(uRingCount[t]);
+            int n = int(texelFetch(uRings, ivec2(32, t), 0).x);
             for (int k = 0; k < 32; k++) {
               if (k >= n) break;
               vec2 a = texelFetch(uRings, ivec2(k, t), 0).xy, ca = vec2(a.x, -a.y);
@@ -2732,7 +2734,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           {
             int t = int(vTile + 0.5);
             vec2 q = unturned(vDisk, t), qx = dFdx(q), qy = dFdy(q);
-            int n = int(q == vDisk ? uLineCount[t] : uLineAll[t]); // (in a turning ring: the lines from past the tile too)
+            vec2 counts = texelFetch(uCounts, ivec2(t, 0), 0).xy;
+            int n = int(q == vDisk ? counts.x : counts.y); // (in a turning ring: the lines from past the tile too)
             float ink = 0.0;
             for (int i = 0; i < 1024; i++) {
               if (i >= n) break;
@@ -2808,16 +2811,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (two texels a line: its circle and kind, then a tile's edge's two corners)
       const width = Math.min(1024, Math.max(1, ...lines.map((l) => l.cuts.length + l.edges.length))), data = new Float32Array(2 * width * T * 4);
       // (the ones reaching the tile first, then the rest, which only a turning ring needs)
+      const counts = new Float32Array(4 * T);
       lines.forEach(({ cuts, edges, nearCuts, nearEdges }, t) => {
         const all = [...cuts.slice(0, nearCuts).map((q) => [q, 0]), ...edges.slice(0, nearEdges).map((q) => [q, 1]),
           ...cuts.slice(nearCuts).map((q) => [q, 0]), ...edges.slice(nearEdges).map((q) => [q, 1])].slice(0, width);
         all.forEach(([{ c, r, a, b }, edge], i) => data.set([c[0], c[1], r, edge, ...(edge ? [a[0], a[1], b[0], b[1]] : [0, 0, 0, 0])], 8 * (t * width + i)));
-        hyperLines.uLineCount.value[t] = Math.min(all.length, nearCuts + nearEdges);
-        hyperLines.uLineAll.value[t] = all.length;
+        counts.set([Math.min(all.length, nearCuts + nearEdges), all.length], 4 * t);
       });
-      hyperLines.uLines.value?.dispose();
+      for (const k of ["uLines", "uCounts", "uRings"]) hyperLines[k].value?.dispose();
       hyperLines.uLines.value = floatTexture(data, 2 * width, T);
-      hyperLines.uRings.value ??= floatTexture(new Float32Array(32 * 64 * 4), 32, 64);
+      hyperLines.uCounts.value = floatTexture(counts, T, 1);
+      hyperLines.uRings.value = floatTexture(new Float32Array(33 * T * 4), 33, T);
       hyperLines.uRings.value.userData.key = null; // (a new surface, new copies)
       if (surfaceTexture) surfaceTexture.dispose();
       surfaceTexture = new THREE.CanvasTexture(texCanvas);
@@ -2845,8 +2849,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           hyperCopies.forEach((copies, t) => {
             // (the nearest: the ones whose ring can reach the tile)
             const mine = copies.filter((c) => c.axis === turn.axis).sort((a, b) => Math.hypot(...a.at) - Math.hypot(...b.at)).slice(0, 32);
-            mine.forEach(({ at }, k) => data.set([at[0], at[1], 0, 0], 4 * (t * 32 + k)));
-            u.uRingCount.value[t] = mine.length;
+            mine.forEach(({ at }, k) => data.set([at[0], at[1], 0, 0], 4 * (t * 33 + k)));
+            data[4 * (t * 33 + 32)] = mine.length;
           });
           u.uRings.value.userData.key = ringKey;
           u.uRings.value.needsUpdate = true;

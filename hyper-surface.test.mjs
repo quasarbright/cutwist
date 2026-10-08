@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildHyper } from "./hyper.mjs";
-import { surfaceMesh, plateLayout, implicitSurface, unpackShape, pretzel, turnedOver, eulerOf } from "./hyper-surface.mjs";
+import { surfaceMesh, plateLayout, cutLayout, implicitSurface, unpackShape, pretzel, turnedOver, eulerOf } from "./hyper-surface.mjs";
 
 const file = (N, M) => JSON.parse(readFileSync(new URL(`./regular-maps/${N}-${M}.json`, import.meta.url), "utf8"));
 const build = (N, M, surface = 0) => buildHyper({ rule: "hyper", N, M, surface, cuts: [], blackout: [] }, file(N, M));
@@ -30,11 +30,11 @@ test("the six octagons lie flat as a plate's top and bottom, none turned over, t
   assert.equal(top.reduce((a, b) => a + b, 0) * 2, mesh.tris.length, "half on top");
 });
 
-test("every two-holed surface lies flat with none turned over (but {6,6}'s two hexagons)", () => {
-  for (const [N, M] of [[3, 8], [4, 6], [4, 8], [5, 10], [6, 4], [8, 3], [8, 4]]) {
-    const P = build(N, M);
+test("every two-holed surface lies flat with none turned over, by its half turn or cut along loops", () => {
+  for (const [N, M] of [[3, 8], [4, 6], [4, 8], [5, 10], [6, 4], [6, 6], [8, 3], [8, 4]]) {
+    const P = build(N, M), { layout, rings } = JSON.parse(readFileSync(new URL(`./regular-maps/shapes/${N}-${M}-0.json`, import.meta.url), "utf8"));
     assert.equal(P.surface.genus, 2, `{${N},${M}}`);
-    assert.equal(plateLayout(P, surfaceMesh(P)).turned, 0, `{${N},${M}}`);
+    assert.equal((layout === "plate" ? plateLayout : cutLayout)(P, surfaceMesh(P, rings, rings)).turned, 0, `{${N},${M}} (${layout} at ${rings})`);
   }
 });
 
@@ -43,18 +43,48 @@ test("a surface with no half turn (the Klein quartic) has no plate", () => {
   assert.throws(() => plateLayout(P, surfaceMesh(P)), /no half turn/);
 });
 
-// (the shapes kept in regular-maps/shapes/, as the page draws them)
+test("on a surface of two tiles, a triangle's corners are its own points on its tile (a vertex is at more than one place round a tile)", () => {
+  const P = build(8, 4), mesh = surfaceMesh(P, 12, 12);
+  let longest = 0;
+  mesh.tris.forEach((t, i) => t.forEach((_, k) => {
+    const [p, q] = [mesh.local[i][k], mesh.local[i][(k + 1) % 3]];
+    longest = Math.max(longest, Math.acosh(1 + (2 * ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2)) / ((1 - p[0] ** 2 - p[1] ** 2) * (1 - q[0] ** 2 - q[1] ** 2))));
+  }));
+  // (by one point per vertex per tile, edges came out 2.9 long)
+  assert.ok(longest < 0.6, `the longest edge ${longest.toFixed(2)}`);
+});
+
+test("laid out without the half turn, cut along loops round the handles: nothing turned over", () => {
+  for (const [N, M, k, r] of [[8, 4, 0, 12], [8, 3, 0, 6]]) {
+    const P = build(N, M, k), { turned, rims } = cutLayout(P, surfaceMesh(P, r, r));
+    assert.equal(turned, 0, `{${N},${M}}`);
+    assert.equal(rims.length, P.surface.genus + 1, `{${N},${M}}: the outside's rim and one a hole`);
+  }
+});
+
+// (the shapes kept in regular-maps/shapes/, as the page draws them: every one index.json lists)
+const keptKeys = JSON.parse(readFileSync(new URL("./regular-maps/shapes/index.json", import.meta.url), "utf8"));
+const keptOf = (key) => {
+  const [N, M, k] = key.split("-").map(Number), kept = JSON.parse(readFileSync(new URL(`./regular-maps/shapes/${key}.json`, import.meta.url), "utf8"));
+  const P = build(N, M, k);
+  return { P, kept, drawn: implicitSurface(surfaceMesh(P, kept.rings, kept.perEdge), unpackShape(kept)) };
+};
 const kept = (N, M, k = 0) => JSON.parse(readFileSync(new URL(`./regular-maps/shapes/${N}-${M}-${k}.json`, import.meta.url), "utf8"));
 
+test("every two-holed surface has a shape kept", () => {
+  for (const [N, M] of [[3, 8], [4, 6], [4, 8], [5, 10], [6, 4], [6, 6], [8, 3], [8, 4]]) assert.ok(keptKeys.includes(`${N}-${M}-0`), `{${N},${M}}`);
+});
+
 test("the kept shapes draw on the pretzel, smooth, with nothing turned over", () => {
-  for (const [N, M] of [[8, 3], [3, 8], [4, 6], [6, 4]]) {
-    const P = build(N, M), mesh = surfaceMesh(P), drawn = implicitSurface(mesh, unpackShape(kept(N, M)));
-    assert.equal(turnedOver(drawn, kept(N, M).shape), 0, `{${N},${M}}`);
-    const { out } = pretzel(kept(N, M).shape);
+  for (const key of keptKeys) {
+    const { P, kept, drawn } = keptOf(key);
+    assert.equal(turnedOver(drawn, kept.shape), 0, key);
+    const { out } = pretzel(kept.shape);
     let worst = 0;
     for (let v = 0; v < drawn.pos.length / 3; v++) { const [f, gx, gy, gz] = out(drawn.pos[3 * v], drawn.pos[3 * v + 1], drawn.pos[3 * v + 2]); worst = Math.max(worst, Math.abs(f) / (Math.hypot(gx, gy, gz) || 1)); }
-    assert.ok(worst < 1e-6, `{${N},${M}}: every point on the pretzel (off by ${worst})`);
-    assert.equal(eulerOf({ verts: { length: drawn.pos.length / 3 }, tris: drawn.tris }), -2, `{${N},${M}}: still two-holed`);
+    assert.ok(worst < 1e-6, `${key}: every point on the pretzel (off by ${worst})`);
+    assert.equal(eulerOf({ verts: { length: drawn.pos.length / 3 }, tris: drawn.tris }), 2 - 2 * P.surface.genus, `${key}: as many holes`);
+    assert.equal(kept.shape.circles.length, P.surface.genus, `${key}: a hole in the pretzel each`);
   }
 });
 
@@ -82,11 +112,12 @@ function bends({ pos, tris, tile, local }) {
 }
 
 test("lines on the tiles stay smooth on the kept shapes: no kinks where they cross the triangles", () => {
-  for (const [N, M] of [[8, 3], [3, 8], [4, 6], [6, 4]]) {
-    const b = bends(implicitSurface(surfaceMesh(build(N, M)), unpackShape(kept(N, M)))), at = (f) => b[Math.floor(f * (b.length - 1))];
-    // (split with Loop's rule after laying out, 1 in 100 turned 134° on the octagons)
-    assert.ok(at(0.5) < 3, `{${N},${M}}: half turn ${at(0.5).toFixed(1)}° or more`);
-    assert.ok(at(0.99) < 32, `{${N},${M}}: 1 in 100 turn ${at(0.99).toFixed(1)}°`);
+  for (const key of keptKeys) {
+    const b = bends(keptOf(key).drawn), at = (f) => b[Math.floor(f * (b.length - 1))];
+    // (split with Loop's rule after laying out, 1 in 100 turned 134° on the octagons; now 9° to 31°
+    // laid out by the half turn, 36° and 38° cut along loops)
+    assert.ok(at(0.5) < 3, `${key}: half turn ${at(0.5).toFixed(1)}° or more`);
+    assert.ok(at(0.99) < 40, `${key}: 1 in 100 turn ${at(0.99).toFixed(1)}°`);
   }
 });
 
