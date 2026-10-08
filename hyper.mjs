@@ -441,7 +441,7 @@ const reachesTile0 = (G, r) => G.Rv + r + 1e-9;
 // Tile 0's edges, as circles: through its two corners, square to the rim (|c|² = r² + 1); and
 // whether a point is inside tile 0 (outside every edge's circle, as its middle is)
 const edgeCache = new WeakMap();
-function tileEdges(G) {
+export function tileEdges(G) {
   if (!edgeCache.has(G)) edgeCache.set(G, G.corners.map((p, k) => {
     const q = G.corners[(k + 1) % G.N], w = [p[0] + q[0], p[1] + q[1]], l = abs(w), u = [w[0] / l, w[1] / l];
     const s = (p[0] * p[0] + p[1] * p[1] + 1) / (2 * (u[0] * p[0] + u[1] * p[1]));

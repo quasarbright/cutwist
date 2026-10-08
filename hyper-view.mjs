@@ -9,7 +9,7 @@
 // region's outline carried there by that dart's map: clipped to it, its stickers are the tiles under
 // it at home, in their colors. Under the pieces is the solved picture, which shows where no circle
 // reaches.
-import { mobius as Mb, darts, hdist, diskCircle } from "./hyper.mjs";
+import { mobius as Mb, darts, hdist, diskCircle, tileEdges } from "./hyper.mjs";
 import { faceHas } from "./tiles.mjs";
 import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
 import { colorDistance, PUZZLE_PALETTES } from "./puzzle.mjs";
@@ -72,7 +72,7 @@ const arcPoints = ({ c, r, a0, a1 }, step, end) => {
 };
 export function fragmentShapes(P) {
   if (shapeCache.has(P)) return shapeCache.get(P);
-  const circleOf = new Map(P.circles.map((c) => [c.c, c])), edgeOf = new Map((P.edges || []).map((e) => [e.c, e]));
+  const circleOf = new Map(P.circles.map((c) => [c.c, c])), edgeOf = new Map(tileEdges(P.G).map((e) => [e.c, e]));
   const out = P.regions.map((region) => STEPS.map((step) => {
     const loops = region.outline.map((loop) => loop.flatMap((arc) => arcPoints(arc, step, false))), cuts = [], edges = [];
     for (const loop of region.outline) for (const arc of loop) {
@@ -352,7 +352,7 @@ export class HyperView {
   // then y) of the two, seen with dart m. (The tile across edge k of tile 0 has its middle at the
   // reflection of 0 in that edge's circle: c/|c|².)
   firstSide(m, k) {
-    const e = this.P.edges[k], n = e.c[0] ** 2 + e.c[1] ** 2, a = Mb.apply(m, [0, 0]), b = Mb.apply(m, [e.c[0] / n, e.c[1] / n]);
+    const e = tileEdges(this.P.G)[k], n = e.c[0] ** 2 + e.c[1] ** 2, a = Mb.apply(m, [0, 0]), b = Mb.apply(m, [e.c[0] / n, e.c[1] / n]);
     return Math.abs(a[0] - b[0]) > 1e-9 ? a[0] < b[0] : a[1] < b[1];
   }
   polyline(ctx, pts, m) {

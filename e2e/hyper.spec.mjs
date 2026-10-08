@@ -147,6 +147,15 @@ test("sides and tiles at a corner: the other one follows to a hyperbolic tiling;
   expect(s).toMatchObject({ N: 6, M: 4 });
 });
 
+// (with no circles there are no pieces, and nothing works out tile 0's cuts: drawing it threw)
+test("a design with no circles draws: just the tiles", async ({ page }) => {
+  const design = { rule: "hyper", N: 12, M: 3, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] };
+  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  const s = await settled(page);
+  expect(s).toMatchObject({ N: 12, M: 3, pieces: 0 });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+});
+
 // A turn drawn partway, stopped at a whole number of steps, is the puzzle after that many steps:
 // the same picture (but for the edges of lines). Drawn with the page's own view, on a canvas of
 // its own, half way round and one step. (Big circles on the 12-gons, 4 of them: turned, the
