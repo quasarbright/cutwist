@@ -21,9 +21,12 @@ export function shapeFor(P) {
   const tries = [];
   for (const k of [0, 2, 4].map((d) => meshDetail(P) + d)) for (const layout of P.surface.genus === 2 ? ["plate", "cut"] : ["cut"]) {
     try {
-      const mesh = surfaceMesh(P, k, k), made = implicitShape(P, mesh, { layout });
+      // (laid flat with some turned over, the tiles mostly come right on the pretzel, where the rims
+      // can slide: unturning them again and again from the start; only kept with none turned over)
+      const mesh = surfaceMesh(P, k, k), made = implicitShape(P, mesh, { layout, allowTurned: true, restarts: 4 });
       if (!made.at.every(Number.isFinite)) throw new Error("lost its way (not a number)");
-      const kept = packShape(made), turned = turnedOver(implicitSurface(mesh, unpackShape(kept)), kept.shape);
+      const kept = packShape(made), drawn = implicitSurface(mesh, unpackShape(kept)), turned = turnedOver(drawn, kept.shape);
+      if (drawn.tooStretched) throw new Error("stretched too thin to draw smooth");
       if (turned) throw new Error(`${turned} triangles turned over`);
       return { rings: k, perEdge: k, layout, ...kept };
     } catch (e) { tries.push(`${layout} at ${k}: ${e.message}`); }

@@ -1094,9 +1094,9 @@ function tutte(inside, nbrsOf, weight, xz, iterations) {
 //     the same energy untangle uses, on the surface: each triangle as near its own shape, angles
 //     and size, as it can be, none turned over (here, run round against the way out of the surface).
 // Returns { pos (x y z per vertex), shape (the pretzel's numbers: see pretzel) }.
-export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30, steps = 300, layout = "plate" } = {}) {
+export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30, steps = 300, layout = "plate", allowTurned = false, restarts = 0 } = {}) {
   const { xz, top, rims, turned } = (layout === "plate" ? plateLayout : cutLayout)(P, mesh), n = mesh.verts.length;
-  if (turned) throw new Error(`${turned} triangles turned over laid flat`);
+  if (turned && !allowTurned) throw new Error(`${turned} triangles turned over laid flat`);
   // ---- the shape: the oval and holes fitted to the layout's rims (the outside's the one reaching
   // furthest out)
   const reach = (r) => Math.max(...r.map((v) => Math.hypot(xz[2 * v], xz[2 * v + 1])));
@@ -1118,7 +1118,7 @@ export function implicitPlate(P, mesh, { thick = 0.6, lambda = 0.3, rounds = 30,
   mesh.tris.forEach((t, i) => t.forEach((v) => { if (!onRim.has(v)) side[v] = top[i] ? 1 : -1; }));
   for (let v = 0; v < n; v++) x.set([xz[2 * v], side[v] * Math.sqrt(Math.max(0, shape.s * F(xz[2 * v], xz[2 * v + 1])[0])), xz[2 * v + 1]], 3 * v);
   project(x);
-  settleOnSurface(mesh.tris, mesh.local, x, out, project, { lambda, rounds, steps });
+  settleOnSurface(mesh.tris, mesh.local, x, out, project, { lambda, rounds, steps, restarts });
   return { pos: x, shape };
 }
 
@@ -1150,7 +1150,7 @@ export function pretzel({ A, B, circles, s }) {
 // equation's value and slope at a point; project: points back onto it) to the least of the energy
 // untangle uses, there: each triangle (tris; local: its corners in the disk, its own shape) as near
 // its own angles and size as it can be, none turned over (run round against the way out).
-function settleOnSurface(tris, local, x, out, project, { lambda, rounds, steps }) {
+function settleOnSurface(tris, local, x, out, project, { lambda, rounds, steps, restarts = 0 }) {
   const n = x.length / 3, T = tris.length;
   // ---- the triangles' own shapes: their angles' cotangents (the disk keeps angles), their areas
   // (hyperbolic), all scaled to cover the surface
@@ -1213,12 +1213,15 @@ function settleOnSurface(tris, local, x, out, project, { lambda, rounds, steps }
     return E;
   };
   const worst = (X) => { let m = Infinity; for (let i = 0; i < T; i++) m = Math.min(m, (way * runs(X, i)) / 2 / own[i]); return m; };
-  let eps = 1, E = energy(x, null, eps);
-  for (let r = 0; r < rounds; r++) {
-    const D = worst(x), E2 = minimize((X, g) => energy(X, g, eps), x, steps, 8, project), sigma = Math.max(1 - E2 / E, 0.1), D2 = worst(x);
-    eps = (1 - sigma) * (D2 + Math.sqrt(eps * eps + D2 * D2)) / 2;
-    E = E2;
-    if (D > 0 && D2 > 0 && r > 2) break;
+  for (let again = 0; again <= restarts; again++) {
+    let eps = 1, E = energy(x, null, eps);
+    for (let r = 0; r < rounds; r++) {
+      const D = worst(x), E2 = minimize((X, g) => energy(X, g, eps), x, steps, 8, project), sigma = Math.max(1 - E2 / E, 0.1), D2 = worst(x);
+      eps = (1 - sigma) * (D2 + Math.sqrt(eps * eps + D2 * D2)) / 2;
+      E = E2;
+      if (D > 0 && D2 > 0 && r > 2) break;
+    }
+    if (worst(x) > 0) break;
   }
 }
 
@@ -1280,10 +1283,21 @@ export function implicitShape(P, mesh, { lambda = 0.3, ...opts } = {}) {
   let { pos, shape } = implicitPlate(P, mesh, { lambda, ...opts }), at = mesh;
   const { out, project } = pretzel(shape);
   for (let k = 0; k < 2; k++) {
+    const was = at, wasPos = Float64Array.from(pos);
     at = loopSurface(at, pos, 1, false);
     ({ pos } = at);
     project(pos);
-    settleOnSurface(at.tris, at.local, pos, out, project, { lambda, rounds: 30, steps: opts.fineSteps ?? 200 });
+    settleOnSurface(at.tris, at.local, pos, out, project, { lambda, rounds: 30, steps: opts.fineSteps ?? 200, restarts: opts.restarts ?? 0 });
+    let turned = turnedOver({ pos, tris: at.tris }, shape);
+    // (settled again after the last split, some can come out turned over that the split alone
+    // left right: then just split)
+    if (turned && k) {
+      const plain = loopSurface(was, wasPos, 1, false);
+      project(plain.pos);
+      const t = turnedOver({ pos: plain.pos, tris: plain.tris }, shape);
+      if (t < turned) { pos = plain.pos; turned = t; }
+    }
+    if (opts.onLevel) opts.onLevel(k, turned);
   }
   return { at: pos, shape };
 }
@@ -1353,8 +1367,12 @@ function splitLong(S, onto, factor = 3) {
       halve(o, ko, m, along(local[o][ko], local[o][(ko + 1) % 3], 0.5));
     }
   };
-  for (let i = 0; i < tris.length; i++) while (len(tris[i][longest(i)], tris[i][(longest(i) + 1) % 3]) > most) split(i);
+  // (no more than twice the triangles there were: a surface stretched worse than that isn't one
+  // splitting mends)
+  const cap = 3 * tris.length;
+  for (let i = 0; i < tris.length && tris.length < cap; i++) while (tris.length < cap && len(tris[i][longest(i)], tris[i][(longest(i) + 1) % 3]) > most) split(i);
   S.pos = Float64Array.from(P);
+  S.tooStretched = tris.length >= cap;
 }
 
 // How many triangles of a surface on the pretzel run round the other way to most (turned over),
