@@ -2,7 +2,7 @@
 // Poincaré disk): loading from the shelf, the sides / at-a-corner / size controls, turns through
 // the test hook, and real pointer input on the disk (tap a tile's middle, drag a circle, slide).
 import { test, expect } from "@playwright/test";
-import { open, info, turn, noErrors, pick } from "./helpers.mjs";
+import { open, info, turn, noErrors, pick, settleLayout } from "./helpers.mjs";
 
 // (each test builds a surface or several, which takes a few times longer under the full parallel run)
 test.describe.configure({ timeout: 60_000 });
@@ -31,6 +31,17 @@ test("a surface of two octagons, each glued to itself at its corners, shows in 3
   expect((await info(page)).tiles).toBe(2);
 });
 
+test("no view button when there's nothing in its dropdown (a surface with no 3D shape); one when there is", async ({ page }) => {
+  await open(page, "?puzzle=hyper-klein");
+  await settled(page);
+  await page.waitForTimeout(500); // (the shapes' list asked for and answered)
+  expect((await info(page)).surface3D).toBe(false);
+  await expect(page.locator(".nx-viewbtn")).toBeHidden();
+  await open(page, "?puzzle=hyper-octagons");
+  await expect.poll(async () => (await info(page)).surface3D, { timeout: 15_000 }).toBe(true);
+  await expect(page.locator(".nx-viewbtn")).toBeVisible();
+});
+
 test("a three-holed surface shows in 3D, a pretzel of three holes", async ({ page }) => {
   await open(page, "?puzzle=hyper-octagons&N=4&M=6&surface=1");
   await settled(page);
@@ -43,7 +54,13 @@ test("the six octagons, a two-holed surface, show in 3D beside the disk too, and
   await settled(page);
   // (laid out just after the disk first shows)
   await expect.poll(async () => (await info(page)).surface3D, { timeout: 15_000 }).toBe(true);
+  expect((await info(page)).views, "3D off by default").toEqual({ flat: true, surface: false });
+  await expect(page.locator("#c")).toBeHidden();
+  await page.click(".nx-viewbtn");
+  await page.locator("#view3D").check();
   expect((await info(page)).views).toEqual({ flat: true, surface: true });
+  expect(new URL(page.url()).searchParams.get("3d")).toBe("on");
+  await settleLayout(page);
   await expect(page.locator("#plane")).toBeVisible();
   await expect(page.locator("#c")).toBeVisible();
   const box = await page.locator("#plane").boundingBox(), vw = page.viewportSize().width;
@@ -52,7 +69,6 @@ test("the six octagons, a two-holed surface, show in 3D beside the disk too, and
   await turn(page, [0, 0, 1]);
   await page.waitForTimeout(100);
   expect(Buffer.compare(before, await page.locator("#c").screenshot()), "the surface repainted").not.toBe(0);
-  await page.click(".nx-viewbtn");
   await page.locator("#view3D").uncheck();
   await expect(page.locator("#c")).toBeHidden();
   await expect.poll(async () => (await page.locator("#plane").boundingBox()).width, { message: "the disk has the room to itself" }).toBeGreaterThan(box.width);

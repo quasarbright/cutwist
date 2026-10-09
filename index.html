@@ -108,7 +108,7 @@
     .nx-sizes .tw-select { height: 28px; font-size: .8rem; padding-block: 0; } /* (the height centers it: padding too would clip the text) */
     #nx-toggles { position: fixed; top: 16px; right: 16px; z-index: 5; display: flex; gap: 6px; align-items: center; font-family: var(--font-mono); }
     #nx-toggles .btn { padding: 6px 10px; }
-    body:not(.nx-planar) .nx-viewbtn { display: none; }
+    body:not(.nx-planar) .nx-viewbtn, body.nx-noview .nx-viewbtn { display: none; }
     /* (a sliding puzzle's arrows are always on: no axes button for them) */
     body.nx-planar #axes { display: none; }
     .nx-pop {
@@ -523,7 +523,7 @@
     <div class="control tw-look" id="planarViews" hidden>
       <div class="control-head"><span class="name" title="the flat grid, the surface it glues into, or both side by side (one is always on)">view</span></div>
       <label class="check" title="the grid laid flat, its glued edges shown as faint copies past each side"><input type="checkbox" id="viewFlat" checked /> flat</label>
-      <label class="check" title="the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way"><input type="checkbox" id="view3D" checked /> 3D surface</label>
+      <label class="check" title="the grid wrapped onto its surface in 3D: drag empty space to turn it, drag a cell to slide its line, click near a cell's edge to slide one cell that way"><input type="checkbox" id="view3D" /> 3D surface</label>
       <!-- the shape the surface is drawn as, where there's a choice (filled in by renderShapeChoice) -->
       <div class="tw-seg tw-fill tw-sub" role="radiogroup" id="surfaceShape" aria-label="surface shape" title="the same surface drawn another way: both glue the grid's edges the same, so the puzzle is the same" hidden></div>
     </div>
@@ -2021,6 +2021,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("c").hidden = isFlat() && (!view3D || !has3D());
       $("plane").hidden = !isFlat() || (!viewFlat && has3D());
       $("planarViews").hidden = !isFlat() || !has3D(); // (most hyperbolic surfaces have no 3D view to switch to)
+      // (no view button with nothing in its dropdown: on a phone it holds the toggles too)
+      document.body.classList.toggle("nx-noview", isFlat() && !has3D() && !isPlanar());
       surfaceGroup.visible = isFlat() && has3D();
       if (isFlat() && has3D()) {
         edgeHints = null;
@@ -2555,7 +2557,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // tall, and always stacked on a phone (like the rear view). The flat view's canvas covers
     // just its part; the 3D view draws on the page-wide WebGL canvas, clipped to its part, with
     // the camera centered there.
-    let viewFlat = true, view3D = true, planeBox = "";
+    let viewFlat = true, view3D = false, planeBox = "";
     function viewRegions() {
       planeView.showArrows = !phone.matches; // (on a phone, no arrow buttons: the grid gets their room)
       const r = safeRect(), w = r.right - r.left, h = r.bottom - r.top;
@@ -3566,16 +3568,16 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (planarTextures) q.set("textures", "on");
         if (shapeId() !== P.topology) q.set("shape", shapeId());
         if (!viewFlat) q.set("flat", "off");
-        if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off"); // (only when it's not the screen's default)
+        if (view3D) q.set("3d", "on"); // (only when it's not the default, off)
         if (!showLabels) q.set("labels", "off");
         if (!reflectLabels) q.set("mirrored-labels", "off");
       } else if (isTiles()) {
         if (!viewFlat) q.set("flat", "off");
-        if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off");
+        if (view3D) q.set("3d", "on");
         if (textureChoice !== null && textureChoice !== P.faces.length >= TEXTURE_MIN_FACES) q.set("textures", textureChoice ? "on" : "off");
       } else if (isHyper()) {
         if (!viewFlat) q.set("flat", "off");
-        if (view3D !== !phone.matches) q.set("3d", view3D ? "on" : "off");
+        if (view3D) q.set("3d", "on");
       } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
@@ -3613,8 +3615,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       const topo = currentSpec().topology;
       if (topo && (SURFACE_SHAPES[topo] || []).some((s) => s.id === q.get("shape"))) shapeChoice[topo] = q.get("shape");
-      // (the 3D view: on by default on a wide screen; a phone shows just the flat view unless the link says otherwise)
-      viewFlat = !off("flat"); view3D = phone.matches ? on("3d") : !off("3d");
+      // (the 3D view: off unless the link says on)
+      viewFlat = !off("flat"); view3D = on("3d");
       if (!viewFlat && !view3D) viewFlat = true;
       showLabels = !off("labels");
       reflectLabels = !off("mirrored-labels");

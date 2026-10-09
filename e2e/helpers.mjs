@@ -46,6 +46,25 @@ export async function openView(page) {
   if (await page.locator(".nx-pop").isHidden()) await page.click(".nx-viewbtn");
 }
 
+// the 3D view on (it's off by default), as its checkbox in the view dropdown does
+export async function show3D(page) {
+  await page.evaluate(() => { const box = document.getElementById("view3D"); box.checked = true; box.dispatchEvent(new Event("change")); });
+  await settleLayout(page);
+}
+// (until the views have taken their places: the 3D canvas the same size two checks running)
+export async function settleLayout(page) {
+  let last = "";
+  for (let k = 0; k < 40; k++) {
+    const now = await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const r = document.getElementById("c").getBoundingClientRect(), p = document.getElementById("plane")?.getBoundingClientRect();
+      done(JSON.stringify([r.x, r.width, p?.x, p?.width]));
+    }))));
+    if (now === last) return;
+    last = now;
+    await page.waitForTimeout(50);
+  }
+}
+
 // the page's state (see cutwist.info in index.html)
 export const info = (page) => page.evaluate(() => window.cutwist.info());
 

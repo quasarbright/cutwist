@@ -2,7 +2,7 @@
 // sticker drags, dragging the view, and the keyboard. Everything else drives turns through
 // the test hook. The hook is only used here to find where things are on screen.
 import { test, expect } from "@playwright/test";
-import { open, info, finish, noErrors } from "./helpers.mjs";
+import { open, info, finish, noErrors, show3D } from "./helpers.mjs";
 
 // keep points the page itself would receive: not under the panel, buttons or the reference
 const onCanvas = (page, pts) => page.evaluate((pts) => pts.filter((p) => document.elementFromPoint(p.x, p.y)?.id === "c"), pts);
@@ -179,7 +179,8 @@ test("planar: the arrows are always on, even from a link with axes=off (no axes 
   expect((await info(page)).moves).toBe(1);
 });
 
-// ---- planar puzzles: the 3D surface ----
+// ---- planar puzzles: the 3D surface (on: it's off by default) ----
+const loadGrid3D = async (page, opts) => { await loadGrid(page, opts); await show3D(page); };
 // a visible cell whose given spots (fractions across it) are all visible, or null
 async function visibleCell(page, spots) {
   return page.evaluate((spots) => {
@@ -194,7 +195,7 @@ async function visibleCell(page, spots) {
 }
 
 test("3D surface: clicking near a cell's right edge slides its row one cell right", async ({ page }) => {
-  await loadGrid(page, { topology: "torus" });
+  await loadGrid3D(page, { topology: "torus" });
   const found = await visibleCell(page, [[0.9, 0.5]]);
   expect(found, "a cell with its right edge in view").toBeTruthy();
   await page.mouse.click(found.pts[0].x, found.pts[0].y);
@@ -205,7 +206,7 @@ test("3D surface: clicking near a cell's right edge slides its row one cell righ
 });
 
 test("3D surface: clicking near a cell's top edge slides its column up; the middle does nothing", async ({ page }) => {
-  await loadGrid(page, { topology: "klein" });
+  await loadGrid3D(page, { topology: "klein" });
   const mid = await visibleCell(page, [[0.5, 0.5]]);
   await page.mouse.click(mid.pts[0].x, mid.pts[0].y);
   await finish(page);
@@ -218,7 +219,7 @@ test("3D surface: clicking near a cell's top edge slides its column up; the midd
 });
 
 test("3D surface: dragging a cell along its row slides the row", async ({ page }) => {
-  await loadGrid(page, { topology: "torus" });
+  await loadGrid3D(page, { topology: "torus" });
   // from a cell's middle to one cell over along its row (both in view)
   const found = await page.evaluate(() => {
     const c = window.cutwist;
@@ -242,7 +243,7 @@ test("3D surface: dragging a cell along its row slides the row", async ({ page }
 });
 
 test("3D surface: dragging empty space turns the view without sliding anything", async ({ page }) => {
-  await loadGrid(page, { topology: "rp2" });
+  await loadGrid3D(page, { topology: "rp2" });
   const v0 = await page.evaluate(() => window.cutwist.view());
   const vw = page.viewportSize().width;
   await page.mouse.move(vw - 60, 420);
@@ -254,7 +255,7 @@ test("3D surface: dragging empty space turns the view without sliding anything",
 });
 
 test("3D surface: hovering a cell shows its chevrons, lighting the one for the edge under the pointer", async ({ page }) => {
-  await loadGrid(page, { topology: "torus" });
+  await loadGrid3D(page, { topology: "torus" });
   const found = await visibleCell(page, [[0.5, 0.5], [0.9, 0.5]]);
   expect(found, "a cell with its middle and right edge in view").toBeTruthy();
   const [mid, right] = found.pts;

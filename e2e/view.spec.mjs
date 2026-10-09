@@ -62,6 +62,7 @@ test("rear view: on by default on a wide screen; the button toggles it, goes in 
   await expect(page.locator("#rearSplit")).toBeHidden();
   // only the 3D surface: back on
   await openView(page);
+  await page.check("#view3D");
   await page.uncheck("#viewFlat");
   await expect(page.locator("#rear")).toBeEnabled();
   expect((await info(page)).rear).toBe(true);

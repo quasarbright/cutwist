@@ -10,7 +10,7 @@ test.afterEach(async () => { await noErrors(errors); });
 const load = (page, tiling = "hex", params) =>
   page.evaluate(({ id, params }) => window.cutwist.load(id, { params }), { id: `tiles-${tiling}`, params });
 
-test("each tiling opens from the shelf, solved, flat and in 3D", async ({ page }) => {
+test("each tiling opens from the shelf, solved, flat (3D off till turned on)", async ({ page }) => {
   for (const [tiling, title, kinds] of [
     ["hex", "12 hexagons on a torus", { 1: 12, 2: 36, 3: 24 }],
     ["square", "9 squares on a torus", { 1: 45, 2: 18, 4: 9 }],
@@ -20,7 +20,7 @@ test("each tiling opens from the shelf, solved, flat and in 3D", async ({ page }
     const s = await info(page);
     expect(s).toMatchObject({ title, tiling, solved: true, kinds });
     await expect(page.locator("#plane")).toBeVisible();
-    await expect(page.locator("#c")).toBeVisible();
+    await expect(page.locator("#c")).toBeHidden();
   }
   await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a tile's middle");
 });
@@ -124,6 +124,7 @@ test("the views: flat only, 3D only, both; the rear view stays off while the fla
   await load(page);
   await expect(page.locator("#rear")).toBeDisabled();
   await openView(page);
+  await page.check("#view3D");
   await page.uncheck("#viewFlat");
   await expect(page.locator("#plane")).toBeHidden();
   await expect(page.locator("#rear")).toBeEnabled();

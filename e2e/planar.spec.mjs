@@ -1,7 +1,7 @@
 // The planar puzzles (sliding grids on a torus, Klein bottle, projective plane), driven
 // through the test hook and the view dropdown. Real drags and arrow clicks are in input.spec.
 import { test, expect } from "@playwright/test";
-import { open, info, turn, finish, noErrors, pick, openView } from "./helpers.mjs";
+import { open, info, turn, finish, noErrors, pick, openView, show3D } from "./helpers.mjs";
 
 // open a sliding grid: { topology (the puzzle: torus, klein, rp2), width, height }
 const load = (page, { topology = "torus", ...params } = {}) =>
@@ -14,12 +14,12 @@ let errors;
 test.beforeEach(async ({ page }) => { errors = await open(page); });
 test.afterEach(async () => { await noErrors(errors); });
 
-test("the sliding torus opens as a 5×5 torus, flat and in 3D", async ({ page }) => {
+test("the sliding torus opens as a 5×5 torus, flat (3D off till turned on)", async ({ page }) => {
   await pick(page, "sliding-torus");
   const s = await info(page);
   expect(s).toMatchObject({ planar: true, title: "5×5 torus", pieces: 25, solved: true });
   await expect(page.locator("#plane")).toBeVisible();
-  await expect(page.locator("#c")).toBeVisible(); // the 3D surface
+  await expect(page.locator("#c")).toBeHidden(); // (the 3D surface: off by default)
   await openView(page);
   await expect(page.locator("#planarControls")).toBeVisible();
   await expect(page.locator("#textures")).toBeHidden();
@@ -150,15 +150,17 @@ test("colors only by default; the textures checkbox adds the column patterns", a
   expect((await info(page)).planarTextures).toBe(true);
 });
 
-test("views: flat and 3D both on, side by side on a wide screen; the last one on can't be turned off", async ({ page }) => {
+test("views: flat alone at first; 3D turned on, side by side on a wide screen; the last one on can't be turned off", async ({ page }) => {
   await load(page);
+  expect((await info(page)).views).toEqual({ flat: true, surface: false });
+  await openView(page);
+  await page.locator("#view3D").check();
   expect((await info(page)).views).toEqual({ flat: true, surface: true });
   await expect(page.locator("#plane")).toBeVisible();
   await expect(page.locator("#c")).toBeVisible();
   // the flat view's canvas takes the left part of the screen
   const box = await page.locator("#plane").boundingBox(), vw = page.viewportSize().width;
   expect(box.x + box.width).toBeLessThan(vw * 0.6);
-  await openView(page);
   await page.locator("#viewFlat").uncheck();
   expect((await info(page)).views).toEqual({ flat: false, surface: true });
   await expect(page.locator("#plane")).toBeHidden();
@@ -182,6 +184,7 @@ test("on a phone: flat over 3D even when the space is wide, and no arrow buttons
 test("every surface shows up in 3D, with cells in view", async ({ page }) => {
   for (const topology of ["torus", "klein", "rp2"]) {
     await load(page, { topology });
+    await show3D(page);
     const visible = await page.evaluate(() => {
       let n = 0;
       for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) if (window.cutwist.surfacePoint(x, y)) n++;
@@ -194,8 +197,10 @@ test("every surface shows up in 3D, with cells in view", async ({ page }) => {
 
 test("the corner card: the solved surface in 3D with the 3D view on, the flat grid with only the flat view", async ({ page }) => {
   await load(page);
-  await expect(page.locator("#refPlane")).toBeHidden(); // 3D on: the card is drawn by the 3D view
+  await expect(page.locator("#refPlane")).toBeVisible(); // 3D off (the default): the flat grid's card
   await openView(page);
+  await page.locator("#view3D").check();
+  await expect(page.locator("#refPlane")).toBeHidden(); // 3D on: the card is drawn by the 3D view
   await page.locator("#view3D").uncheck();
   await expect(page.locator("#refPlane")).toBeVisible();
   await page.locator("#view3D").check();
