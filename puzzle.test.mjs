@@ -601,15 +601,15 @@ test("prisms: every kind and side count scrambles cleanly", () => {
       }
 });
 
-test("deep cuts: dino, helicopter, megaminx crystal, chopasaurus", () => {
+test("deep cuts: dino, edge-turning cube, megaminx crystal, chopasaurus", () => {
   const kinds = (P) => { const k = {}; for (const p of P.pieces) if (p.stickers.length) k[p.stickers.length] = (k[p.stickers.length] || 0) + 1; return k; };
   assert.deepEqual(kinds(preset("dino")), { 2: 12 });
   // dino sizes: evenly spaced from the neighbors' plane (1/3 of the way to the corner) outward
   const dino3 = preset("dino", 3);
   assert.deepEqual(dino3.axes[0].offsets.map((o) => +(o / Math.sqrt(3)).toFixed(6)), [-2 / 3, -1 / 3, 1 / 3, 2 / 3].map((x) => +x.toFixed(6)));
   assert.deepEqual(kinds(dino3), { 2: 36 });
-  assert.deepEqual(kinds(preset("helicopter")), { 1: 24, 3: 8 });
-  assert.ok(preset("helicopter").axes.every((a) => a.order === 2));
+  assert.deepEqual(kinds(preset("edge-turning-cube")), { 1: 24, 3: 8 });
+  assert.ok(preset("edge-turning-cube").axes.every((a) => a.order === 2));
   assert.deepEqual(kinds(preset("megaminx-crystal")), { 2: 30, 3: 20 });
   assert.deepEqual(kinds(preset("chopasaurus")), { 2: 30, 3: 20, 12: 1 }); // the face centers never move: one core
   assert.deepEqual(kinds(preset("icosahedron-crystal")), { 1: 60, 2: 90, 5: 12 });

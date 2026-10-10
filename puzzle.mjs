@@ -352,7 +352,7 @@ export const PRESETS = [
   { id: "dino", name: "Dino Cube", solid: "cube", on: "vertex", rule: "neighbor-corners", size: 2, names: { 2: "Dino Cube" } },
   // Edge turning, cuts through the centers of the two faces at each edge. The real puzzle
   // also turns by odd angles that jumble it; here only half turns (the cube's symmetry).
-  { id: "helicopter", name: "Helicopter Cube", solid: "cube", on: "edge", rule: "depths", depths: [Math.SQRT1_2], size: 2, fixed: true, names: { 2: "Helicopter Cube" } },
+  { id: "edge-turning-cube", name: "Edge-Turning Cube", solid: "cube", on: "edge", rule: "depths", depths: [Math.SQRT1_2], size: 2, fixed: true, names: { 2: "Edge-Turning Cube" } },
   // A cuboid a×b×c, each length set on its own. Faces that aren't square turn in halves.
   { id: "cuboid", name: "Cuboid", rule: "cuboid", on: "face", size: 3, fixed: true, a: 2, b: 3, c: 4, noCustom: true,
     params: [{ key: "a", label: "length", min: 1 }, { key: "b", label: "height", min: 1 }, { key: "c", label: "width", min: 1 }],

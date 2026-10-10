@@ -3583,8 +3583,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (window.history: this module's own `history` is the undo history)
       if (url !== location.pathname + location.search) window.history.replaceState(null, "", url);
     }
+    // (presets renamed since: old links still open them)
+    const PRESET_RENAMES = { helicopter: "edge-turning-cube" };
     function applyURL() {
-      const q = new URLSearchParams(location.search), id = q.get("puzzle");
+      const q = new URLSearchParams(location.search), id = PRESET_RENAMES[q.get("puzzle")] ?? q.get("puzzle");
       const shared = !id || id === "custom" ? readShared() : null;
       if (shared) { custom = shared; presetIdx = "custom"; size = custom.size; resetEdits(); renderBuilder(); computeSnaps(); }
       else {
