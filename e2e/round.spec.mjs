@@ -90,10 +90,10 @@ test("the steppers go wherever {N,M} is: a torus, a ball, a hyperbolic surface",
   await expect(page.locator('button[title="one fewer (sides)"]')).toBeDisabled();
 });
 
-test("customizing: a solid design turns into an {N,M} one and back, and the link keeps it", async ({ page }) => {
+test("customizing: a solid design turns into an arbitrary tiling's and back, and the link keeps it", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
-  await page.locator("#bSolid button", { hasText: "{N,M}" }).click();
+  await page.locator("#bSolid button", { hasText: "arbitrary" }).click();
   expect(await settled(page)).toMatchObject({ id: "custom", sphere: true, N: 4, M: 3, pieces: 26 });
   await page.locator("#bSets .tw-rblock", { hasText: "corners" }).getByRole("button", { name: "+ cut" }).click();
   await expect.poll(async () => (await info(page)).pieces).toBeGreaterThan(26);

@@ -158,7 +158,7 @@ test("dragging away from the circles slides the plane, and turns nothing", async
   expect(s).toMatchObject({ panned: true, moves: 0, solved: true });
 });
 
-test("customize: the circles' rulers ({N,M} picked over the solids, truncation too), a corner circle, a share link back, blacking out", async ({ page }) => {
+test("customize: the circles' rulers (\"arbitrary\" picked over the solids, truncation too), a corner circle, a share link back, blacking out", async ({ page }) => {
   // (on the 6 octagons: a corner circle on the Klein quartic makes 668 pieces, slow to build and
   // reload under a loaded run)
   await pick(page, "hyper-octagons");
@@ -166,7 +166,7 @@ test("customize: the circles' rulers ({N,M} picked over the solids, truncation t
   await page.click("#customize");
   let s = await settled(page);
   expect(s).toMatchObject({ id: "custom", hyper: true, pieces: 46 });
-  await expect(page.locator("#bSolid button", { hasText: "{N,M}" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#bSolid button", { hasText: "arbitrary" })).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("#bTrim")).toBeVisible();
   await expect(page.locator("#bStats")).toContainText("46 pieces");
   // (+ cut on the corners' ruler: more pieces, and the corners turn in thirds)

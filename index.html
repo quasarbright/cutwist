@@ -2071,7 +2071,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // start: the cube's is {4,3}), round, flat or hyperbolic by its steppers. Its circles start as
       // a preset's, as a solid's depths aren't radii; and back to a solid, the cuts start over too.
       else radio($("bSolid"), [...Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]),
-        ["nm", "{N,M}", "a tiling of N-gons, M at each corner, cut by circles: on a ball (where the tiles are a solid's faces, and more: a beach ball's wedges), on a torus, or on a hyperbolic surface"]],
+        ["nm", "arbitrary", "any tiling: N-gons, M at each corner (the sides and at-a-corner steppers), cut by circles: on a ball (where the tiles are a solid's faces, and more: a beach ball's wedges), on a torus, or on a hyperbolic surface"]],
         isHyperDesign() ? "nm" : custom.solid,
         (k) => {
           pushUndo();
