@@ -253,8 +253,8 @@ export function buildHyper(spec, file) {
 // tileParts (a point at distance d from the middle is tanh d from it in the Klein disk). The cuts
 // don't make pieces: they're where the stickers' colors change, so a fragment (a piece's part on a
 // tile) is drawn in its tile's color with the corners' and edges' faces over it (hyper-view.mjs).
-const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [x * s, y * s]; };
-const fromKlein = ([x, y]) => { const s = 1 / (1 + Math.sqrt(Math.max(0, 1 - x * x - y * y))); return [x * s, y * s]; };
+export const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [x * s, y * s]; };
+export const fromKlein = ([x, y]) => { const s = 1 / (1 + Math.sqrt(Math.max(0, 1 - x * x - y * y))); return [x * s, y * s]; };
 // a convex polygon cut to n·x ≤ k
 function clipBelow(poly, n, k) {
   const out = [], val = (p) => n[0] * p[0] + n[1] * p[1] - k;

@@ -235,17 +235,41 @@
     }
     .nx-custombtn:hover { color: var(--text); border-color: var(--faint); }
     .nx-custombtn[hidden], body.nx-custom .nx-custombtn { display: none; }
-    body.nx-custom { --nx-left: 360px; }
-    body.nx-custom .tw-title { left: calc(var(--nx-left) + 22px); }
-    /* (the footer centers in the space beside the drawer, clear of the algorithms) */
-    body.nx-custom mike-footer { padding-left: var(--nx-left) !important; }
-    #panel {
-      display: none; position: fixed; left: 0; top: 0; bottom: 0; z-index: 6; width: var(--nx-left);
-      overflow-y: auto; padding: 14px; background: var(--panel); border-right: 1px solid var(--border);
+    /* customizing: the tools down the left, the shape in the name's menu, the numbers in the hint
+       line where the tape is, copy link and done top right. No turning, so no tape, algorithms,
+       scramble or reset. */
+    .ed-only, body:not(.nx-custom) .ed-only { display: none; }
+    body.nx-custom .ed-only { display: inline-block; }
+    body.nx-custom #axes, body.nx-custom #nx-algs, body.nx-custom #scramble, body.nx-custom #reset { display: none; }
+    body.nx-custom .nx-moves, body.nx-custom .nx-side { display: none; }
+    .ed-hint { display: none; }
+    body.nx-custom .ed-hint {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 9px 14px; min-height: 40px;
+      font: .78rem var(--font-mono); color: var(--muted);
     }
-    body.nx-custom #panel { display: block; }
-    .nx-drawerhead { display: flex; align-items: center; justify-content: space-between; }
-    .nx-drawertitle { font-family: var(--font-display); font-size: .95rem; letter-spacing: .04em; text-transform: uppercase; }
+    .ed-stats { color: var(--text); white-space: nowrap; }
+    .ed-stats .warn { color: var(--danger); }
+    .ed-hint .tw-link { font-size: .78rem; }
+    #bShare2 { display: none; }
+    #edit { position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+    #edit[hidden] { display: none; }
+    .ed-rail {
+      position: fixed; left: 16px; top: 50%; transform: translateY(-50%); z-index: 6;
+      display: flex; flex-direction: column; gap: 4px; padding: 5px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ed-rail[hidden] { display: none; }
+    .ed-tool {
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 66px; padding: 9px 0 7px;
+      background: none; border: 0; border-radius: 8px; color: var(--muted); font: 500 .7rem var(--font-ui); cursor: pointer;
+    }
+    .ed-tool svg { width: 24px; height: 24px; }
+    .ed-tool:hover { color: var(--text); background: var(--panel-2); }
+    .ed-tool[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); }
+    .ed-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ed-menu { width: 300px; gap: 8px; }
+    .ed-menu .tw-label { margin: 0; }
+    .ed-menu .nx-sizes:empty, .ed-menu .nx-sizes:empty + * { display: none; }
     .nx-done {
       font: 500 .85rem var(--font-ui); color: var(--on-accent); background: var(--accent);
       border: 0; border-radius: 8px; padding: 6px 14px; cursor: pointer;
@@ -463,12 +487,13 @@
       .nx-viewbtn { display: inline-block !important; } /* (it holds the toggles here) */
       .tw-title { top: 12px; left: 12px; }
       .tw-title h1 { line-height: 30px; }
-      body.nx-custom { --nx-left: 0px; }
-      body.nx-custom #panel {
-        top: 50%; right: 0; width: auto; border: 0; border-top: 1px solid var(--border); border-radius: 12px 12px 0 0;
-        padding-bottom: 40px; /* (scrolls its last control clear of the footer) */
-      }
-      body.nx-custom mike-footer { padding-left: 0 !important; }
+      /* (the tools: a row along the bottom, over the hint line) */
+      .ed-rail { flex-direction: row; top: auto; left: 12px; transform: none; bottom: calc(70px + var(--nx-tape-h, 44px)); }
+      .ed-tool { width: 60px; }
+      /* (the top row has room for done, view and about: copy link moves to the hint line) */
+      body.nx-custom #bShare { display: none; }
+      body.nx-custom #bShare2 { display: inline; }
+      .ed-menu { width: calc(100vw - 24px); }
     }
   </style>
 </head>
@@ -542,72 +567,32 @@
 
   </div>
 
-  <!-- customize: the puzzle builder, a drawer on the left (on a phone, a sheet along the bottom)
-       beside the live puzzle -->
-  <aside id="panel">
-    <div class="tw-builder" id="builder" hidden>
-      <div class="nx-drawerhead">
-        <span class="nx-drawertitle">Customize</span>
-        <button class="nx-done" id="customizeDone" title="close the editor; the puzzle stays as you made it">done</button>
-      </div>
-      <!-- undo and redo for the whole design (solid, truncation, cuts, blacked-out pieces); the
-           puzzle's own undo, for turns, is at the bottom -->
-      <section>
-        <div class="tw-label">
-          <span title="changes to this design: the solid, truncation, cuts and blacked-out pieces">design edits</span>
-          <span class="tw-icons">
-            <button class="btn tw-hist" id="bUndo" disabled>↶ undo<span class="tw-n" id="bUndoN"></span></button>
-            <button class="btn tw-hist" id="bRedo" disabled>redo ↷<span class="tw-n" id="bRedoN"></span></button>
-          </span>
-        </div>
-      </section>
-
-      <section>
-        <div class="tw-label" id="bSolidLabel" title="the shape before it's cut">solid</div>
-        <div class="tw-chips" id="bSolid" role="radiogroup" aria-label="solid"></div>
-        <div id="bNM" class="nx-sizes"></div>
-      </section>
-
-      <!-- trim: reshape the solid by cutting its corners or edges flat, before any twisting cuts -->
-      <section>
-        <div class="tw-label" title="cut the solid's corners or edges off flat, making new faces with their own color">truncation</div>
-        <div class="tw-trim" id="bTrim"></div>
-      </section>
-
-      <!-- the signature: every cut is a handle on one depth axis, center to surface. One block
-           per cut set; each set cuts around faces, corners or edges -->
-      <section>
-        <div class="tw-label">
-          <span title="the turning cuts: each set goes around faces, corners or edges, at one or more depths">cuts</span>
-          <span class="tw-icons">
-            <button class="tw-icon is-on" id="bSnap" title="snap cuts to depths where they line up exactly and leave no slivers (the marks on each ruler)" aria-label="snap" aria-pressed="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2h3v6a2 2 0 0 0 4 0V2h3v6a5 5 0 0 1-10 0z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 5h3M10 5h3" stroke="currentColor" stroke-width="1.6"/></svg>
-            </button>
-          </span>
-        </div>
-        <div id="bSets" class="tw-sets"></div>
-      </section>
-
-      <section class="tw-paint">
-        <button class="tw-toggle" id="bPaint" aria-pressed="false" title="while on, clicking a piece blacks out every piece like it (all the corners, all the tips...); click a blacked-out piece to bring its kind back">
-          <span class="tw-dot" aria-hidden="true"></span>black out pieces
-        </button>
-        <button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button>
-        <div class="tw-hint" id="bPaintHint" hidden>click a piece to black out its kind, or a black one to bring it back</div>
-      </section>
-
-      <footer class="tw-foot">
-        <span class="tw-stats" id="bStats"></span>
-        <button class="tw-link" id="bShare" title="copy a link that opens this puzzle">copy link</button>
-      </footer>
-    </div>
-  </aside>
+  <!-- customize (issue #22): no panel. The tools down the left act on the puzzle itself: cut (dots
+       on what can be cut round; drag a cut to set its depth), truncate (dots on corners and edges;
+       drag inward), black out (click a piece). The shape is chosen from the name's menu, the
+       numbers show in the hint line, and copy link and done sit top right. -->
+  <canvas id="edit" hidden></canvas>
+  <div class="ed-rail" id="edTools" role="toolbar" aria-label="customize tools" hidden>
+    <button class="ed-tool" data-tool="cut" aria-pressed="true" title="cut: click a dot to add a cut round every place like it, drag a cut to move it, right-click (or long-press) a cut or drag it off to remove it">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9.7 2.5v19M14.3 2.5v19M2.5 9.7h19M2.5 14.3h19" stroke="currentColor" stroke-width="1.7"/></svg>cut</button>
+    <button class="ed-tool" data-tool="trim" aria-pressed="false" title="truncate: drag a corner's or edge's dot inward to cut it off flat, drag it back (or right-click it) to put it back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.31 15.44L15.44 20.31L8.56 20.31L3.69 15.44L3.69 8.56L8.56 3.69L15.44 3.69L20.31 8.56Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>truncate</button>
+    <button class="ed-tool" data-tool="paint" aria-pressed="false" title="black out: click a piece to black out every piece like it, click a black one to bring them back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L21 19.5H3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12.00 3.50L14.70 8.30Q12.00 10.22 9.30 8.30ZM21.00 19.50L15.60 19.50Q15.33 16.14 18.30 14.70ZM3.00 19.50L5.70 14.70Q8.67 16.14 8.40 19.50Z" fill="currentColor"/></svg>black out</button>
+  </div>
+  <div class="nx-pop ed-menu" id="edMenu" hidden>
+    <div class="tw-label" id="bSolidLabel">solid</div>
+    <div class="tw-chips" id="bSolid" role="radiogroup" aria-label="solid"></div>
+    <div class="tw-label" id="bNMLabel">tiling</div>
+    <div id="bNM" class="nx-sizes"></div>
+  </div>
 
   <!-- bottom: the algorithms down the left (turns recorded while "record" is on, played back
        as one undo step), the tape, and the actions under it -->
   <div id="nx-algs"></div>
   <div class="nx-preview" id="algPreview" hidden></div>
   <div id="nx-tape">
+    <div class="ed-hint" id="edHint"><span id="edTip"></span><span class="ed-stats" id="bStats"></span><button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button><button class="tw-link" id="bShare2" title="copy a link that opens this puzzle">copy link</button></div>
     <div class="nx-moves" id="tapeMoves"></div>
     <div class="nx-side">
       <span class="nx-status" id="tapeStatus"></span>
@@ -629,6 +614,8 @@
 
   <!-- top right: view (only shown when it has something in it), the toggles, about -->
   <div id="nx-toggles">
+    <button class="btn ed-only" id="bShare" title="copy a link that opens this puzzle">copy link</button>
+    <button class="nx-done ed-only" id="customizeDone" title="stop customizing; the puzzle stays as you made it">done</button>
     <button class="btn nx-viewbtn" id="view" title="flat and 3D views, the surface's shape, and how cells look">view ▾</button>
     <button class="btn is-active" id="axes" title="show the turn axes: click a segment to turn that layer clockwise, right-click for counterclockwise" aria-pressed="true">axes</button>
     <button class="btn is-active" id="textures" title="patterns on the stickers, to tell similar colors apart (on by default past 12 faces)" aria-pressed="true">textures</button>
@@ -783,7 +770,7 @@
   <script type="module">
     import * as THREE from "three";
     import {
-      PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, regularTrims, toCustom, CUT_RANGE, TRIM_RANGE,
+      PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, regularTrims, toCustom, CUT_RANGE, TRIM_RANGE, cutDirectionsOf, trimDirectionsOf,
       piecesInLayer, layerOf, closestOrientation, TEXTURE_MIN_FACES, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
@@ -799,7 +786,7 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear, pressAt } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry,
+      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
@@ -1548,7 +1535,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // always three cut sets, one per kind, in this order (a design from a link or a preset
     // may list them differently, or repeat a kind)
     const threeSets = (cuts) => ["face", "vertex", "edge"].map((on) => ({ on, depths: (cuts || []).filter((c) => c.on === on).flatMap((c) => c.depths) }));
-    let custom = { name: "Custom", rule: "custom", size: 2, fixed: true, solid: "cube", truncate: {}, cuts: threeSets([{ on: "face", depths: [0.33] }]), blackout: [] };
+    // A solid's design has five: the same three, then cuts around the faces truncation makes at its
+    // corners and at its edges, each type of face with its own (its own faces' set says so: of
+    // "face"). A face set without `of` (an older link, a preset) goes around every face, so its
+    // depths go to every type of face there is.
+    const solidSets = (cuts, truncate = {}) => {
+      const pick = (f) => (cuts || []).filter(f).flatMap((c) => c.depths), every = pick((c) => c.on === "face" && !c.of);
+      const faces = (of) => [...pick((c) => c.on === "face" && c.of === of), ...(of === "face" || truncate[of] !== undefined ? every : [])];
+      return [{ on: "face", of: "face", depths: faces("face") }, ...["vertex", "edge"].map((on) => ({ on, depths: pick((c) => c.on === on) })),
+        ...["vertex", "edge"].map((of) => ({ on: "face", of, depths: faces(of) }))];
+    };
+    const solidCustom = (solid, cuts = [{ on: "face", depths: [0.33] }], truncate = {}, blackout = []) => ({ name: "Custom", rule: "custom", size: 2, fixed: true, solid, truncate, cuts: solidSets(cuts, truncate), blackout });
+    let custom = solidCustom("cube");
     // A tile-turning design is the same, on a tiling instead of a solid, with its torus's size
     // and skew, and cuts' depths as circles' radii (in tile spacings)
     const isTileDesign = () => custom.rule === "tiles";
@@ -1578,14 +1576,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const clampDepths = (ds) => (Array.isArray(ds) ? ds : []).map(Number).filter(Number.isFinite).map((d) => Math.max(-0.95, Math.min(0.99, d)));
         // older links carried one set as on/depths
         const sets = Array.isArray(c.cuts) ? c.cuts : c.on ? [{ on: c.on, depths: c.depths }] : [];
-        const cuts = sets.filter((s) => ON_NAMES[s.on]).map((s) => ({ on: s.on, depths: clampDepths(s.depths) }));
         const truncate = {};
         for (const k of ["vertex", "edge"]) {
           const f = c.truncate && Number(c.truncate[k]);
           if (Number.isFinite(f)) truncate[k] = Math.max(TRIM_MIN, Math.min(TRIM_MAX, f));
         }
         const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
-        return { name: "Custom", rule: "custom", size: 2, fixed: true, solid: c.solid, truncate, cuts: threeSets(cuts), blackout };
+        return solidCustom(c.solid, sets.filter((s) => ON_NAMES[s.on]).map((s) => ({ on: s.on, ...(s.on === "face" && ["face", "vertex", "edge"].includes(s.of) ? { of: s.of } : {}), depths: clampDepths(s.depths) })), truncate, blackout);
       } catch { return null; }
     }
     // a tile-turning design from a link, its numbers kept in range
@@ -1629,8 +1626,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let painting = false;
     function setPainting(on) {
       painting = on;
-      $("bPaint").setAttribute("aria-pressed", String(on));
-      $("bPaintHint").hidden = !on;
       if (!on) setHover(null);
     }
     // Light up every piece of one type (null: none), so it's clear what a click will change.
@@ -1661,14 +1656,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let undoStack = [], redoStack = [];
     const snapshot = () => JSON.stringify(design());
     const steps = (n) => (n === 1 ? "1 edit" : `${n} edits`);
+    // (customizing, the undo and redo along the bottom are the design's: see renderTape)
     function showHistory() {
+      if (!editing()) return;
       const u = undoStack.length, r = redoStack.length;
-      $("bUndo").disabled = !u;
-      $("bRedo").disabled = !r;
-      $("bUndoN").textContent = u || "";
-      $("bRedoN").textContent = r || "";
-      $("bUndo").title = u ? `undo the last change to this design (${steps(u)} to go back through)` : "nothing to undo yet: changes to this design show up here";
-      $("bRedo").title = r ? `redo a change you undid (${steps(r)})` : "nothing to redo";
+      $("undo").disabled = !u;
+      $("redo").disabled = !r;
+      $("undo").title = u ? `undo the last change to this design (${steps(u)} to go back through)` : "nothing to undo yet: changes to this design show up here";
+      $("redo").title = r ? `redo a change you undid (${steps(r)})` : "nothing to redo";
     }
     function resetEdits() {
       undoStack = []; redoStack = [];
@@ -1706,7 +1701,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // handle (only the nearest were ever checked, and a ruler's far marks never showed).
     let snapping = true, snaps = [], snapJob = 0;
     let loadFrame = 0; // (a dragged handle's rebuild, waiting for the next frame: see loadSoon)
-    let rulerDragging = false; // (a handle's being dragged: its ruler isn't rebuilt under it)
+    let rulerDragging = false; // (a cut's being dragged: the design isn't rebuilt under it)
     const SNAP_PX = 7; // how close (on screen) a handle has to come to a mark to snap
     const SNAP_NEAREST = 16;
     // keep: [r, i] of a handle whose snaps are still right (the one just dragged: its snaps
@@ -1784,50 +1779,57 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       };
       setTimeout(step, 150);
     }
-    // ---------- the rulers ----------
-    // Every depth in the design is a handle on a ruler. There are five: truncating corners
-    // and edges (at most one handle each; 0 takes nothing off the corner or edge), then cuts
-    // around faces, corners and edges (any number; 0 is the center, 1 the surface, negative
-    // past the center). One handle across all rulers is selected: its ruler shows its snap
-    // marks and its readout. Pressing anywhere on a ruler grabs its nearest handle, so small
-    // handles are still easy to catch.
+    // ---------- the design's numbers ----------
+    // Every depth in the design belongs to a ruler (no longer drawn: the editor's tools set them on
+    // the puzzle itself, see "customize: tools on the puzzle"). There are seven: truncating corners
+    // and edges (at most one each; 0 takes nothing off the corner or edge), then cut sets (any
+    // number of cuts each) around faces, corners and edges, and on a solid around the faces its
+    // corners' and edges' truncation made. A solid's depths run from the center (0) to the surface
+    // (1), negative past the center; a tiling's are circles' radii.
     const CUT_KINDS = ["face", "vertex", "edge"];
-    const setOf = (on) => custom.cuts.find((c) => c.on === on);
+    const setOf = (on, of = null) => custom.cuts.find((c) => c.on === on && (on !== "face" || !isSolidDesign() || (c.of || "face") === (of || "face")));
+    const isSolidDesign = () => !isCircleDesign();
     // A hyperbolic ruler ends at the biggest circle that still works out: under the surface's limit
     // and the circles budget. That's set by the biggest circle of the design (how far the others
-    // reach) and how many there are, so it's the same for every handle on the ruler; new: for one
-    // more circle on it.
+    // reach) and how many there are, so it's the same for every cut of the set; new: for one more.
     function hyperRulerMax(on, more = false) {
       const rs = P.radii[on];
       return hyperRadiusLimit(P, on, more || !rs.length ? rs.length : rs.indexOf(Math.max(...rs)));
     }
-    // (on a tiling, a cut set's depths are circles' radii, from nothing out: no center mark)
-    const cutRuler = (on) => ({
-      group: "bSets", label: ON_SHORT[on], max: Infinity, noun: "cut",
+    // A cut set's ruler. on: what its cuts go around; of: on a solid, which type of face.
+    // (on a tiling, a cut set's depths are circles' radii, from nothing out)
+    const cutRuler = (on, of = null) => ({
+      on, of, max: Infinity, noun: "cut",
       // (a tiling's radii stop where a circle would reach around the torus to overlap itself; a
       // hyperbolic one's, around its surface: the built puzzle knows how far that is)
       get range() {
         if (isHyperDesign()) return isSphere() ? SPHERE_RADIUS_RANGE : [0.05, isHyper() ? hyperRulerMax(on) : 2];
         return isTileDesign() ? [TILE_CUT_RANGE[0], Math.min(TILE_CUT_RANGE[1], tileRadiusCap(custom))] : CUT_RANGE;
       },
-      get center() { return !isCircleDesign(); },
-      get title() {
-        const one = ON_NAMES[on].replace("around ", "").replace(/s$/, "");
-        return isCircleDesign() ? `circles around every ${on === "face" ? "tile's middle" : on === "vertex" ? "corner" : "edge's middle"}: each radius cuts all of them the same way; the circles around one point make layers that turn on their own`
-          : `cuts around every ${one}: each depth cuts all of them the same way`;
+      // what it's called: a truncated corner (or edge) is a face, and its cuts go around that face
+      // (a tiling's circles round a corner are round the corner's face once it's truncated)
+      get label() {
+        const trimmed = (k) => custom.truncate && custom.truncate[k] !== undefined;
+        if (of === "vertex") return "corner faces";
+        if (of === "edge") return "edge faces";
+        if (on === "face") return isCircleDesign() ? "tiles" : "faces";
+        if (isCircleDesign() && trimmed(on)) return on === "vertex" ? "corner faces" : "edge faces";
+        return on === "vertex" ? "corners" : "edges";
       },
+      // whether there's anything for it to go around now (a truncation's faces only once it's truncated)
+      get exists() { return !!setOf(on, of) && (!of || of === "face" || (custom.truncate && custom.truncate[of] !== undefined)); },
       depth: (v) => v,
-      values: () => setOf(on).depths,
-      set: (i, v) => { setOf(on).depths[i] = v; },
-      add: (v) => setOf(on).depths.push(v),
-      remove: (i) => setOf(on).depths.splice(i, 1),
-      target: (i) => ({ s: custom.cuts.indexOf(setOf(on)), i }),
+      values: () => (setOf(on, of) ? setOf(on, of).depths : []),
+      set: (i, v) => { setOf(on, of).depths[i] = v; },
+      add: (v) => setOf(on, of).depths.push(v),
+      remove: (i) => setOf(on, of).depths.splice(i, 1),
+      target: (i) => ({ s: custom.cuts.indexOf(setOf(on, of)), i }),
     });
-    // (a truncation's ruler reads how much it takes off, 1 − its depth: 0 at the left is the
-    // tip, nothing off. The design keeps the depth.)
+    // (a truncation's ruler reads how much it takes off, 1 − its depth: 0 is the tip, nothing off.
+    // The design keeps the depth.)
     const trimRuler = (kind) => ({
-      group: "bTrim", label: kind === "vertex" ? "corners" : "edges", range: [1 - TRIM_RANGE[1], 1 - TRIM_RANGE[0]], max: 1, noun: "truncation", center: false,
-      get title() { return `cut the ${isCircleDesign() ? "tiles'" : "solid's"} ${kind === "vertex" ? "corners" : "edges"} off ${isCircleDesign() ? "straight" : "flat"}; 0 takes nothing off, higher cuts more off`; },
+      trim: kind, label: kind === "vertex" ? "corners" : "edges", range: [1 - TRIM_RANGE[1], 1 - TRIM_RANGE[0]], max: 1, noun: "truncation",
+      exists: true,
       depth: (v) => 1 - v, // (ruler → design, and back)
       values: () => (custom.truncate[kind] === undefined ? [] : [1 - custom.truncate[kind]]),
       set: (_, v) => { custom.truncate[kind] = 1 - v; },
@@ -1835,96 +1837,23 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       remove: () => { delete custom.truncate[kind]; },
       target: () => ({ trim: kind }),
     });
-    const ON_SHORT = { face: "faces", vertex: "corners", edge: "edges" };
-    const RULERS = [trimRuler("vertex"), trimRuler("edge"), ...CUT_KINDS.map(cutRuler)];
+    const RULERS = [trimRuler("vertex"), trimRuler("edge"), ...CUT_KINDS.map((on) => cutRuler(on, on === "face" ? "face" : null)), cutRuler("face", "vertex"), cutRuler("face", "edge")];
+    const rulerOf = (R) => RULERS.indexOf(R);
 
-    let sel = { r: 2, i: 0 };
-    let rulerEls = []; // per ruler: { ruler, marks, handles, info, remove, add }
-    const pctIn = ([lo, hi], v) => ((v - lo) / (hi - lo)) * 100;
+    let sel = { r: 2, i: 0 }; // (the cut last grabbed: its snaps are worked out first)
     const isSnapped = (r, i) => snapping && ((snaps[r] || [])[i] || []).some((f) => Math.abs(f - RULERS[r].values()[i]) < 1e-9);
-
-    function showSnaps() {
-      rulerEls.forEach((el, r) => {
-        const R = RULERS[r], values = R.values();
-        el.marks.textContent = "";
-        if (R.center) {
-          const zero = Object.assign(document.createElement("span"), { className: "tw-zero" });
-          zero.style.left = pctIn(R.range, 0) + "%";
-          el.marks.append(zero);
-        }
-        // (marks past the ruler's ends aren't reachable: the range can end before the snaps' search)
-        const [lo, hi] = R.range;
-        // (not the one a snapped handle sits on: its ring already says so)
-        const on = sel.r === r && isSnapped(r, sel.i) ? values[sel.i] : null;
-        if (snapping && sel.r === r)
-          for (const f of ((snaps[r] || [])[sel.i] || []).filter((f) => f >= lo && f <= hi && (on === null || Math.abs(f - on) > 1e-6 * (hi - lo)))) {
-            const m = document.createElement("span");
-            m.style.left = pctIn(R.range, f) + "%";
-            el.marks.append(m);
-          }
-        [...el.handles.children].forEach((h, i) => {
-          h.classList.toggle("is-snapped", isSnapped(r, i));
-          h.classList.toggle("is-sel", sel.r === r && sel.i === i);
-        });
-        // the readout: this ruler's selected value if the selection is here, else a count
-        const n = values.length, here = sel.r === r && n;
-        // (remove: the selected one if it's here, else the deepest, see deepest)
-        el.remove.hidden = !n;
-        el.remove.title = here ? `remove the selected ${R.noun} (Delete)` : `remove the deepest ${R.noun}`;
-        el.add.hidden = n >= R.max;
-        if (!n) { el.info.textContent = R.max === 1 ? "off" : "none"; el.info.className = "tw-rinfo tw-dim"; }
-        else if (here) {
-          el.info.textContent = `${n > 1 ? `${sel.i + 1} of ${n} · ` : ""}${values[sel.i].toFixed(3)}`;
-          el.info.className = "tw-rinfo" + (isSnapped(r, sel.i) ? " is-snapped" : "");
-        } else { el.info.textContent = R.max === 1 ? values[0].toFixed(3) : `${n} ${R.noun}${n > 1 ? "s" : ""}`; el.info.className = "tw-rinfo tw-dim"; }
-      });
-    }
-    // Every handle (and mark) where its value is in its ruler's range now. A hyperbolic ruler's range
-    // comes from the built puzzle, which can change under it: a design from a link has its rulers
-    // laid out before its surface is in, against a stand-in range, and grabbing a handle there
-    // jumped it. In place, so a handle being dragged or nudged keeps its focus.
-    function placeHandles() {
-      rulerEls.forEach((el, r) => {
-        const R = RULERS[r], values = R.values();
-        [...el.handles.children].forEach((h, i) => {
-          if (values[i] === undefined) return;
-          h.style.left = pctIn(R.range, values[i]) + "%";
-          h.setAttribute("aria-valuemin", R.range[0]);
-          h.setAttribute("aria-valuemax", R.range[1]);
-        });
-      });
-      showSnaps();
-    }
-    // A ruler's deepest handle (what its remove takes when none of its handles is selected): a
-    // circle's the biggest (it cuts the most), a solid's cut the nearest the center (0; the surface
-    // is 1)
-    function deepest(r) {
-      const values = RULERS[r].values();
-      return values.reduce((b, v, i) => ((isCircleDesign() ? v > values[b] : v < values[b]) ? i : b), 0);
-    }
-    function select(r, i) {
-      if (sel.r === r && sel.i === i) return;
-      sel = { r, i };
-      showSnaps();
-    }
-    // set handle i of ruler r; snap: pull it onto a nearby mark (within SNAP_PX on screen)
-    function setDepth(r, i, v, snap) {
+    // (the snaps came in, or the design's ranges moved: the editor redraws from them each frame)
+    function showSnaps() {}
+    function placeHandles() {}
+    function select(r, i) { sel = { r, i }; }
+    // set cut (or truncation) i of ruler r, in range
+    function setDepth(r, i, v) {
       const R = RULERS[r], [lo, hi] = R.range;
-      v = Math.max(lo, Math.min(hi, v));
-      if (snap && snapping) {
-        const near = ((snaps[r] || [])[i] || []).filter((f) => f >= lo && f <= hi).reduce((b, f) => (Math.abs(f - v) < Math.abs(b - v) ? f : b), Infinity);
-        const perPx = (hi - lo) / Math.max(1, rulerEls[r].handles.clientWidth);
-        if (Math.abs(near - v) < SNAP_PX * perPx) v = near;
-      }
-      R.set(i, v);
-      const h = rulerEls[r].handles.children[i];
-      h.style.left = pctIn(R.range, v) + "%";
-      h.setAttribute("aria-valuenow", v.toFixed(3));
+      R.set(i, Math.max(lo, Math.min(hi, v)));
       custom.blackout = [];
       loadSoon();
-      showSnaps();
     }
-    // A dragged handle rebuilds the puzzle at most once a frame (pointer moves come faster than a
+    // A dragged cut rebuilds the puzzle at most once a frame (pointer moves come faster than a
     // big design builds, and each one waiting its turn made the drag lag behind). loadNow: the
     // last one, at once (before anything reads the built puzzle, like the snaps)
     function loadSoon() { if (!loadFrame) loadFrame = requestAnimationFrame(() => { loadFrame = 0; load(false); }); }
@@ -1932,121 +1861,32 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function removeValue(r, i) {
       pushUndo();
       RULERS[r].remove(i);
-      sel = { r, i: Math.max(0, Math.min(i, RULERS[r].values().length - 1)) };
+      sel = { r, i: 0 };
       changed();
       computeSnaps();
     }
-    // a new cut goes in the widest gap between 0 and the surface; a truncation starts near
-    // the tip, where it takes off a little
+    // A new cut: a solid's in the widest gap between the center and the surface; a circle's in the
+    // widest gap out to a bit past the tiles' corners. A truncation starts near the tip, where it
+    // takes off a little. Returns its index.
     function addValue(r) {
       pushUndo();
       const R = RULERS[r];
       let v = 0.15;
       if (R.max !== 1) {
         // (a tiling's: out to the next tile's middle, or the cap; a hyperbolic one's, a tile's corners or the cap)
-        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(isHyper() ? hyperRulerMax(CUT_KINDS[r - 2], true) : isSphere() ? R.range[1] : 2, 1.2 * (isHyper() || isSphere() ? P.G.Rv : 1))] : [0, 0.95];
+        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(isHyper() ? hyperRulerMax(R.on, true) : isSphere() ? R.range[1] : 2, 1.2 * (isHyper() || isSphere() ? P.G.Rv : 1))] : [0, 0.95];
         const pts = [lo, ...R.values().filter((d) => d > lo && d < hi), hi].sort((a, b) => a - b);
         let gap = -1;
         for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1] - pts[k] > gap) { gap = pts[k + 1] - pts[k]; v = (pts[k] + pts[k + 1]) / 2; }
       }
       R.add(v);
-      sel = { r, i: R.values().length - 1 };
+      const i = R.values().length - 1;
+      sel = { r, i };
       changed();
       computeSnaps();
-    }
-    // press on a ruler: grab its nearest handle there and drag it. An empty ruler gets a
-    // new cut (or truncation) where you pressed, pulled onto a snap mark if one's close.
-    function rulerDown(e, r) {
-      const R = RULERS[r], values = R.values(), el = rulerEls[r], [lo, hi] = R.range;
-      if (e.button !== 0) return;
-      const box = el.handles.getBoundingClientRect();
-      const at = (x) => lo + ((x - box.left) / box.width) * (hi - lo);
-      const v0 = at(e.clientX);
-      if (!values.length) {
-        e.preventDefault();
-        pushUndo();
-        R.add(Math.max(lo, Math.min(hi, v0)));
-        sel = { r, i: 0 };
-        changed();
-        computeSnaps();
-        return;
-      }
-      const onHandle = e.target.classList.contains("tw-handle");
-      const i = onHandle
-        ? [...el.handles.children].indexOf(e.target)
-        : values.reduce((b, d, k) => (Math.abs(d - v0) < Math.abs(values[b] - v0) ? k : b), 0);
-      e.preventDefault();
-      el.handles.children[i].focus({ preventScroll: true });
-      select(r, i);
-      pushUndo();
-      // grabbing a handle keeps its offset; pressing the rail moves the handle there
-      const offset = onHandle ? values[i] - v0 : 0;
-      if (!onHandle) setDepth(r, i, v0, true);
-      el.ruler.setPointerCapture(e.pointerId);
-      rulerDragging = true;
-      const move = (ev) => setDepth(r, i, at(ev.clientX) + offset, true);
-      const up = () => {
-        rulerDragging = false;
-        el.ruler.removeEventListener("pointermove", move);
-        el.ruler.removeEventListener("pointerup", up);
-        el.ruler.removeEventListener("pointercancel", up);
-        computeSnaps([r, i]); // the other handles' snaps depend on this one
-      };
-      el.ruler.addEventListener("pointermove", move);
-      el.ruler.addEventListener("pointerup", up);
-      el.ruler.addEventListener("pointercancel", up);
+      return i;
     }
     const make = (tag, className, props = {}) => Object.assign(document.createElement(tag), { className, ...props });
-    // one block per ruler: its name and readout above, the ruler below
-    function renderRulers() {
-      $("bTrim").textContent = "";
-      $("bSets").textContent = "";
-      rulerEls = [];
-      const n = RULERS[sel.r].values().length;
-      sel.i = Math.min(sel.i, Math.max(0, n - 1));
-      RULERS.forEach((R, r) => {
-        const block = make("div", "tw-rblock");
-        const head = make("div", "tw-rhead");
-        const name = make("span", "tw-rname", { textContent: R.label, title: R.title });
-        const info = make("span", "tw-rinfo");
-        const remove = make("button", "tw-link", { textContent: "remove", title: `remove the selected ${R.noun} (Delete)` });
-        remove.onclick = () => removeValue(r, sel.r === r ? sel.i : deepest(r));
-        const add = make("button", "tw-link", { textContent: R.max === 1 ? "+ truncate" : "+ cut", title: R.max === 1 ? R.title : `add another cut ${ON_NAMES[CUT_KINDS[r - 2]]}` });
-        add.onclick = () => addValue(r);
-        head.append(name, info, remove, add);
-        const ruler = make("div", "tw-ruler");
-        const marks = make("div", "tw-marks"), handles = make("div", "tw-handles");
-        ruler.append(make("div", "tw-rail" + (R.center ? "" : " tw-rail-plain")), marks, handles);
-        ruler.addEventListener("pointerdown", (e) => rulerDown(e, r));
-        R.values().forEach((d, i) => {
-          const h = make("button", "tw-handle", { title: `drag to set this ${R.noun}'s depth · arrow keys nudge · Delete removes` });
-          h.style.left = pctIn(R.range, d) + "%";
-          h.setAttribute("role", "slider");
-          h.setAttribute("aria-label", `${R.label} ${R.noun} ${i + 1} depth`);
-          h.setAttribute("aria-valuemin", R.range[0]);
-          h.setAttribute("aria-valuemax", R.range[1]);
-          h.setAttribute("aria-valuenow", d.toFixed(3));
-          h.onfocus = () => select(r, i);
-          h.onkeydown = (e) => {
-            const step = e.shiftKey ? 0.05 : 0.005;
-            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-              e.preventDefault();
-              pushUndo();
-              setDepth(r, i, R.values()[i] + (e.key === "ArrowRight" ? step : -step), false);
-              computeSnaps([r, i]);
-            } else if (e.key === "Delete" || e.key === "Backspace") {
-              e.preventDefault();
-              removeValue(r, i);
-            }
-          };
-          handles.append(h);
-        });
-        block.append(head, ruler);
-        $(R.group).append(block);
-        rulerEls.push({ ruler, marks, handles, info, remove, add });
-      });
-      showSnaps();
-    }
 
     // solid chips
     const SOLID_SHORT = { tetrahedron: "tetra", cube: "cube", octahedron: "octa", dodecahedron: "dodeca", icosahedron: "icosa", rhombicDodecahedron: "rhombic" };
@@ -2080,7 +1920,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (k === "nm") {
             const { N, M } = designNM() || { N: 4, M: 3 };
             custom = hyperCustom({ rule: "hyper", N, M, surface: 0, cuts: roundCuts(N, M), blackout: [] });
-          } else if (isHyperDesign()) custom = { name: "Custom", rule: "custom", size: 2, fixed: true, solid: k, truncate: {}, cuts: threeSets([{ on: "face", depths: [0.33] }]), blackout: [] };
+          } else if (isHyperDesign()) custom = solidCustom(k);
           else custom.solid = k;
           renderParams();
           changed();
@@ -2090,7 +1930,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // them makes it a tiling design (see stepTiling); the rhombic solids have none
       const nm = designNM();
       $("bNM").replaceChildren(...(nm ? ["N", "M"].map((key, i) => stepperRow(HYPER_PARAMS[i], () => designNM()[key], (v) => stepTiling(key, v))) : []));
-      renderRulers();
+      $("bNMLabel").hidden = !nm;
     }
     // The solid or cuts changed. rerender: rebuild the builder's controls too (not while a
     // slider is being dragged).
@@ -2104,19 +1944,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isCircleDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
       if (isHyper()) {
         $("bStats").title = "how many pieces, and the surface";
-        $("bStats").innerHTML = `${P.n} pieces<br>${P.tiles} tiles · genus ${P.surface.genus}`;
+        $("bStats").innerHTML = `${P.n} pieces · ${P.tiles} tiles · genus ${P.surface.genus}`;
         return;
       }
       if (isTiles()) {
         const st = tileStats(P), pct = st.smallest * 100;
         $("bStats").title = "how many pieces, and the smallest one as a share of a tile (red: slivers)";
-        $("bStats").innerHTML = `${st.pieces} pieces<br>smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
+        $("bStats").innerHTML = `${st.pieces} pieces · smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
         return;
       }
       const st = isSphere() ? sphereStats(P) : puzzleStats(P);
       const pct = st.smallest * 100;
       $("bStats").title = `how many pieces show, and the smallest sticker as a share of its ${isSphere() ? "tile" : "face"} (red: slivers)`;
-      $("bStats").innerHTML = `${st.pieces} pieces<br>smallest ` +
+      $("bStats").innerHTML = `${st.pieces} pieces · smallest ` +
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 
@@ -2341,7 +2181,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("size").value = size;
       $("sizeDown").disabled = size <= 0;
       $("sizeControl").hidden = !!spec.fixed;
-      $("builder").hidden = !isCustom();
       $("customize").hidden = !!spec.noCustom; // (the editor can't express a cuboid, a prism or a sliding puzzle)
       if (!isPlanar()) renderTexturesButton();
       if (!isCustom()) setPainting(false);
@@ -2354,21 +2193,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       writeURL();
     }
 
-    $("builder").style.setProperty("--center", pctIn(CUT_RANGE, 0) + "%");
-    $("bUndo").onclick = undoEdit;
-    $("bRedo").onclick = redoEdit;
-    $("bSnap").onclick = () => {
-      snapping = !snapping;
-      $("bSnap").classList.toggle("is-on", snapping);
-      $("bSnap").setAttribute("aria-pressed", String(snapping));
-      showSnaps();
-    };
-    $("bPaint").onclick = () => setPainting(!painting);
     $("bRestore").onclick = restoreAll;
-    $("bShare").onclick = async () => {
-      try { await navigator.clipboard.writeText(shareLink()); $("bShare").textContent = "copied"; }
+    for (const id of ["bShare", "bShare2"]) $(id).onclick = async () => {
+      try { await navigator.clipboard.writeText(shareLink()); $(id).textContent = "copied"; }
       catch { prompt("copy this link", shareLink()); }
-      setTimeout(() => { $("bShare").textContent = "copy link"; }, 1500);
+      setTimeout(() => { $(id).textContent = "copy link"; }, 1500);
     };
     // (the puzzle in the URL is applied at startup, below: see applyURL)
     // pick a puzzle: its index in MENU, or "custom" (the shelf and the test hook)
@@ -2390,7 +2219,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       else if (isHyper() || isSphere()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: P.spec.cuts, blackout: [] }); } // (the built cuts: a preset's circle is sized for its tiling)
       else {
         custom = toCustom(P);
-        custom.cuts = threeSets(custom.cuts);
+        custom.cuts = solidSets(custom.cuts, custom.truncate);
       }
       presetIdx = "custom";
       size = custom.size;
@@ -2410,8 +2239,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     $("size").onchange = () => setSize(+$("size").value, 1);
     $("sizeDown").onclick = () => setSize(size - 1, -1);
     $("sizeUp").onclick = () => setSize(size + 1, 1);
-    $("undo").onclick = () => { flush(); undo(); };
-    $("redo").onclick = () => { flush(); redo(); };
+    $("undo").onclick = () => { if (editing()) { undoEdit(); return; } flush(); undo(); };
+    $("redo").onclick = () => { if (editing()) { redoEdit(); return; } flush(); redo(); };
     // Scramble from wherever the puzzle is by playing the turns quickly, about 3.5 s in all. They go
     // straight into the animation queue, not the history, so undo can't unscramble.
     $("axes").onclick = () => {
@@ -2552,8 +2381,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     addEventListener("keydown", (e) => {
       if (!(e.metaKey || e.ctrlKey) || e.target.matches?.("input:not([type=number])")) return; // (typing a name: its own undo)
       const k = e.key.toLowerCase();
-      if (k === "z" && !e.shiftKey) { e.preventDefault(); flush(); undo(); }
-      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); flush(); redo(); }
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); if (editing()) undoEdit(); else { flush(); undo(); } }
+      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); if (editing()) redoEdit(); else { flush(); redo(); } }
     });
 
     // ---------- pointer input ----------
@@ -2720,6 +2549,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (pointers.size > 2) return;
       aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
+      // (customizing: the tool takes the press; anywhere else turns the view, never the puzzle)
+      if (editing() && !(painting && isCustom())) { if (isFlat() || !edDown(e)) drag = { mode: "orbit", x: e.clientX, y: e.clientY }; return; }
       if (isHyper()) { drag = { mode: "orbit", x: e.clientX, y: e.clientY }; return; } // (the hyperbolic surface in 3D: turns are made on the disk)
       if (isTiles()) {
         // the 3D torus: press a circle to drag it round, click a tile's middle to turn it;
@@ -2785,8 +2616,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     });
 
     canvas.addEventListener("pointermove", (e) => {
+      if (edDrag) { edMove(e); return; }
       if (!pointers.has(e.pointerId)) {
         if (!pointers.size) aimAt(e.clientX, e.clientY); // (hovering; never mid-drag)
+        if (editing() && !painting && !isFlat()) { edHoverAt(e.clientX, e.clientY); return; }
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
         if (isTiles()) { hoverTiles3D(e.clientX, e.clientY); return; }
         if (isHyper()) return;
@@ -2879,6 +2712,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
 
     function endPointer(e) {
       pointers.delete(e.pointerId);
+      if (edDrag) { edUp(e); drag = null; return; }
       if (drag && drag.mode === "turn") releaseTurn();
       if (drag && drag.mode === "ring") { releaseTurn(); canvas.style.cursor = "grab"; }
       if (drag && drag.mode === "rclick") turnSegment(drag.seg, drag.clockwise);
@@ -2909,6 +2743,416 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       zoom = Math.min(2.4, Math.max(0.55, zoom * Math.exp(e.deltaY * 0.001)));
       placeCamera();
     }, { passive: false });
+
+    // ---------- customize: tools on the puzzle (issue #22) ----------
+    // While customizing, the puzzle holds still (solved) and the tool picked down the left acts on
+    // it. Cut: a pulsing dot on every place a cut can go round (a face's middle, a corner, an edge's
+    // middle; a tiling's tiles, corners and edges), the side showing; clicking one adds a cut round
+    // every place like it, and pressing and dragging sets where it goes. Pressing a cut's line grabs
+    // it; dragging it off the puzzle (past the surface, or a circle shrunk to nothing) and letting go
+    // removes it, as does a right-click or a long press. Truncate: the same with the corners and
+    // edges, dragged inward. Black out: a click on a piece blacks out its kind (see setPainting).
+    // A cut snaps to the depths where it lines up with the rest (the snaps, worked out as before),
+    // within a few px on screen; Alt held, it doesn't.
+    // Each kind of puzzle answers the same few questions (edGeo): where its dots are, what depth a
+    // spot on it is from one of them, and where a cut at a depth runs on screen.
+    let edTool = "cut";
+    function editing() { return document.body.classList.contains("nx-custom"); }
+    const coarse = matchMedia("(pointer: coarse)");
+    function setTool(t) {
+      if (t) edTool = t;
+      for (const b of document.querySelectorAll(".ed-tool")) b.setAttribute("aria-pressed", String(b.dataset.tool === edTool));
+      setPainting(t === "paint");
+      edHover = null;
+      renderEditHint();
+    }
+    for (const b of document.querySelectorAll(".ed-tool")) b.onclick = () => setTool(b.dataset.tool);
+    function renderEditHint() {
+      const remove = coarse.matches ? "long-press" : "right-click";
+      $("edTip").textContent = edTool === "cut" ? `tap a dot to add a cut · drag a cut · drag it off or ${remove} to remove`
+        : edTool === "trim" ? `drag a corner or edge dot inward · drag it back or ${remove} to remove`
+        : "tap a piece to black out every piece like it";
+    }
+
+    // Where things are on screen. 3D (a solid or a ball): through a view's camera, and whether a
+    // spot with outward normal n faces it. Flat: the tiles' or the disk's own picture.
+    const tmpV = new THREE.Vector3();
+    function projectWith(cam, p) {
+      tmpV.set(p[0], p[1], p[2]);
+      puzzleGroup.localToWorld(tmpV).project(cam);
+      return [((tmpV.x + 1) / 2) * W, ((1 - tmpV.y) / 2) * H];
+    }
+    function facing(cam, n, p) {
+      const w = puzzleGroup.localToWorld(tmpV.set(p[0], p[1], p[2])).clone(), nw = new THREE.Vector3(...n).applyQuaternion(root.quaternion);
+      return nw.dot(cam.position.clone().sub(w)) > 0;
+    }
+    // a 3D polyline cut into the runs that face the camera, on screen
+    function visibleRuns(cam, pts, normalAt) {
+      const runs = [];
+      let run = null;
+      for (const p of pts) {
+        if (facing(cam, normalAt(p), p)) { if (!run) runs.push((run = [])); run.push(projectWith(cam, p)); } else run = null;
+      }
+      return runs.filter((r) => r.length > 1);
+    }
+    // whether a point of the (convex) solid's surface is out of sight: every face it's on faces away
+    // (a corner on the outline shows)
+    function hidden(cam, p) {
+      const on = P.solid.polys.filter((q) => Math.abs(dot(q.normal, p) - dot(q.normal, q.verts[0])) < 1e-6 * P.R);
+      return !on.some((q) => facing(cam, q.normal, p));
+    }
+    // a 3D solid: cut sets go round directions { n, h } (puzzle.mjs's cutDirectionsOf): depth f is
+    // the plane n·x = f·h. Truncations the same, measured on the uncut solid.
+    // (a truncated solid's own corners and edges mostly sit off its turning axes: cuts round them
+    // split pieces but never turn, and their dots are hollow)
+    const turnsAbout = (n) => P.group.mats.filter((m) => len(sub(applyMat(m, n), n)) < 1e-5).length > 1;
+    const solidGeo = {
+      solid: true,
+      sites: (R) => (R.trim ? trimDirectionsOf(P, R.trim).map((at) => ({ at, p: scale(at.n, at.h * (custom.truncate[R.trim] ?? 1)), n: at.n, turns: true }))
+        : cutDirectionsOf(P, { on: R.on, of: R.of }).map((at) => ({ at, p: scale(at.n, at.h), n: at.n, turns: turnsAbout(at.n) }))),
+      // (where the pointer's ray meets the solid, exactly: the pieces' meshes have gaps between
+      // them, right where cuts run)
+      probe(x, y) {
+        ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
+        raycaster.setFromCamera(ndc, inputCam);
+        const o = puzzleGroup.worldToLocal(raycaster.ray.origin.clone()), e = puzzleGroup.worldToLocal(raycaster.ray.origin.clone().add(raycaster.ray.direction));
+        const O = [o.x, o.y, o.z], d = [e.x - o.x, e.y - o.y, e.z - o.z];
+        let t0 = 0, t1 = Infinity;
+        for (const q of P.solid.polys) {
+          const k = dot(q.normal, q.verts[0]), nd = dot(q.normal, d), no = dot(q.normal, O);
+          if (Math.abs(nd) < 1e-12) { if (no > k) return null; continue; }
+          const t = (k - no) / nd;
+          if (nd < 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+        }
+        return t0 <= t1 ? add(O, scale(d, t0)) : null;
+      },
+      value: (R, at, w) => (R.trim ? 1 - dot(w, at.n) / at.h : dot(w, at.n) / at.h),
+      // (a plane's line across the faces showing; a truncation's just inside its face, so it runs
+      // round the face's rim)
+      curve(R, at, v, cam) {
+        const d = R.trim ? (1 - v) * at.h - 1e-4 * P.R : v * at.h, out = [];
+        for (const q of P.solid.polys) {
+          if (!facing(cam, q.normal, q.verts[0])) continue;
+          const pts = [];
+          q.verts.forEach((a, k) => {
+            const b = q.verts[(k + 1) % q.verts.length], fa = dot(at.n, a) - d, fb = dot(at.n, b) - d;
+            if ((fa > 0) !== (fb > 0)) { const t = fa / (fa - fb); pts.push(add(a, scale(sub(b, a), t))); }
+          });
+          if (pts.length === 2) out.push(pts.map((p) => projectWith(cam, p)));
+        }
+        return out;
+      },
+    };
+    // a ball: circles round its points (sphere.mjs), each radius an angle. A truncation's line in
+    // a tile is the great circle square to the way from its middle to the corner (or edge's middle),
+    // at the truncation's fraction of the way there (see sphere.mjs's findPieces).
+    const circleOnBall = (p, r) => {
+      const u = normalize(cross(p, Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(p, u);
+      return Array.from({ length: 97 }, (_, k) => { const t = (k * TAU) / 96; return add(scale(p, Math.cos(r)), add(scale(u, Math.sin(r) * Math.cos(t)), scale(v, Math.sin(r) * Math.sin(t)))); });
+    };
+    const ballTrimR = (kind) => (kind === "vertex" ? P.G.Rv : P.G.Ri);
+    const ballTilesAt = (kind, p) => P.H.normals.filter((c) => Math.abs(angleTo(c, p) - ballTrimR(kind)) < 1e-6);
+    const toward = (c, p) => normalize(sub(p, scale(c, dot(p, c))));
+    const ballGeo = {
+      sites: (R) => P.H.points[R.trim || R.on].map((p) => ({ at: p, p, n: p })),
+      probe: (x, y) => ballPoint(x, y),
+      value(R, p, w) {
+        if (!R.trim) return angleTo(w, p);
+        const c = ballTilesAt(R.trim, p).reduce((b, c) => (dot(c, w) > dot(b, w) ? c : b)), u = toward(c, p);
+        return 1 - Math.atan2(dot(w, u), dot(w, c)) / ballTrimR(R.trim);
+      },
+      curve(R, p, v, cam) {
+        if (!R.trim) return visibleRuns(cam, circleOnBall(p, v), (q) => q);
+        // (in each tile round the point: the arc of the line, out from where it crosses the way to
+        // the point, as far as the tile goes)
+        const t = (1 - v) * ballTrimR(R.trim), out = [];
+        for (const c of ballTilesAt(R.trim, p)) {
+          const u = toward(c, p), m = sub(scale(u, Math.cos(t)), scale(c, Math.sin(t))), y0 = add(scale(c, Math.cos(t)), scale(u, Math.sin(t))), e = normalize(cross(m, y0));
+          const inTile = (y) => P.H.normals.every((o) => dot(y, c) >= dot(y, o) - 1e-9);
+          const side = (sg) => { const pts = []; for (let k = 0; k < 120; k++) { const s = (sg * k * Math.PI) / 120, y = add(scale(y0, Math.cos(s)), scale(e, Math.sin(s))); if (!inTile(y)) break; pts.push(y); } return pts; };
+          out.push(...visibleRuns(cam, [...side(-1).reverse(), ...side(1).slice(1)], (q) => q));
+        }
+        return out;
+      },
+    };
+    // the flat torus: its points, at every copy on the picture (tiles.mjs's points are at the copy
+    // nearest the middle; the picture shows a band of copies round the patch)
+    function tileCopies(pts) {
+      const { Ap, Bp } = P, v = tileView.view, out = [];
+      if (tileView.P !== P || !v) return out;
+      for (const pt of pts) for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) {
+        const c = [pt.center[0] + i * Ap[0] + j * Bp[0], pt.center[1] + i * Ap[1] + j * Bp[1]];
+        if (c[0] > v.x0 - 0.6 && c[0] < v.x1 + 0.6 && c[1] > v.y0 - 0.6 && c[1] < v.y1 + 0.6) out.push({ c, tile: pt });
+      }
+      return out;
+    }
+    const scr2 = (s) => [s.x, s.y];
+    // (the tiles round a point: the copies whose middle is nearest it; a tile's polygon is its corners)
+    function tilesRound(o) {
+      const tiles = tileCopies(P.tiles), d = (t) => Math.hypot(t.c[0] - o[0], t.c[1] - o[1]), m = Math.min(...tiles.map(d));
+      return tiles.filter((t) => d(t) < m + 1e-6).map((t) => ({ c: t.c, poly: t.tile.corners.map((q) => [q[0] - t.tile.center[0] + t.c[0], q[1] - t.tile.center[1] + t.c[1]]) }));
+    }
+    // a line { y : (y − c)·q = k } across a convex polygon: its two ends, or null
+    function chord(poly, c, q, k) {
+      const pts = [], val = (y) => (y[0] - c[0]) * q[0] + (y[1] - c[1]) * q[1] - k;
+      poly.forEach((a, j) => {
+        const b = poly[(j + 1) % poly.length], fa = val(a), fb = val(b);
+        if ((fa > 0) !== (fb > 0)) { const t = fa / (fa - fb); pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+      });
+      return pts.length === 2 ? pts : null;
+    }
+    const circlePx = (c, r, toScr) => Array.from({ length: 97 }, (_, k) => { const t = (k * TAU) / 96; return toScr([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)]); });
+    const tileGeo = {
+      flat: true,
+      sites: (R) => tileCopies(P.points[R.trim || R.on]).map(({ c }) => ({ at: c, s: scr2(tileView.toScreen(c)) })),
+      probe: (x, y) => (tileView.shows(x, y) ? tileView.toPlane(x, y) : null),
+      value(R, o, w) {
+        if (!R.trim) return Math.hypot(w[0] - o[0], w[1] - o[1]);
+        const t = tilesRound(o).reduce((b, t) => (Math.hypot(w[0] - t.c[0], w[1] - t.c[1]) < Math.hypot(w[0] - b.c[0], w[1] - b.c[1]) ? t : b));
+        const q = [o[0] - t.c[0], o[1] - t.c[1]];
+        return 1 - ((w[0] - t.c[0]) * q[0] + (w[1] - t.c[1]) * q[1]) / (q[0] * q[0] + q[1] * q[1]);
+      },
+      curve(R, o, v) {
+        const toScr = (p) => scr2(tileView.toScreen(p));
+        if (!R.trim) return [circlePx(o, v, toScr)];
+        return tilesRound(o).flatMap((t) => { const q = [o[0] - t.c[0], o[1] - t.c[1]], e = chord(t.poly, t.c, q, (1 - v) * (q[0] * q[0] + q[1] * q[1])); return e ? [e.map(toScr)] : []; });
+      },
+      clip(ctx) { const v = tileView.view, a = tileView.toScreen([v.x0, v.y0]), b = tileView.toScreen([v.x1, v.y1]); ctx.beginPath(); ctx.rect(a.x, a.y, b.x - a.x, b.y - a.y); ctx.clip(); },
+    };
+    // the hyperbolic disk: every visible copy of each point (one per spot), from the visible tiles
+    // (each tile's map from tile 0's frame). A truncation's line in a tile is straight in the Klein
+    // picture, square to the way to the corner, at tanh of its fraction of the corner's distance.
+    const hyperLocal = (kind) => (kind === "face" ? [[0, 0]] : kind === "vertex" ? P.G.corners : P.G.mids);
+    const hyperTrimR = (kind) => (kind === "vertex" ? P.G.Rv : P.G.Ri);
+    // (only where the tiles are big enough to aim at: a tile's middle to its edge at least 24 px)
+    function hyperSitesOf(kind) {
+      const seen = new Set(), out = [];
+      if (hyperView.P !== P) return out;
+      for (const d of hyperView.listVisible().tiles) for (const q of hyperLocal(kind)) {
+        const z = mobius.apply(d.m, q), key = `${Math.round(z[0] * 1e5)}:${Math.round(z[1] * 1e5)}`;
+        if (((1 - z[0] * z[0] - z[1] * z[1]) / 2) * hyperView.R * P.G.Ri < 24 || seen.has(key)) continue;
+        seen.add(key); out.push(z);
+      }
+      return out;
+    }
+    // (the tiles round a point: each tile and which of its corners, or edges' middles, it is)
+    function hyperTilesRound(kind, z) {
+      const out = [];
+      for (const d of hyperView.listVisible().tiles) hyperLocal(kind).forEach((q, k) => { const w = mobius.apply(d.m, q); if (Math.hypot(w[0] - z[0], w[1] - z[1]) < 1e-6) out.push({ d, k }); });
+      return out;
+    }
+    const unit2 = (p) => { const l = Math.hypot(p[0], p[1]); return [p[0] / l, p[1] / l]; };
+    const hyperGeo = {
+      flat: true,
+      sites: (R) => hyperSitesOf(R.trim || R.on).map((z) => ({ at: z, s: scr2(hyperView.toScreen(z)) })),
+      probe: (x, y) => (hyperView.shows(x, y) ? hyperView.toDisk(x, y) : null),
+      value(R, z, w) {
+        if (!R.trim) return hdist(w, z);
+        const round = hyperTilesRound(R.trim, z);
+        if (!round.length) return null;
+        const best = round.map(({ d, k }) => ({ k, lw: mobius.apply(mobius.inv(d.m), w) })).reduce((b, t) => (Math.hypot(...t.lw) < Math.hypot(...b.lw) ? t : b));
+        const kl = toKlein(best.lw), u = unit2(hyperLocal(R.trim)[best.k]), x = Math.max(-0.999999, Math.min(0.999999, kl[0] * u[0] + kl[1] * u[1]));
+        return 1 - Math.atanh(x) / hyperTrimR(R.trim);
+      },
+      curve(R, z, v) {
+        const toScr = (p) => scr2(hyperView.toScreen(p));
+        if (!R.trim) { const c = diskCircle(z, v); return [circlePx(c.c, c.r, toScr)]; }
+        const t = Math.tanh((1 - v) * hyperTrimR(R.trim)), poly = P.G.corners.map(toKlein);
+        return hyperTilesRound(R.trim, z).flatMap(({ d, k }) => {
+          const u = unit2(hyperLocal(R.trim)[k]), e = chord(poly, [0, 0], u, t);
+          return e ? [Array.from({ length: 17 }, (_, j) => toScr(mobius.apply(d.m, fromKlein([e[0][0] + ((e[1][0] - e[0][0]) * j) / 16, e[0][1] + ((e[1][1] - e[0][1]) * j) / 16]))))] : [];
+        });
+      },
+      clip(ctx) { ctx.beginPath(); ctx.arc(hyperView.cx, hyperView.cy, hyperView.R, 0, TAU); ctx.clip(); },
+    };
+    const edGeo = () => (!P || !isCustom() ? null : isSphere() ? ballGeo : isTiles() ? tileGeo : isHyper() ? hyperGeo : isFlat() ? null : solidGeo);
+    // the rulers the tool works on: the truncations, or the cut sets there's something to cut round
+    const edRulers = () => RULERS.filter((R) => (edTool === "trim" ? !!R.trim : edTool === "cut" && !R.trim && R.exists));
+    // the views to draw in and pick from: a flat puzzle's picture, or the 3D views (front, and back)
+    const edViews = (g) => (g.flat ? [{ cam: null }] : views().map((v) => ({ cam: v.cam, clip: v.clip })));
+    // the sites showing, on screen, in one view
+    function edSites(g, R, view) {
+      return g.sites(R).flatMap((st) => {
+        if (g.flat) return [{ ...st, x: st.s[0], y: st.s[1] }];
+        if (g.solid ? hidden(view.cam, st.p) : !facing(view.cam, st.n, st.p)) return [];
+        const [x, y] = projectWith(view.cam, st.p);
+        return [{ ...st, x, y }];
+      });
+    }
+
+    // What's under the pointer (x, y): the nearest cut's line, within 10 px, or else a dot, within
+    // 13 px: { r, i (the cut; for a dot, none yet), at (which of its places), px }.
+    // A cut's line is where the depth the pointer's spot would give matches its depth: the
+    // distance in px is the difference over how fast that depth changes per px there.
+    function edProbe(g, x, y) {
+      const w0 = g.probe(x, y);
+      if (!w0) return null;
+      const w1 = g.probe(x + 1.5, y) || w0, w2 = g.probe(x, y + 1.5) || w0;
+      return { w0, w1, w2 };
+    }
+    function edRate(g, R, at, pr) {
+      const v0 = g.value(R, at, pr.w0), v1 = g.value(R, at, pr.w1), v2 = g.value(R, at, pr.w2);
+      if (v0 === null) return null;
+      return { v: v0, perPx: Math.max(1e-9, Math.hypot((v1 ?? v0) - v0, (v2 ?? v0) - v0) / 1.5) };
+    }
+    function edHitTest(x, y) {
+      const g = edGeo();
+      if (!g || edTool === "paint") return null;
+      const view = g.flat ? { cam: null } : { cam: inputCam };
+      const pr = edProbe(g, x, y);
+      let best = null;
+      for (const R of edRulers()) {
+        const r = rulerOf(R), values = R.values();
+        const sites = edSites(g, R, view);
+        if (pr && values.length) for (const st of sites) {
+          const rate = edRate(g, R, st.at, pr);
+          if (!rate) continue;
+          // (where lines cross, the one whose place is nearer the pointer)
+          const near = Math.hypot(st.x - x, st.y - y);
+          values.forEach((d, i) => {
+            const px = Math.abs(rate.v - d) / rate.perPx;
+            if (px < 10 && (!best || px < best.px - 2 || (px < best.px + 2 && near < best.near))) best = { r, i, at: st.at, px, near };
+          });
+        }
+        for (const st of sites) {
+          const px = Math.hypot(st.x - x, st.y - y);
+          if (px < 13 && (!best || px < best.px - 3)) best = { r, i: R.trim && values.length ? 0 : null, at: st.at, px, dot: true, still: st.turns === false };
+        }
+      }
+      return best;
+    }
+
+    let edHover = null, edDrag = null, edLast = { x: 0, y: 0 };
+    function edHoverAt(x, y) {
+      edLast = { x, y };
+      edHover = edHitTest(x, y);
+      const el = isFlat() ? plane : canvas;
+      el.style.cursor = edHover ? (edHover.i === null ? "pointer" : "grab") : "";
+    }
+    // a press: grab the cut there, or add one at the dot there and grab it; true if it took the press
+    function edDown(e) {
+      const hit = edHitTest(e.clientX, e.clientY);
+      if (!hit) return false;
+      const R = RULERS[hit.r];
+      if (e.button === 2) { // (right-click: remove)
+        if (hit.i !== null) removeValue(hit.r, hit.i);
+        return true;
+      }
+      if (e.button !== 0) return true;
+      let i = hit.i;
+      if (i === null) i = addValue(hit.r); // (pushes its own undo step)
+      else pushUndo();
+      select(hit.r, i);
+      edDrag = { r: hit.r, i, at: hit.at, id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, out: false, snapped: false };
+      rulerDragging = true;
+      (isFlat() ? plane : canvas).style.cursor = "grabbing";
+      // (a long press without moving removes it)
+      edDrag.hold = setTimeout(() => {
+        if (!edDrag || edDrag.moved) return;
+        const { r } = edDrag;
+        edDrag = null; rulerDragging = false;
+        RULERS[r].remove(i);
+        changed(); computeSnaps();
+      }, 550);
+      return true;
+    }
+    function edMove(e) {
+      const d = edDrag, g = edGeo();
+      if (!d || !g || e.pointerId !== d.id) return;
+      edLast = { x: e.clientX, y: e.clientY };
+      if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return;
+      d.moved = true;
+      clearTimeout(d.hold);
+      const R = RULERS[d.r], [lo, hi] = R.range, pr = edProbe(g, e.clientX, e.clientY), rate = pr && edRate(g, R, d.at, pr);
+      // off the puzzle, or past where cuts go (a solid's past its surface, a circle shrunk to
+      // nothing, a truncation back to its tip): letting go here removes it
+      d.out = !rate || (R.trim ? rate.v < lo * 0.5 : isCircleDesign() ? rate.v < lo * 0.6 : rate.v > hi + 0.004);
+      if (d.out) return;
+      let v = Math.max(lo, Math.min(hi, rate.v));
+      d.snapped = false;
+      if (snapping && !e.altKey) {
+        const near = ((snaps[d.r] || [])[d.i] || []).filter((f) => f >= lo && f <= hi).reduce((b, f) => (Math.abs(f - v) < Math.abs(b - v) ? f : b), Infinity);
+        if (Math.abs(near - v) < SNAP_PX * rate.perPx) { v = near; d.snapped = true; }
+      }
+      if (Math.abs(v - R.values()[d.i]) > 1e-12) setDepth(d.r, d.i, v);
+    }
+    function edUp(e) {
+      const d = edDrag;
+      if (!d || e.pointerId !== d.id) return;
+      clearTimeout(d.hold);
+      edDrag = null;
+      rulerDragging = false;
+      if (d.out) { RULERS[d.r].remove(d.i); changed(); computeSnaps(); }
+      else { loadNow(); renderBuilder(); computeSnaps([d.r, d.i]); }
+      edHoverAt(e.clientX, e.clientY);
+    }
+
+    // Drawing, every frame while customizing: the dots of the tool's rulers, pulsing; the cut under
+    // the pointer (or being dragged) outlined as the turning circles are, yellow on black; and by
+    // the pointer, what it is and its depth.
+    const edCanvas = $("edit"), edCtx = edCanvas.getContext("2d");
+    function drawEdit(now) {
+      if (!editing()) return;
+      try { drawEditing(now); } catch (err) { console.error(err); } // (never the frame loop's end)
+    }
+    function drawEditing(now) {
+      if (axisGroup) axisGroup.visible = false; // (no turning while customizing)
+      const dpr = pixelRatio();
+      if (edCanvas.width !== Math.round(W * dpr) || edCanvas.height !== Math.round(H * dpr)) { edCanvas.width = Math.round(W * dpr); edCanvas.height = Math.round(H * dpr); }
+      const ctx = edCtx;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const g = edGeo();
+      if (!g || edTool === "paint") return;
+      const pulse = 0.5 + 0.5 * Math.sin(now / 260);
+      const lit = edDrag ? { r: edDrag.r, i: edDrag.i, at: edDrag.at } : edHover && edHover.i !== null ? edHover : null;
+      for (const view of edViews(g)) {
+        ctx.save();
+        if (g.flat) g.clip(ctx);
+        else { const c = view.clip; ctx.beginPath(); ctx.rect(c.left, c.top, c.right - c.left, c.bottom - c.top); ctx.clip(); }
+        // the cut lit: every place it goes round, the one held brightest
+        if (lit && RULERS[lit.r].values()[lit.i] !== undefined) {
+          const R = RULERS[lit.r], v = R.values()[lit.i], out = edDrag && edDrag.out;
+          for (const pts of g.curve(R, lit.at, v, view.cam)) {
+            ctx.beginPath();
+            pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+            ctx.lineJoin = "round"; ctx.lineCap = "round";
+            ctx.setLineDash(out ? [6, 6] : []);
+            ctx.strokeStyle = "#0a0b0e"; ctx.lineWidth = 5; ctx.stroke();
+            ctx.strokeStyle = out ? "#ff8a7a" : "#f5c518"; ctx.lineWidth = 2.6; ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        }
+        // the dots
+        for (const R of edRulers()) for (const st of edSites(g, R, view)) {
+          const held = lit && lit.r === rulerOf(R) && st.at === lit.at;
+          // (a place where cuts won't turn: small and hollow, no pulse)
+          if (st.turns !== false) { ctx.beginPath(); ctx.arc(st.x, st.y, 8 + 4 * pulse, 0, TAU); ctx.fillStyle = `rgba(245, 197, 24, ${0.1 + 0.18 * (1 - pulse)})`; ctx.fill(); }
+          ctx.beginPath(); ctx.arc(st.x, st.y, held ? 6 : st.turns === false ? 3.2 : 4.6, 0, TAU);
+          ctx.fillStyle = st.turns === false ? "#0a0b0e" : "#f5c518"; ctx.fill();
+          ctx.lineWidth = 1.8; ctx.strokeStyle = st.turns === false ? "#f5c518" : "#0a0b0e"; ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // what the pointer's on: the set's name, and while it's held its depth, whether it snapped and
+      // how many pieces there are (or that letting go removes it)
+      const tagOf = edDrag || edHover;
+      if (tagOf) {
+        const R = RULERS[tagOf.r], v = tagOf.i !== null ? R.values()[tagOf.i] : undefined;
+        const top = R.trim ? `${R.label} truncated` : v === undefined ? `add a cut round the ${R.label}${tagOf.still ? " (won't turn)" : ""}` : R.label;
+        const sub = edDrag ? (edDrag.out ? "let go to remove" : `${v.toFixed(3)}${edDrag.snapped ? " · snapped" : ""} · ${P.n ?? P.pieces.length} pieces`)
+          : v !== undefined ? v.toFixed(3) : "";
+        ctx.font = "500 12.5px 'JetBrains Mono', monospace";
+        const wBox = Math.max(ctx.measureText(top).width, ctx.measureText(sub).width) + 20, hBox = sub ? 44 : 26;
+        let x = edLast.x + 18, y = edLast.y + 14;
+        if (x + wBox > W - 8) x = edLast.x - 18 - wBox;
+        if (y + hBox > H - 8) y = edLast.y - 14 - hBox;
+        ctx.fillStyle = "rgba(27, 29, 36, .94)"; ctx.strokeStyle = "#43485a"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(x, y, wBox, hBox, 7); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#ecebe6"; ctx.fillText(top, x + 10, y + 17);
+        if (sub) { ctx.fillStyle = edDrag && edDrag.out ? "#ff8a7a" : "#a3a5ae"; ctx.font = "12px 'JetBrains Mono', monospace"; ctx.fillText(sub, x + 10, y + 34); }
+      }
+    }
 
     // ---------- planar puzzles: drawing and input ----------
     // PlanarView (planar-view.mjs) lays the grid out inside the space the page's controls leave
@@ -3631,6 +3875,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isHyper() || tdrag || hpan) return;
+      if (editing() && !painting && edDown(e)) { try { plane.setPointerCapture(e.pointerId); } catch {} return; }
       if (painting && isCustom()) { // (blacking out: a click blacks out, or brings back, a piece's kind)
         const piece = hyperView.pieceAt(e.clientX, e.clientY, state);
         if (piece !== null && e.button === 0) toggleType(piece);
@@ -3640,7 +3885,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (a press by a circle's line drags it, one on a tile's, corner's or edge's middle turns that
       // one: where both are near, as round a corner, whichever is nearer)
       const mid = hyperView.middleHit(e.clientX, e.clientY);
-      let c = e.button === 0 ? hyperView.circleAt(e.clientX, e.clientY) : null;
+      let c = e.button === 0 && !editing() ? hyperView.circleAt(e.clientX, e.clientY) : null;
       if (c && mid && mid.px < c.px) c = null;
       try { plane.setPointerCapture(e.pointerId); } catch {}
       if (c) {
@@ -3651,11 +3896,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         tilePointer = { at: z, real: true, cursor: "grabbing" };
         return;
       }
-      if (mid && (e.button === 0 || e.button === 2)) { turnTile({ axis: mid.axis, layer: 0, q: e.button === 0 ? -1 : 1 }); return; }
+      if (mid && !editing() && (e.button === 0 || e.button === 2)) { turnTile({ axis: mid.axis, layer: 0, q: e.button === 0 ? -1 : 1 }); return; }
       if (e.button === 0 && hyperView.shows(e.clientX, e.clientY)) { hpan = { id: e.pointerId, last: z }; plane.style.cursor = "move"; }
     });
     plane.addEventListener("pointermove", (e) => {
       if (!isHyper()) return;
+      if (edDrag) { edMove(e); return; }
       const z = hyperView.toDisk(e.clientX, e.clientY);
       if (tdrag) { tilePointer = { at: z, real: true, cursor: "grabbing" }; if (e.pointerId === tdrag.id) dragHyperTo(z); return; }
       if (hpan) {
@@ -3671,6 +3917,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         plane.style.cursor = piece === null ? "" : "pointer";
         return;
       }
+      if (editing()) { edHoverAt(e.clientX, e.clientY); if (!edHover && hyperView.shows(e.clientX, e.clientY)) plane.style.cursor = "move"; return; }
       // (as a press would take it: the nearer of a circle's line and a turning point's middle)
       const mid = hyperView.middleHit(e.clientX, e.clientY);
       let c = hyperView.circleAt(e.clientX, e.clientY);
@@ -3681,6 +3928,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     });
     function endHyperDrag(e) {
       if (!isHyper()) return;
+      if (edDrag) { edUp(e); return; }
       if (tdrag && e.pointerId === tdrag.id) { releaseTileDrag(); plane.style.cursor = "grab"; return; }
       if (hpan && e.pointerId === hpan.id) { hpan = null; plane.style.cursor = "move"; }
     }
@@ -3720,6 +3968,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (piece !== null && e.button === 0) toggleType(piece);
           return;
         }
+        if (editing()) { if (edDown(e)) { try { plane.setPointerCapture(e.pointerId); } catch {} } return; }
         const hit = tileView.pressAt(e.clientX, e.clientY), c = e.button === 0 ? hit.circle || null : null;
         if (c) {
           try { plane.setPointerCapture(e.pointerId); } catch {}
@@ -3744,6 +3993,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     });
     plane.addEventListener("pointermove", (e) => {
       if (isTiles()) {
+        if (edDrag) { edMove(e); return; }
+        if (editing() && !painting) { edHoverAt(e.clientX, e.clientY); return; }
         const at = tileView.toPlane(e.clientX, e.clientY);
         if (tdrag) {
           tilePointer = { at, real: true, cursor: "grabbing" };
@@ -3782,6 +4033,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (anim && anim.live) anim.theta = (pdrag.axis === 0 ? dx : dy) / planeView.cell;
     });
     function endPlanarDrag(e) {
+      if (edDrag) { edUp(e); return; }
       if (tdrag && e.pointerId === tdrag.id) {
         // (let go: an open hand again, over the circle it's still on)
         releaseTileDrag();
@@ -3847,7 +4099,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         anim.theta = anim.from + (anim.to - anim.from) * ease(u);
         if (u >= 1) finishAnim();
       }
-      if (isFlat()) { drawPlanar(); requestAnimationFrame(frame); return; }
+      if (isFlat()) { drawPlanar(); drawEdit(now); requestAnimationFrame(frame); return; }
       updatePieces();
       if (algLit) { // (the pulse: from half the hover highlight's glow to two and a half times it)
         const k = 0.5 + (2 * (litPulse() - 0.15)) / 0.45;
@@ -3871,6 +4123,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         renderer.setScissorTest(false);
       } else renderer.render(scene, camera);
       renderReference();
+      drawEdit(now);
       requestAnimationFrame(frame);
     }
 
@@ -4966,10 +5219,24 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // Customize: the editor as a drawer on the left, the puzzle still live beside it (turn
     // it, undo, everything). Opening it on a preset turns that preset into a custom puzzle
     // you can change; done closes the drawer and keeps what you made.
+    // Customizing: the tools down the left act on the puzzle, which holds still, solved (the cuts
+    // are where they are on the solved puzzle): there's no turning till done.
     function nxCustomize(on) {
-      if (on && !isCustom()) customizePreset();
-      if (!on) setPainting(false); // (closing the editor ends blacking out)
       document.body.classList.toggle("nx-custom", on);
+      $("edTools").hidden = !on;
+      $("edit").hidden = !on;
+      $("edMenu").hidden = true;
+      if (on && !isCustom()) customizePreset();
+      else if (on) load(false); // (back to solved)
+      if (on && isFlat() && has3D() && !viewFlat) { viewFlat = true; $("viewFlat").checked = true; showViews(false); planeBox = ""; } // (the cuts are set on the flat picture)
+      setTool(on ? (edTool === "paint" ? "cut" : edTool) : null); // (opening it again: not still blacking out)
+      if (on) showHistory();
+      else {
+        if (axisGroup) axisGroup.visible = showAxes;
+        for (const k of ["undo", "redo"]) $(k).disabled = false;
+        $("undo").title = "undo the last turn (⌘Z)"; $("redo").title = "redo a turn you undid (⇧⌘Z)";
+      }
+      renderTape();
       resize();
     }
     // Along the bottom: the algorithms, the tape in the gap between them, and the solved card
@@ -4992,8 +5259,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     // where the customize drawer is, while it's open: down the left, or on a phone a sheet
     // along the bottom (null edges when it's closed)
+    // (customizing: the tools down the left, or on a phone along the bottom)
     function nxDrawer() {
-      const open = document.body.classList.contains("nx-custom"), r = $("panel").getBoundingClientRect();
+      const open = editing(), r = $("edTools").getBoundingClientRect();
       return { right: open && !phone.matches ? r.right : 0, top: open && phone.matches ? r.top : H };
     }
     // the space the puzzle gets: clear of the top row, the drawer, and the tape (stacked, the
@@ -5010,7 +5278,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     // the layout's controls
-    $("pick").onclick = nxOpenShelf;
+    // (customizing, the name opens the shape's menu: the solids, or the tilings, and the tiling's steppers)
+    $("pick").onclick = () => {
+      if (!editing()) { nxOpenShelf(); return; }
+      const menu = $("edMenu"), r = $("pick").getBoundingClientRect();
+      menu.hidden = !menu.hidden;
+      Object.assign(menu.style, { left: Math.max(12, Math.min(r.left, innerWidth - 12 - menu.offsetWidth)) + "px", top: r.bottom + 6 + "px" });
+    };
     nx.search.oninput = () => nxFillShelf(nx.search.value);
     $("customize").onclick = () => nxCustomize(true);
     $("customizeDone").onclick = () => nxCustomize(false);
@@ -5034,17 +5308,38 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       document.body.style.setProperty("--nx-tape-h", nx.tape.offsetHeight + "px");
       if (P && nxStacked()) { planeBox = ""; placeCamera(); } // (stacked, its top is the puzzle's floor)
     }).observe(nx.tape);
-    addEventListener("keydown", (e) => { if (e.key === "Escape") { nx.shelf.hidden = true; nx.pop.hidden = true; } });
+    addEventListener("keydown", (e) => { if (e.key === "Escape") { nx.shelf.hidden = true; nx.pop.hidden = true; $("edMenu").hidden = true; } });
     // a click anywhere else closes the gallery and the view options
     addEventListener("pointerdown", (e) => {
       if (!nx.shelf.hidden && !nx.shelf.contains(e.target) && !e.target.closest(".nx-pick")) nx.shelf.hidden = true;
       if (!nx.pop.hidden && !nx.pop.contains(e.target) && e.target !== $("view")) nx.pop.hidden = true;
+      if (!$("edMenu").hidden && !$("edMenu").contains(e.target) && !e.target.closest(".nx-pick")) $("edMenu").hidden = true;
     }, true);
 
     // ---------- test hook ----------
     // For the browser tests (e2e/) and poking at things from the console: drive the page
     // without pointer input. A turn here goes through the same path as a turn by hand.
     window.cutwist = {
+      // customizing (issue #22): pick a tool; the dots showing for it, on screen ({ r (its ruler),
+      // label, x, y }); and where cut i of ruler r runs at depth v, round its place nearest the
+      // middle of the view (polylines, on screen), for dragging it by hand
+      tool(t) { setTool(t); },
+      editSites() {
+        const g = edGeo();
+        if (!g) return [];
+        const view = edViews(g)[0];
+        return edRulers().flatMap((R) => edSites(g, R, view).map((st) => ({ r: rulerOf(R), label: R.label, x: st.x, y: st.y })));
+      },
+      editCurve(r, i, v) {
+        const g = edGeo(), R = RULERS[r], view = edViews(g)[0];
+        const c = g.flat ? { x: (plane.getBoundingClientRect().left + plane.getBoundingClientRect().right) / 2, y: (plane.getBoundingClientRect().top + plane.getBoundingClientRect().bottom) / 2 } : { x: (view.clip.left + view.clip.right) / 2, y: (view.clip.top + view.clip.bottom) / 2 };
+        const st = edSites(g, R, view).reduce((b, st) => (!b || Math.hypot(st.x - c.x, st.y - c.y) < Math.hypot(b.x - c.x, b.y - c.y) ? st : b), null);
+        return st ? { site: { x: st.x, y: st.y }, lines: g.curve(R, st.at, v ?? R.values()[i], view.cam) } : { site: null, lines: [] };
+      },
+      editHit(x, y) { aimAt(x, y); const h = edHitTest(x, y); return h && { r: h.r, i: h.i, px: h.px, dot: !!h.dot }; },
+      editSnaps(r, i) { return ((snaps[r] || [])[i] || []).slice(); },
+      editRulers() { return RULERS.map((R, r) => ({ r, label: R.label, values: R.values().slice(), exists: R.exists, trim: R.trim || null })); },
+      design() { return JSON.parse(JSON.stringify(design())); },
       // the pieces (planar: cells) lit by hovering an algorithm's play or reverse button, or null
       lit() { return algLit ? [...algLit].sort((a, b) => a - b) : null; },
       // what the main renderer holds on the GPU (for catching leaks)
@@ -5225,9 +5520,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     if (currentSpec().rule === "hyper" && !isRound(currentSpec())) await fetchHyper(currentSpec().N, currentSpec().M).catch((err) => { console.error(err); presetIdx = 0; paramVals = {}; });
     renderParams();
     load();
-    // (a share link opens in the editor, with its rulers' marks worked out on the puzzle just built:
-    // applyURL's were before there was one)
-    if (isCustom()) { nxCustomize(true); computeSnaps(); }
+    // (a share link opens the puzzle to play: the editor holds it still, so it opens on customize.
+    // Its cuts' snaps are worked out on the puzzle just built: applyURL's were before there was one)
+    if (isCustom()) computeSnaps();
     requestAnimationFrame(frame);
   </script>
 </body>

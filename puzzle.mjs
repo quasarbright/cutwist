@@ -711,7 +711,7 @@ export function buildPuzzle(spec, size = spec.size) {
   if (custom) {
     if (size > 1)
       for (const set of cuts)
-        for (const n of cutDirections(solid, normals, set.on)) {
+        for (const n of cutDirections(solid, normals, set, labels)) {
           const hi = surfaceAlong(solid, n);
           for (const f of set.depths) planes.push([n, f * hi]);
         }
@@ -783,7 +783,7 @@ export function buildPuzzle(spec, size = spec.size) {
     }
   }
 
-  return { spec, size, normals, colors, textures: faceTextures(colors), texturesByDefault: colors.length >= TEXTURE_MIN_FACES, solid, R, axes: turning, pieces, group, types, cuts };
+  return { spec, size, normals, colors, textures: faceTextures(colors), texturesByDefault: colors.length >= TEXTURE_MIN_FACES, solid, R, axes: turning, pieces, group, types, cuts, labels, baseSolid, baseNormals };
 }
 
 // A piece's type: the set of pieces the solid's rotations carry it onto (all the corners,
@@ -845,7 +845,7 @@ export function pieceFinder(pieces) {
 export function toCustom(P) {
   if (P.spec.rule === "custom") {
     const out = { name: "Custom", rule: "custom", size: 2, fixed: true, solid: P.spec.solid, truncate: { ...(P.spec.truncate || {}) },
-      cuts: (P.size > 1 ? P.cuts : []).map((c) => ({ on: c.on, depths: c.depths.slice() })), blackout: (P.spec.blackout || []).slice() };
+      cuts: (P.size > 1 ? P.cuts : []).map((c) => ({ on: c.on, ...(c.of ? { of: c.of } : {}), depths: c.depths.slice() })), blackout: (P.spec.blackout || []).slice() };
     // an even sized design blacks out its middle strips too: find their kinds by comparing
     if (P.spec.faceRows === undefined || P.size < 2 || P.size % 2) return out;
     const plain = buildPuzzle({ ...out, blackout: [] });
@@ -1052,11 +1052,21 @@ function alignments(solid, normals, labels, planes) {
 }
 
 // the directions a cut set goes around, on the (possibly truncated) solid: every face that
-// exists, and every corner or edge
-function cutDirections(solid, normals, on) {
-  if (on === "face") return [...new Set(solid.polys.map((p) => p.color))].map((c) => normals[c]);
-  return directions(solid, normals, on);
+// exists, and every corner or edge. A face set with `of` goes around one type of face only: the
+// solid's own ("face"), or the faces truncating its corners ("vertex") or edges ("edge"); one
+// without (older designs, the presets) around them all. (labels: each face's type, as customSolid
+// gives them.)
+function cutDirections(solid, normals, set, labels = null) {
+  if (set.on === "face") return [...new Set(solid.polys.map((p) => p.color))].filter((c) => !set.of || !labels || labels[c] === set.of).map((c) => normals[c]);
+  return directions(solid, normals, set.on);
 }
+// For the editor, on a built custom puzzle: where a cut set's cuts go round ([{ n, h }]: each
+// direction and how far the surface is along it, so depth f is the plane n·x = f·h), and where a
+// truncation of the corners or edges goes ([{ n, h }]: the uncut solid's, so f is n·x = f·h)
+export const cutDirectionsOf = (P, set) => cutDirections(P.solid, P.normals, set, P.labels).map((n) => ({ n, h: surfaceAlong(P.solid, n) }));
+export const trimDirectionsOf = (P, kind) => directions(P.baseSolid, P.baseNormals, kind).map((n) => ({ n, h: surfaceAlong(P.baseSolid, n) }));
+// two cut sets around the same things
+const sameSet = (a, b) => a.on === b.on && (a.of || null) === (b.of || null);
 
 // What a snap target is: { cut: s, i } (cut i of cut set s) or { trim: "vertex" | "edge" }.
 export const CUT_RANGE = [-0.95, 0.99], TRIM_RANGE = [0.34, 0.99];
@@ -1077,15 +1087,16 @@ export function alignedDepthCandidates(spec, target) {
   }
   const { s, i } = target;
   const g = customSolid(spec), sets = cutSets(spec);
-  const planes = sets.flatMap((set, si) => cutDirections(g.solid, g.normals, set.on).flatMap((n) => {
+  const planes = sets.flatMap((set, si) => cutDirections(g.solid, g.normals, set, g.labels).flatMap((n) => {
     const h = surfaceAlong(g.solid, n);
     return set.depths.map((f, j) => ({ n, h, d: si === s && j === i ? null : f * h }));
   }));
   // landing exactly on another cut of the same kind (or, when opposite directions are both
   // cut, its mirror) just merges the two cuts, so those don't count
-  const dirs = cutDirections(g.solid, g.normals, sets[s].on);
+  const dirs = cutDirections(g.solid, g.normals, sets[s], g.labels);
+  if (!dirs.length) return [];
   const symmetric = dirs.some((n) => close(n, scale(dirs[0], -1)));
-  const others = sets.flatMap((set, si) => (set.on === sets[s].on ? set.depths.filter((_, j) => !(si === s && j === i)) : []));
+  const others = sets.flatMap((set, si) => (sameSet(set, sets[s]) ? set.depths.filter((_, j) => !(si === s && j === i)) : []));
   const merges = (f) => others.some((o) => Math.abs(f - o) < 1e-6 || (symmetric && Math.abs(f + o) < 1e-6));
   return uniq(alignments(g.solid, g.normals, g.labels, planes), CUT_RANGE, merges);
 }

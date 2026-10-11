@@ -81,3 +81,41 @@ export const finish = (page) => page.evaluate(() => window.cutwist.finish());
 export async function noErrors(errors) {
   expect(errors, errors.join("\n")).toEqual([]);
 }
+
+// ---- customizing (issue #22): the tools act on the puzzle ----
+export const editTool = (page, tool) => page.click(`.ed-tool[data-tool="${tool}"]`);
+// a solid (or tiling) from the name's menu
+export async function editShape(page, name) {
+  if (await page.locator("#edMenu").isHidden()) await page.click(".nx-pick");
+  await page.locator("#bSolid").getByRole("radio", { name }).click();
+}
+// the dots showing for the tool, as the page has them (see cutwist.editSites)
+export const editSites = (page) => page.evaluate(() => window.cutwist.editSites());
+// a click on a dot of the set named label (the one nearest the middle of the screen): a new cut
+// round every place like it (with the truncate tool, a truncation)
+export async function editDot(page, label, tool = "cut") {
+  await editTool(page, tool);
+  const vp = page.viewportSize(), sites = (await editSites(page)).filter((s) => s.label === label);
+  if (!sites.length) throw new Error(`no ${label} dots showing`);
+  const s = sites.sort((a, b) => Math.hypot(a.x - vp.width / 2, a.y - vp.height / 2) - Math.hypot(b.x - vp.width / 2, b.y - vp.height / 2))[0];
+  await page.mouse.click(s.x, s.y);
+}
+// a point a cut's line runs through (cut i of ruler r, round its place nearest the middle): the
+// one nearest that place (clear of other places' lines crossing it); and the point on its line at
+// depth v nearest p
+export async function cutPoint(page, r, i, v, near = null) {
+  const { site, lines } = await page.evaluate(({ r, i, v }) => window.cutwist.editCurve(r, i, v ?? undefined), { r, i, v });
+  const pts = lines.flat(), at = near || site;
+  if (!pts.length) throw new Error(`cut ${r}:${i} isn't showing`);
+  const [x, y] = pts.reduce((b, q) => (Math.hypot(q[0] - at.x, q[1] - at.y) < Math.hypot(b[0] - at.x, b[1] - at.y) ? q : b));
+  return { x, y };
+}
+// drag cut i of ruler r by hand from its line to where depth v would put it
+export async function dragCut(page, r, i, v, steps = 12) {
+  const from = await cutPoint(page, r, i, null), to = await cutPoint(page, r, i, v, from);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps });
+  await page.mouse.up();
+}
+export const rulers = (page) => page.evaluate(() => window.cutwist.editRulers());

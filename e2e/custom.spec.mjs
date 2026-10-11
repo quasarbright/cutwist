@@ -1,49 +1,124 @@
-// The custom puzzle editor: opening it, changing the solid, its undo, share links.
+// The custom puzzle editor (issue #22: tools on the puzzle, no panel): opening it, the shape from
+// the name's menu, cuts added at dots and dragged by hand, truncation, its undo, share links.
 import { test, expect } from "@playwright/test";
-import { open, info, noErrors } from "./helpers.mjs";
+import { open, info, noErrors, editTool, editShape, editDot, editSites, dragCut, cutPoint, rulers } from "./helpers.mjs";
 
-test("customize a cube: the editor shows its stats", async ({ page }) => {
+const designOf = (page) => page.evaluate(() => window.cutwist.design());
+const link = (design) => `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`;
+
+test("customize a cube: the tools, the dots and the numbers", async ({ page }) => {
   await open(page);
   await page.click(".nx-custombtn");
+  await expect(page.locator("#edTools")).toBeVisible();
   await expect(page.locator("#bStats")).toContainText("26 pieces"); // pieces that show (no core)
+  await expect(page.locator('.ed-tool[data-tool="cut"]')).toHaveAttribute("aria-pressed", "true");
+  // (a dot on each face, corner and edge showing: three faces, seven corners, nine edges)
+  const by = (sites) => sites.reduce((m, s) => ({ ...m, [s.label]: (m[s.label] || 0) + 1 }), {});
+  expect(by(await editSites(page))).toEqual({ faces: 3, corners: 7, edges: 9 });
+  // (no turning while customizing: the scramble and the tape are gone)
+  await expect(page.locator("#scramble")).toBeHidden();
+  await page.click("#customizeDone");
+  await expect(page.locator("#edTools")).toBeHidden();
+  await expect(page.locator("#scramble")).toBeVisible();
 });
 
-test("picking a solid rebuilds the puzzle; undo edit goes back", async ({ page }) => {
+test("picking a solid from the name's menu rebuilds the puzzle; undo goes back", async ({ page }) => {
   await open(page);
   await page.click(".nx-custombtn");
-  await page.locator("#bSolid").getByRole("radio", { name: "dodeca" }).click();
+  await editShape(page, "dodeca");
   expect((await info(page)).faces).toBe(12);
   await expect(page.locator("#bSolid").getByRole("radio", { name: "dodeca" })).toHaveAttribute("aria-checked", "true");
-  await page.click("#bUndo");
+  await page.click("#undo");
   expect((await info(page)).faces).toBe(6);
-  await page.click("#bRedo");
+  await page.click("#redo");
   expect((await info(page)).faces).toBe(12);
 });
 
-test("a share link opens the same design in the editor", async ({ page }) => {
+test("a dot adds a cut; dragging its line moves it, snapping; dragging it off removes it; so does a right-click", async ({ page }) => {
+  await open(page);
+  await page.click(".nx-custombtn");
+  await editDot(page, "corners");
+  let r = await rulers(page);
+  expect(r[3].values.length).toBe(1);
+  const added = r[3].values[0];
+  // (the corner cut, dragged toward the middle: deeper in, more pieces)
+  const before = (await info(page)).pieces;
+  await dragCut(page, 3, 0, 0.2);
+  r = await rulers(page);
+  expect(r[3].values[0]).toBeLessThan(added);
+  expect((await info(page)).pieces).not.toBe(before);
+  // (dragged onto its corner, past the surface, and let go: gone)
+  const from = await cutPoint(page, 3, 0, null), corner = (await editSites(page)).filter((s) => s.label === "corners").reduce((b, s) => (Math.hypot(s.x - from.x, s.y - from.y) < Math.hypot(b.x - from.x, b.y - from.y) ? s : b));
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(corner.x + (corner.x - from.x) * 0.3 + 40, corner.y + (corner.y - from.y) * 0.3 + 40, { steps: 16 }); // (on past it, off the cube)
+  await page.mouse.up();
+  expect((await rulers(page))[3].values).toEqual([]);
+  // (the face cut: a right-click on its line)
+  const p = await cutPoint(page, 2, 0, null);
+  await page.mouse.click(p.x, p.y, { button: "right" });
+  expect((await rulers(page))[2].values).toEqual([]);
+  expect((await info(page)).pieces).toBe(1);
+  // (each was one step to undo)
+  await page.click("#undo");
+  expect((await rulers(page))[2].values.length).toBe(1);
+});
+
+test("truncating corners makes faces with their own cuts, apart from the solid's own faces'", async ({ page }) => {
+  await open(page);
+  await page.click(".nx-custombtn");
+  await editDot(page, "corners", "trim");
+  expect((await designOf(page)).truncate.vertex).toBeGreaterThan(0);
+  expect((await info(page)).faces).toBe(6 + 8);
+  // (the cut tool's dots: the corner faces now too; a cut round them leaves the squares' alone)
+  await editTool(page, "cut");
+  expect((await editSites(page)).some((s) => s.label === "corner faces")).toBe(true);
+  await editDot(page, "corner faces");
+  const d = await designOf(page);
+  expect(d.cuts.find((c) => c.on === "face" && c.of === "vertex").depths.length).toBe(1);
+  expect(d.cuts.find((c) => c.on === "face" && c.of === "face").depths.length).toBe(1);
+  // (the link keeps them apart)
+  const pieces = (await info(page)).pieces, url = await page.evaluate(() => window.cutwist.shareLink());
+  await open(page, new URL(url).search);
+  expect((await info(page)).pieces).toBe(pieces);
+});
+
+// (a link from before face types: its face cuts go round every face, the truncation's too, so it
+// opens as the same puzzle)
+test("an older link's face cuts go round every type of face", async ({ page }) => {
+  const design = { solid: "cube", truncate: { vertex: 0.8 }, cuts: [{ on: "face", depths: [0.5] }], blackout: [] };
+  const expected = await (async () => { await open(page); return page.evaluate(async (d) => (await import("./puzzle.mjs")).buildPuzzle({ rule: "custom", size: 2, ...d }).pieces.length, design); })();
+  await open(page, link(design));
+  expect((await info(page)).pieces).toBe(expected);
+  await page.click(".nx-custombtn");
+  const r = await rulers(page);
+  expect(r[2].values).toEqual([0.5]); // (the cube's own faces)
+  expect(r[5].values).toEqual([0.5]); // (the corners' faces)
+});
+
+test("a share link opens the same design", async ({ page }) => {
   await open(page);
   await page.evaluate(() => window.cutwist.load("megaminx"));
   await page.click(".nx-custombtn");
-  const link = await page.evaluate(() => window.cutwist.shareLink());
+  const url = await page.evaluate(() => window.cutwist.shareLink());
   const before = await info(page);
-  const errors = await open(page, new URL(link).search);
+  const errors = await open(page, new URL(url).search);
   const after = await info(page);
   expect(after.id).toBe("custom");
   expect(after.pieces).toBe(before.pieces);
   expect(after.faces).toBe(12);
-  await expect(page.locator("#builder")).toBeVisible();
   await noErrors(errors);
 });
 
-// (only the 16 candidates nearest a handle were checked, so a ruler's far marks never showed: a
+// (only the 16 candidates nearest a cut were checked once, so its far snaps were never found: a
 // cube's corner cut with a face cut has 19)
-test("a ruler shows every mark, however far from its handle", async ({ page }) => {
+test("a cut snaps to every depth it lines up at, however far from where it is", async ({ page }) => {
   const design = { rule: "custom", solid: "cube", cuts: [{ on: "face", depths: [0.3] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [] }], truncate: {}, blackout: [] };
-  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  await open(page, link(design));
   const expected = await page.evaluate(async (design) => (await import("./puzzle.mjs")).snapDepths({ name: "x", size: 2, ...design }, { s: 1, i: 0 }).length, design);
   expect(expected).toBeGreaterThan(16);
-  await page.locator(".tw-rblock").filter({ hasText: "corners" }).locator(".tw-handle").first().focus();
-  await expect.poll(() => page.locator(".tw-rblock").filter({ hasText: "corners" }).locator(".tw-marks span:not(.tw-zero)").count(), { timeout: 30000 }).toBe(expected);
+  await page.click(".nx-custombtn");
+  await expect.poll(() => page.evaluate(() => window.cutwist.editSnaps(3, 0).length), { timeout: 30000 }).toBe(expected);
 });
 
 test("a broken share link falls back to the default puzzle", async ({ page }) => {
@@ -56,8 +131,8 @@ test("customizing a preset starts with nothing to undo: undo can't turn it into 
   await open(page);
   await page.evaluate(() => window.cutwist.load("megaminx"));
   await page.click(".nx-custombtn");
-  await expect(page.locator("#bUndo")).toBeDisabled();
-  await page.locator("#bUndo").click({ force: true }); // (even a stray click does nothing)
+  await expect(page.locator("#undo")).toBeDisabled();
+  await page.locator("#undo").click({ force: true }); // (even a stray click does nothing)
   expect((await info(page)).faces).toBe(12);
 });
 
@@ -65,26 +140,40 @@ test("undo covers every kind of edit, not just cuts, and counts its steps", asyn
   await open(page);
   await page.click(".nx-custombtn");
   const faces0 = (await info(page)).faces;
-  await page.locator("#bTrim").getByRole("button", { name: "+ truncate" }).first().click(); // a truncation: new faces
+  await editDot(page, "corners", "trim"); // a truncation: new faces
   const faces1 = (await info(page)).faces;
   expect(faces1).toBeGreaterThan(faces0);
-  await page.locator("#bSolid").getByRole("radio", { name: "dodeca" }).click();
-  await expect(page.locator("#bUndoN")).toHaveText("2");
-  await page.click("#bUndo");
+  await editShape(page, "dodeca");
+  await expect(page.locator("#undo")).toHaveAttribute("title", /2 edits/);
+  await page.click("#undo");
   expect((await info(page)).faces).toBe(faces1);
-  await page.click("#bUndo");
+  await page.click("#undo");
   expect((await info(page)).faces).toBe(faces0); // the truncation, undone
-  await expect(page.locator("#bUndo")).toBeDisabled();
-  await expect(page.locator("#bRedoN")).toHaveText("2");
+  await expect(page.locator("#undo")).toBeDisabled();
+  await expect(page.locator("#redo")).toHaveAttribute("title", /2 edits/);
 });
 
-test("closing the editor turns off blacking out", async ({ page }) => {
+test("closing the editor turns off blacking out, and the undo button is the turns' again", async ({ page }) => {
   await open(page);
   await page.click(".nx-custombtn");
-  await page.click("#bPaint");
-  await expect(page.locator("#bPaint")).toHaveAttribute("aria-pressed", "true");
+  await editTool(page, "paint");
+  await expect(page.locator('.ed-tool[data-tool="paint"]')).toHaveAttribute("aria-pressed", "true");
   await page.click("#customizeDone");
+  await expect(page.locator("#undo")).toBeEnabled();
   await page.click(".nx-custombtn");
-  await expect(page.locator("#bPaint")).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator("#bPaintHint")).toBeHidden();
+  await expect(page.locator('.ed-tool[data-tool="paint"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator('.ed-tool[data-tool="cut"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("on a phone the tools sit along the bottom and the puzzle fits above them", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await open(page);
+  await page.click(".nx-custombtn");
+  const rail = await page.locator("#edTools").boundingBox(), tape = await page.locator("#nx-tape").boundingBox();
+  expect(rail.y + rail.height).toBeLessThanOrEqual(tape.y + 1);
+  expect(rail.x + rail.width).toBeLessThanOrEqual(375);
+  const sites = await editSites(page);
+  expect(sites.length).toBeGreaterThan(5);
+  expect(sites.every((s) => s.y < rail.y)).toBe(true);
+  await expect(page.locator("#bShare2")).toBeVisible();
 });
