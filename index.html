@@ -1040,6 +1040,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       root.add(puzzleGroup);
       pieceObjs = []; bodyMeshes = [];
       if (isSphere()) puzzleGroup.add(new THREE.Mesh(coreGeo, bodyMat)); // (a round puzzle's core)
+      if (ringMesh) { ringMesh.geometry.dispose(); ringMesh = null; } // (a ring outlined on the last puzzle)
+      ringShown = "";
       // gaps between stickers shrink with the pieces on bigger puzzles
       // the icosahedron's pieces are small for its size, so it gets thinner lines
       const solidGap = P.spec.solid === "icosahedron" || P.spec.solid === "rhombicTriacontahedron" ? 0.45 : 1;
@@ -2665,13 +2667,36 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const u = normalize(cross(dir, Math.abs(dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(dir, u);
       return Math.atan2(dot(p, v), dot(p, u));
     }
-    // hovering: the ring a press would grab (or the middle a tap would turn) lit, and the cursor to say so
-    // (x null: the pointer's gone; lit again only when what's under it changes)
-    let ballHover = "";
+    // The ring a press would grab (hovering), or that's being dragged, outlined in yellow as the tile
+    // puzzles do: a thin band just over the ball along each circle bounding it (rebuilt only when
+    // it's another ring). axis null: none.
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide });
+    let ringShown = "", ringMesh = null;
+    function showRing(axis, layer) {
+      const key = axis === null ? "" : `${axis}:${layer}`;
+      if (key === ringShown && (!ringMesh || ringMesh.parent === puzzleGroup)) return;
+      ringShown = key;
+      if (ringMesh) { ringMesh.parent?.remove(ringMesh); ringMesh.geometry.dispose(); ringMesh = null; }
+      if (axis === null) return;
+      const ax = P.axes[axis], u = normalize(cross(ax.dir, Math.abs(ax.dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(ax.dir, u), w = 0.011, pos = [];
+      for (const o of [ax.offsets[layer - 1], ax.offsets[layer]].filter((o) => o !== undefined)) {
+        const s = Math.sqrt(1 - o * o), n = Math.max(48, Math.ceil(s * 160));
+        const at = (t, d) => { const a = Math.acos(o) + d, r = Math.sin(a), h = Math.cos(a); return scale(add(scale(ax.dir, h), add(scale(u, r * Math.cos(t)), scale(v, r * Math.sin(t)))), 1.006); };
+        for (let k = 0; k < n; k++) {
+          const t0 = (k * TAU) / n, t1 = ((k + 1) * TAU) / n, [a, b, c, d] = [at(t0, -w), at(t0, w), at(t1, -w), at(t1, w)];
+          pos.push(...a, ...b, ...c, ...b, ...d, ...c);
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      ringMesh = new THREE.Mesh(g, ringMat);
+      puzzleGroup.add(ringMesh);
+    }
+    // hovering: the ring a press would grab outlined, and the cursor to say what a press does
+    // (x null: the pointer's gone)
     function hoverBall(x, y) {
-      const p = painting || x === null ? null : ballPoint(x, y), c = p && roundCircleAt(p), m = p && !c && roundMiddleAt(p), h = c || m;
-      const key = h ? `${h.axis}:${h.layer}` : "";
-      if (key !== ballHover) { ballHover = key; lightPieces(h ? new Set(piecesInLayer(P, state, h.axis, h.layer)) : null); }
+      const p = painting || x === null ? null : ballPoint(x, y), c = p && roundCircleAt(p), m = p && !c && roundMiddleAt(p);
+      showRing(c ? c.axis : null, c ? c.layer : 0);
       canvas.style.cursor = c ? "grab" : m ? "pointer" : "";
     }
 
@@ -2728,6 +2753,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           flush();
           drag = { mode: "ring", x: e.clientX, y: e.clientY, axis: c.axis, layer: c.layer, last: angleAbout(p, P.axes[c.axis].dir), theta: 0 };
           anim = { live: true, axis: c.axis, theta: 0, pieces: new Set(piecesInLayer(P, state, c.axis, c.layer)) };
+          showRing(c.axis, c.layer);
           canvas.style.cursor = "grabbing";
           return;
         }
