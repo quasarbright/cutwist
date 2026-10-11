@@ -2,7 +2,7 @@
 // Poincaré disk): loading from the shelf, the sides / at-a-corner / size controls, turns through
 // the test hook, and real pointer input on the disk (tap a tile's middle, drag a circle, slide).
 import { test, expect } from "@playwright/test";
-import { open, info, turn, noErrors, pick, settleLayout } from "./helpers.mjs";
+import { open, info, turn, noErrors, pick, settleLayout, editTool, editDot, editSites, cutPoint, rulers } from "./helpers.mjs";
 
 // (each test builds a surface or several, which takes a few times longer under the full parallel run)
 test.describe.configure({ timeout: 60_000 });
@@ -158,7 +158,7 @@ test("dragging away from the circles slides the plane, and turns nothing", async
   expect(s).toMatchObject({ panned: true, moves: 0, solved: true });
 });
 
-test("customize: the circles' rulers (\"arbitrary\" picked over the solids, truncation too), a corner circle, a share link back, blacking out", async ({ page }) => {
+test("customize: \"arbitrary\" picked over the solids, truncation dots too, a corner circle, a share link back, blacking out", async ({ page }) => {
   // (on the 6 octagons: a corner circle on the Klein quartic makes 668 pieces, slow to build and
   // reload under a loaded run)
   await pick(page, "hyper-octagons");
@@ -166,11 +166,14 @@ test("customize: the circles' rulers (\"arbitrary\" picked over the solids, trun
   await page.click("#customize");
   let s = await settled(page);
   expect(s).toMatchObject({ id: "custom", hyper: true, pieces: 46 });
+  await page.click(".nx-pick");
   await expect(page.locator("#bSolid button", { hasText: "arbitrary" })).toHaveAttribute("aria-checked", "true");
-  await expect(page.locator("#bTrim")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await editTool(page, "trim");
+  expect((await editSites(page)).some((d) => d.label === "corners")).toBe(true);
   await expect(page.locator("#bStats")).toContainText("46 pieces");
-  // (+ cut on the corners' ruler: more pieces, and the corners turn in thirds)
-  await page.locator("#bSets button", { hasText: "+ cut" }).nth(1).click();
+  // (a dot on a corner: a circle round every corner, more pieces, and the corners turn in thirds)
+  await editDot(page, "corners");
   s = await settled(page);
   expect(s.pieces).toBeGreaterThan(46);
   expect(s.axes.some((a) => a.kind === "vertex" && a.order === 3)).toBe(true);
@@ -183,7 +186,9 @@ test("customize: the circles' rulers (\"arbitrary\" picked over the solids, trun
   s = await settled(page);
   expect(s).toMatchObject({ id: "custom", hyper: true, pieces });
   // (blacking out: a click on a piece blacks out its kind; the puzzle's still solved)
-  await page.click("#bPaint");
+  await page.click("#customize");
+  await settled(page);
+  await editTool(page, "paint");
   const mid = await page.evaluate(() => window.cutwist.hyperMiddle(0));
   await page.mouse.click(mid.x, mid.y);
   s = await info(page);
@@ -196,16 +201,27 @@ test("nudging a cut redraws it, even when the pieces count stays the same", asyn
   await settled(page);
   await page.click("#customize");
   await settled(page);
-  await page.mouse.move(5, 5);
   // (the disk's picture, a frame or two after a change)
   const picture = async () => {
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     return page.evaluate(() => document.getElementById("plane").toDataURL());
   };
-  await page.locator(".tw-handle").first().focus();
-  const before = await picture(), n = (await info(page)).pieces;
-  await page.keyboard.press("ArrowRight");
+  const before = await picture(), n = (await info(page)).pieces, r0 = (await rulers(page))[2].values[0];
+  // (a little bigger, by hand, with Alt held: no snapping; far enough on screen to be a drag)
+  const from = await cutPoint(page, 2, 0, null);
+  let to = from;
+  for (let dv = 0.002; Math.hypot(to.x - from.x, to.y - from.y) < 8; dv += 0.002) to = await cutPoint(page, 2, 0, r0 + dv, from);
+  await page.mouse.move(from.x, from.y);
+  await page.keyboard.down("Alt");
+  await page.mouse.down();
+  await page.mouse.move(from.x + (to.x - from.x) / 2, from.y + (to.y - from.y) / 2);
+  await page.mouse.move(to.x, to.y);
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  await settled(page);
+  expect((await rulers(page))[2].values[0]).not.toBe(r0);
   expect((await info(page)).pieces).toBe(n);
+  await page.mouse.move(5, 5);
   expect(await picture()).not.toBe(before);
 });
 
@@ -225,81 +241,48 @@ test("sides and tiles at a corner: the size menu lists a tiling's surfaces; a fl
   await expect.poll(async () => (await info(page)).tiling).toBe("hex");
 });
 
-// (the marks were worked out when the link was read, before the puzzle was built, so a design
+// (the snaps were worked out when the link was read, before the puzzle was built, so a design
 // opened from a link, or reloaded, had none till a cut was removed and added again)
-test("a design opened from a link has its rulers' snap marks", async ({ page }) => {
+test("a design opened from a link has its cuts' snaps", async ({ page }) => {
   const design = { rule: "hyper", N: 9, M: 9, surface: 0, cuts: [{ on: "face", depths: [1.2] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] };
   await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
   await settled(page);
-  await page.locator(".tw-handle").first().focus();
-  await expect.poll(() => page.locator(".tw-marks span:not(.tw-zero)").count(), { timeout: 15000 }).toBeGreaterThan(0);
+  await page.click("#customize");
+  await expect.poll(() => page.evaluate(() => window.cutwist.editSnaps(2, 0).length), { timeout: 15000 }).toBeGreaterThan(0);
 });
 
-// (remove showed only on the ruler of the selected handle; now on every ruler with a cut, taking
-// the selected one there or else the deepest: for circles the biggest)
-test("each ruler's remove takes its deepest circle when none of its own is selected", async ({ page }) => {
+test("a right-click on a circle removes that one", async ({ page }) => {
   await pick(page, "hyper-octagons");
   await settled(page);
   await page.click("#customize");
   await settled(page);
-  // (two tile circles, then a corner circle, which is selected)
-  await page.locator(".tw-rblock").filter({ hasText: "faces" }).locator("button", { hasText: "+ cut" }).click();
+  await editDot(page, "tiles"); // (a second circle round each tile)
   await settled(page);
-  await page.locator(".tw-rblock").filter({ hasText: "corners" }).locator("button", { hasText: "+ cut" }).click();
-  await settled(page);
-  const faces = () => page.evaluate(() => JSON.parse(atob(new URLSearchParams(location.search).get("design").replace(/-/g, "+").replace(/_/g, "/"))).cuts.find((c) => c.on === "face").depths);
+  const faces = async () => (await rulers(page))[2].values;
   const before = await faces();
   expect(before.length).toBe(2);
-  await page.locator(".tw-rblock").filter({ hasText: "faces" }).locator("button", { hasText: "remove" }).click();
+  const p = await cutPoint(page, 2, 1, null);
+  await page.mouse.click(p.x, p.y, { button: "right" });
   await settled(page);
-  expect(await faces()).toEqual([Math.min(...before)]);
+  expect(await faces()).toEqual([before[0]]);
 });
 
-// (the rulers were laid out when the link was read, before the surface's puzzle was built, so a
-// handle sat against the wrong range, and grabbing it jumped it to where the right one put it)
-test("a design from a link: its handle is where its value is, and a grab doesn't move it", async ({ page }) => {
+// (a design from a link has its surface built after it's read: a cut grabbed and let go where it
+// was stays the size it was)
+test("a design from a link: pressing a circle and letting go leaves it be", async ({ page }) => {
   const design = { rule: "hyper", N: 9, M: 4, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [1.2725492333018065] }, { on: "edge", depths: [] }], blackout: [] };
   await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
   await settled(page);
-  const value = () => page.evaluate(() => JSON.parse(atob(new URLSearchParams(location.search).get("design").replace(/-/g, "+").replace(/_/g, "/"))).cuts.find((c) => c.on === "vertex").depths[0]);
-  const before = await value();
-  // (the cut ruler, not the corners' truncation one, which a hyperbolic design hides)
-  const handle = page.locator(".tw-rblock").filter({ hasText: "corners" }).filter({ hasText: "+ cut" }).locator(".tw-handle").first();
-  const box = await handle.boundingBox(), x = box.x + box.width / 2;
-  await page.mouse.move(x, box.y + box.height / 2);
+  await page.click("#customize");
+  await settled(page);
+  const before = (await rulers(page))[3].values[0];
+  const p = await cutPoint(page, 3, 0, null);
+  await page.mouse.move(p.x, p.y);
   await page.mouse.down();
-  await page.mouse.move(x + 1, box.y + box.height / 2);
-  // (the handle stays under the pointer, at the value it had)
-  const now = await handle.boundingBox();
-  expect(Math.abs(now.x + now.width / 2 - (x + 1))).toBeLessThan(4);
+  await page.mouse.move(p.x + 1, p.y);
   await page.mouse.up();
   await settled(page);
-  expect(Math.abs((await value()) - before)).toBeLessThan(0.05);
-});
-
-// (a handle sitting a hair off a mark hid it, so the ruler looked to have no mark where the pieces
-// change: the octagons' corner circle, its first mark a quarter pixel from the handle)
-test("a mark under a handle shows through it", async ({ page }) => {
-  const design = { rule: "hyper", N: 8, M: 3, surface: 0, cuts: [{ on: "face", depths: [] }, { on: "vertex", depths: [0.36267365202504137] }, { on: "edge", depths: [] }], blackout: [] };
-  await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
-  await settled(page);
-  const ruler = page.locator(".tw-rblock").filter({ hasText: "corners" }).filter({ hasText: "+ cut" }), handle = ruler.locator(".tw-handle").first();
-  await handle.focus();
-  // (the mark under it: the nearest one)
-  const mark = ruler.locator(".tw-marks span:not(.tw-zero)").first();
-  await expect(mark).toBeAttached({ timeout: 15000 });
-  await page.mouse.move(5, 5);
-  const [h, m] = [await handle.boundingBox(), await mark.boundingBox()];
-  expect(Math.abs(m.x - (h.x + h.width / 2))).toBeLessThan(h.width / 2); // (it is under the handle)
-  // (down the mark's line, through the handle's middle, the pixels are darker than the handle's beside it)
-  const shot = await page.screenshot({ clip: { x: Math.round(m.x) - 3, y: Math.round(h.y + h.height / 2), width: 7, height: 1 } });
-  const px = await page.evaluate(async (b64) => {
-    const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
-    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
-    const d = g.getImageData(0, 0, img.width, 1).data, lum = (i) => d[4 * i] + d[4 * i + 1] + d[4 * i + 2];
-    return { mid: lum(Math.floor(img.width / 2)), side: lum(0) };
-  }, shot.toString("base64"));
-  expect(px.mid).toBeLessThan(px.side - 60);
+  expect(Math.abs((await rulers(page))[3].values[0] - before)).toBeLessThan(0.02);
 });
 
 // (with no circles there are no pieces, and nothing works out tile 0's cuts: drawing it threw)

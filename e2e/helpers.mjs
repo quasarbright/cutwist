@@ -43,7 +43,7 @@ export async function pick(page, id) {
 
 // open the view dropdown (a sliding puzzle's views and look; on a phone, the toggles too)
 export async function openView(page) {
-  if (await page.locator(".nx-pop").isHidden()) await page.click(".nx-viewbtn");
+  if (await page.locator("#viewPop").isHidden()) await page.click(".nx-viewbtn");
 }
 
 // the 3D view on (it's off by default), as its checkbox in the view dropdown does
@@ -105,7 +105,8 @@ export async function editDot(page, label, tool = "cut") {
 // depth v nearest p
 export async function cutPoint(page, r, i, v, near = null) {
   const { site, lines } = await page.evaluate(({ r, i, v }) => window.cutwist.editCurve(r, i, v ?? undefined), { r, i, v });
-  const pts = lines.flat(), at = near || site;
+  // (the middles of the lines' pieces: a line's ends are on the solid's edges, maybe its outline)
+  const pts = lines.flatMap((l) => l.slice(1).map((q, k) => [(q[0] + l[k][0]) / 2, (q[1] + l[k][1]) / 2])), at = near || site;
   if (!pts.length) throw new Error(`cut ${r}:${i} isn't showing`);
   const [x, y] = pts.reduce((b, q) => (Math.hypot(q[0] - at.x, q[1] - at.y) < Math.hypot(b[0] - at.x, b[1] - at.y) ? q : b));
   return { x, y };

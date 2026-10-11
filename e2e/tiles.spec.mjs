@@ -1,7 +1,7 @@
 // The tile-turning puzzles (hexagons, squares or triangles on a torus): loading, turns through
 // the test hook, and real pointer input on the flat view (drag a circle, click a tile's middle).
 import { test, expect } from "@playwright/test";
-import { open, info, turn, finish, noErrors, pick, openView } from "./helpers.mjs";
+import { open, info, turn, finish, noErrors, pick, openView, editShape, editDot, editTool } from "./helpers.mjs";
 
 let errors;
 test.beforeEach(async ({ page }) => { errors = await open(page); });
@@ -147,34 +147,33 @@ test("textures: off up to 12 tiles, on from 13; the button toggles them and goes
 });
 
 // ---- customizing: the solids' editor, on a tiling ----
-const block = (page, group, name) => page.locator(`#${group} .tw-rblock`).filter({ has: page.locator(".tw-rname", { hasText: new RegExp(`^${name}$`) }) });
-
-test("customize opens the editor on the tiling: tilings for solids, the same rulers, the torus's and the tiling's steppers", async ({ page }) => {
+test("customize opens the editor on the tiling: tilings for solids in the name's menu, the torus's and the tiling's steppers", async ({ page }) => {
   await load(page, "hex", { a: 3, b: 0 });
   await page.click(".nx-custombtn");
   const s = await info(page);
   expect(s).toMatchObject({ id: "custom", tiling: "hex", pieces: 54 });
+  await page.click(".nx-pick");
   await expect(page.locator("#bSolidLabel")).toHaveText("tiling");
   await expect(page.locator("#bSolid").getByRole("radio", { name: "hexagons" })).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("#bStats")).toContainText("54 pieces");
   await expect(page.locator("#paramControls .control")).toHaveCount(4); // (sides, at a corner, size and skew)
   // another tiling, then undo
-  await page.locator("#bSolid").getByRole("radio", { name: "squares" }).click();
+  await editShape(page, "squares");
   expect((await info(page)).tiling).toBe("square");
-  await page.click("#bUndo");
+  await page.click("#undo");
   expect((await info(page)).tiling).toBe("hex");
 });
 
 test("cuts around corners and edges, rings of circles, and truncation", async ({ page }) => {
   await load(page, "hex", { a: 3, b: 0 });
   await page.click(".nx-custombtn");
-  await block(page, "bSets", "corners").getByRole("button", { name: "+ cut" }).click();
+  await editDot(page, "corners");
   let s = await info(page);
   expect(s.axes.filter((a) => a.kind === "vertex").map((a) => a.order)).toEqual(Array(18).fill(3)); // (a hexagon's corners turn in thirds)
-  await block(page, "bSets", "faces").getByRole("button", { name: "+ cut" }).click();
+  await editDot(page, "tiles");
   s = await info(page);
   expect(s.axes.find((a) => a.kind === "face").layers).toBe(2); // (two circles around each middle: a disk and a ring)
-  await block(page, "bTrim", "edges").getByRole("button", { name: "+ truncate" }).click();
+  await editDot(page, "edges", "trim");
   s = await info(page);
   expect(s.faces).toBe(9 + 27); // (the edges' faces)
   // still a puzzle: scramble, undo the scramble's turns, solved
@@ -186,7 +185,7 @@ test("cuts around corners and edges, rings of circles, and truncation", async ({
 test("black out pieces: a click on a piece blacks out every piece like it", async ({ page }) => {
   await load(page, "hex", { a: 3, b: 0 });
   await page.click(".nx-custombtn");
-  await page.click("#bPaint");
+  await editTool(page, "paint");
   const m = await page.evaluate(() => window.cutwist.tileMiddle(0));
   await page.mouse.click(m.x, m.y); // (a center)
   expect((await info(page)).black).toBe(9);
@@ -197,7 +196,7 @@ test("black out pieces: a click on a piece blacks out every piece like it", asyn
 test("a tile design's share link opens the same design", async ({ page }) => {
   await load(page, "triangle", { a: 2, b: 0 });
   await page.click(".nx-custombtn");
-  await block(page, "bTrim", "corners").getByRole("button", { name: "+ truncate" }).click();
+  await editDot(page, "corners", "trim");
   const before = await info(page), link = await page.evaluate(() => window.cutwist.shareLink());
   const errors2 = await open(page, new URL(link).search);
   const after = await info(page);

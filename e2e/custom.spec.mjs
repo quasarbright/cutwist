@@ -1,7 +1,7 @@
 // The custom puzzle editor (issue #22: tools on the puzzle, no panel): opening it, the shape from
 // the name's menu, cuts added at dots and dragged by hand, truncation, its undo, share links.
 import { test, expect } from "@playwright/test";
-import { open, info, noErrors, editTool, editShape, editDot, editSites, dragCut, cutPoint, rulers } from "./helpers.mjs";
+import { open, info, noErrors, settleLayout, editTool, editShape, editDot, editSites, dragCut, cutPoint, rulers } from "./helpers.mjs";
 
 const designOf = (page) => page.evaluate(() => window.cutwist.design());
 const link = (design) => `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`;
@@ -47,11 +47,11 @@ test("a dot adds a cut; dragging its line moves it, snapping; dragging it off re
   r = await rulers(page);
   expect(r[3].values[0]).toBeLessThan(added);
   expect((await info(page)).pieces).not.toBe(before);
-  // (dragged onto its corner, past the surface, and let go: gone)
-  const from = await cutPoint(page, 3, 0, null), corner = (await editSites(page)).filter((s) => s.label === "corners").reduce((b, s) => (Math.hypot(s.x - from.x, s.y - from.y) < Math.hypot(b.x - from.x, b.y - from.y) ? s : b));
+  // (dragged off the cube and let go: gone)
+  const from = await cutPoint(page, 3, 0, null), vp = page.viewportSize();
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  await page.mouse.move(corner.x + (corner.x - from.x) * 0.3 + 40, corner.y + (corner.y - from.y) * 0.3 + 40, { steps: 16 }); // (on past it, off the cube)
+  await page.mouse.move(vp.width - 60, from.y, { steps: 16 });
   await page.mouse.up();
   expect((await rulers(page))[3].values).toEqual([]);
   // (the face cut: a right-click on its line)
@@ -169,6 +169,7 @@ test("on a phone the tools sit along the bottom and the puzzle fits above them",
   await page.setViewportSize({ width: 375, height: 812 });
   await open(page);
   await page.click(".nx-custombtn");
+  await settleLayout(page);
   const rail = await page.locator("#edTools").boundingBox(), tape = await page.locator("#nx-tape").boundingBox();
   expect(rail.y + rail.height).toBeLessThanOrEqual(tape.y + 1);
   expect(rail.x + rail.width).toBeLessThanOrEqual(375);
@@ -176,4 +177,19 @@ test("on a phone the tools sit along the bottom and the puzzle fits above them",
   expect(sites.length).toBeGreaterThan(5);
   expect(sites.every((s) => s.y < rail.y)).toBe(true);
   await expect(page.locator("#bShare2")).toBeVisible();
+});
+
+test("by touch, a long press on a cut removes it; a mouse held still doesn't", async ({ page }) => {
+  await open(page);
+  await page.click(".nx-custombtn");
+  const press = (p, pointerType, ms) => page.evaluate(async ({ p, pointerType, ms }) => {
+    const c = document.getElementById("c"), ev = (type) => c.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: p.x, clientY: p.y, pointerId: 9, pointerType, isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 }));
+    ev("pointerdown");
+    await new Promise((r) => setTimeout(r, ms));
+    ev("pointerup");
+  }, { p, pointerType, ms });
+  await press(await cutPoint(page, 2, 0, null), "mouse", 800);
+  expect((await rulers(page))[2].values.length).toBe(1);
+  await press(await cutPoint(page, 2, 0, null), "touch", 800);
+  expect((await rulers(page))[2].values).toEqual([]);
 });

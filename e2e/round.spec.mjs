@@ -2,7 +2,7 @@
 // shelf, the sides / at-a-corner steppers going between balls, tori and hyperbolic surfaces, a
 // real sticker drag, and the editor's {N,M} choice beside the solids.
 import { test, expect } from "@playwright/test";
-import { open, info, turn, finish, noErrors, pick } from "./helpers.mjs";
+import { open, info, turn, finish, noErrors, pick, editShape, editDot } from "./helpers.mjs";
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -95,21 +95,24 @@ test("the steppers go wherever {N,M} is: a torus, a ball, a hyperbolic surface",
 test("customizing: a solid design turns into an arbitrary tiling's and back, and the link keeps it", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
-  await page.locator("#bSolid button", { hasText: "arbitrary" }).click();
+  await editShape(page, "arbitrary");
   expect(await settled(page)).toMatchObject({ id: "custom", sphere: true, N: 4, M: 3, pieces: 26 });
-  await page.locator("#bSets .tw-rblock", { hasText: "corners" }).getByRole("button", { name: "+ cut" }).click();
+  await page.keyboard.press("Escape");
+  await editDot(page, "corners");
   await expect.poll(async () => (await info(page)).pieces).toBeGreaterThan(26);
   const pieces = (await info(page)).pieces, link = await page.evaluate(() => window.cutwist.shareLink());
   await open(page, link.slice(link.indexOf("?")) + "&rear=off");
   expect(await settled(page)).toMatchObject({ id: "custom", sphere: true, N: 4, M: 3, pieces });
-  await page.locator("#bSolid button", { hasText: "octa" }).click();
+  await page.click("#customize");
+  await editShape(page, "octa");
   await expect.poll(async () => (await info(page)).sphere).toBeFalsy();
   expect((await info(page)).faces).toBe(8);
 });
 
-test("the editor has the tiling's steppers too: a cube design's are {4,3}, and stepping one makes it a tiling", async ({ page }) => {
+test("the name's menu has the tiling's steppers too: a cube design's are {4,3}, and stepping one makes it a tiling", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
+  await page.click(".nx-pick");
   const panel = (label) => page.locator("#bNM .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
   await expect(panel("sides").locator("input")).toHaveValue("4");
   await expect(panel("at a corner").locator("input")).toHaveValue("3");
@@ -124,16 +127,18 @@ test("truncating a ball's corners: a face round each, the same pieces; and a hyp
   await settled(page);
   await page.click("#customize");
   const before = await info(page);
-  await page.locator("#bTrim .tw-rblock", { hasText: "corners" }).getByRole("button", { name: "+ truncate" }).click();
+  await editDot(page, "corners", "trim");
   await expect.poll(async () => (await info(page)).faces).toBe(before.faces + 8);
   expect((await info(page)).pieces).toBe(before.pieces);
   const link = await page.evaluate(() => window.cutwist.shareLink());
   expect(JSON.parse(Buffer.from(new URL(link).searchParams.get("design"), "base64url").toString()).truncate.vertex).toBeGreaterThan(0);
+  await page.click(".nx-pick");
   await page.locator("#bNM .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,4}: a torus, still truncated
   await page.locator("#bNM .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,5}: hyperbolic
   expect(await settled(page)).toMatchObject({ hyper: true, N: 4, M: 5 });
   const d = JSON.parse(Buffer.from(new URL(await page.evaluate(() => window.cutwist.shareLink())).searchParams.get("design"), "base64url").toString());
   expect(d.truncate.vertex).toBeGreaterThan(0);
+  await page.click("#customizeDone"); // (no turning while customizing)
   const moves = await page.evaluate(() => window.cutwist.scramble());
   await finish(page);
   expect((await info(page)).solved).toBe(false);

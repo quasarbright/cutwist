@@ -227,8 +227,7 @@
     .nx-card:hover { background: var(--panel-2); }
     .nx-card.is-cur { border-color: var(--accent); }
     .nx-card img { width: 80px; height: 80px; }
-    /* customize: a button by the name; the editor opens as a drawer on the left and
-       everything else (name, tape, algorithms) moves over beside it, still working */
+    /* customize: a button by the name; it turns on the tools (see body.nx-custom below) */
     .nx-custombtn {
       font: .8rem var(--font-mono); color: var(--muted); background: none; cursor: pointer;
       border: 1px dashed var(--border); border-radius: 8px; padding: 5px 10px;
@@ -466,7 +465,7 @@
     @media (max-width: 600px) {
       .tw-title h1 { font-size: 1.05rem; }
     }
-    /* stacked (a phone, or too little room beside the customize drawer; set by the script):
+    /* stacked (a phone, or too little room beside the customize tools; set by the script):
        along the bottom, up from the footer, the actions, the tape across the whole width, and
        the algorithms and the solved card side by side above it */
     body.nx-stack #nx-actions { bottom: 30px; left: calc(var(--nx-left, 0px) + 12px); right: 12px; gap: 0; }
@@ -521,7 +520,7 @@
     <h1>CUTWIST</h1>
     <div class="nx-pickrow">
       <button class="nx-pick" id="pick" title="choose a puzzle"><span class="nx-pickname" id="pickName"></span><span class="nx-caret">▾</span></button>
-      <button class="nx-custombtn" id="customize" title="change this puzzle's solid and cuts, beside it">customize</button>
+      <button class="nx-custombtn" id="customize" title="change this puzzle's shape and cuts, on the puzzle itself">customize</button>
     </div>
     <div class="nx-sizes">
       <div id="paramControls"></div>
@@ -985,7 +984,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         camera.position.set(0, 0, (1.15 / Math.sin(half)) * zoom);
         camera.setViewOffset(W, H, W / 2 - (region.left + w / 2), H / 2 - (region.top + h / 2), W, H);
       } else {
-        // fit the space the layout leaves the puzzle (beside the customize drawer, above the tape)
+        // fit the space the layout leaves the puzzle (beside the customize tools, above the tape)
         fitView(camera, nxStage(), 1.3);
         return;
       }
@@ -2879,7 +2878,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // nearest the middle; the picture shows a band of copies round the patch)
     function tileCopies(pts) {
       const { Ap, Bp } = P, v = tileView.view, out = [];
-      if (tileView.P !== P || !v) return out;
+      if (!tileView.P || !v) return out;
       for (const pt of pts) for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) {
         const c = [pt.center[0] + i * Ap[0] + j * Bp[0], pt.center[1] + i * Ap[1] + j * Bp[1]];
         if (c[0] > v.x0 - 0.6 && c[0] < v.x1 + 0.6 && c[1] > v.y0 - 0.6 && c[1] < v.y1 + 0.6) out.push({ c, tile: pt });
@@ -2927,7 +2926,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (only where the tiles are big enough to aim at: a tile's middle to its edge at least 24 px)
     function hyperSitesOf(kind) {
       const seen = new Set(), out = [];
-      if (hyperView.P !== P) return out;
+      if (!hyperView.P || hyperView.P.G !== P.G) return out; // (not drawn yet; a rebuild of the same tiling draws next frame)
       for (const d of hyperView.listVisible().tiles) for (const q of hyperLocal(kind)) {
         const z = mobius.apply(d.m, q), key = `${Math.round(z[0] * 1e5)}:${Math.round(z[1] * 1e5)}`;
         if (((1 - z[0] * z[0] - z[1] * z[1]) / 2) * hyperView.R * P.G.Ri < 24 || seen.has(key)) continue;
@@ -3046,8 +3045,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       edDrag = { r: hit.r, i, at: hit.at, id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, out: false, snapped: false };
       rulerDragging = true;
       (isFlat() ? plane : canvas).style.cursor = "grabbing";
-      // (a long press without moving removes it)
-      edDrag.hold = setTimeout(() => {
+      // (by touch, a long press without moving removes it: there's no right button)
+      if (e.pointerType !== "mouse") edDrag.hold = setTimeout(() => {
         if (!edDrag || edDrag.moved) return;
         const { r } = edDrag;
         edDrag = null; rulerDragging = false;
@@ -3165,7 +3164,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function safeRect() {
       const pad = 16, r = (sel) => document.querySelector(sel).getBoundingClientRect();
       const top = Math.max(r(".tw-title").bottom, r("#nx-toggles").bottom) + pad, right = W - pad;
-      // (whatever's along the bottom, and showing, and the customize drawer while it's open)
+      // (whatever's along the bottom, and showing, and the customize tools while they're out)
       const stack = ["#nx-tape", "#reference", ...(nxStacked() ? ["#nx-algs"] : [])], d = nxDrawer();
       const bottom = Math.min(d.top, ...stack.map(r).filter((b) => b.height).map((b) => b.top)) - pad;
       return { left: d.right + pad, top, right, bottom };
@@ -4933,7 +4932,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // The markup's controls, moved into this layout, plus: the tape (the turn history, one
     // mark per turn, click to jump back and forth), a list of algorithms that shows an
     // algorithm's own tape when you hover its play buttons, and the shelf (every puzzle as a
-    // picture). Customize opens the editor as a drawer beside the puzzle, which stays live.
+    // picture). Customize puts tools down the left that act on the puzzle itself.
     // (nx, its elements, is declared near the top: the camera reads it from the first frame.)
     // A turn as a mark: a dot in the colors of the end you'd grab it by (one face: one color;
     // a corner: a pie of its faces' colors; an edge: two halves), an inner layer's depth
@@ -5216,11 +5215,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       requestAnimationFrame(next);
     }
 
-    // Customize: the editor as a drawer on the left, the puzzle still live beside it (turn
-    // it, undo, everything). Opening it on a preset turns that preset into a custom puzzle
-    // you can change; done closes the drawer and keeps what you made.
     // Customizing: the tools down the left act on the puzzle, which holds still, solved (the cuts
-    // are where they are on the solved puzzle): there's no turning till done.
+    // are where they are on the solved puzzle): there's no turning till done. Opening it on a
+    // preset turns that preset into a custom puzzle you can change; done keeps what you made.
     function nxCustomize(on) {
       document.body.classList.toggle("nx-custom", on);
       $("edTools").hidden = !on;
@@ -5243,7 +5240,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (twice as wide with the rear view on). Stacked: on a phone, or when that gap is too
     // narrow for the tape, the tape spans the width and the other two sit above it
     // (body.nx-stack). Runs with every camera placement, so it follows the window, the
-    // drawer, the rear view and the algorithm list.
+    // customize tools, the rear view and the algorithm list.
     const TAPE_MIN = 360; // px
     function nxStacked() { return document.body.classList.contains("nx-stack"); }
     let bottomKey = "";
@@ -5257,16 +5254,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       document.body.style.setProperty("--nx-algs-w", algs + "px");
       document.body.style.setProperty("--nx-ref-w", ref + "px");
     }
-    // where the customize drawer is, while it's open: down the left, or on a phone a sheet
-    // along the bottom (null edges when it's closed)
-    // (customizing: the tools down the left, or on a phone along the bottom)
+    // where the customize tools are, while they're out: down the left, or on a phone along the
+    // bottom (null edges when they're not)
     function nxDrawer() {
       const open = editing(), r = $("edTools").getBoundingClientRect();
       return { right: open && !phone.matches ? r.right : 0, top: open && phone.matches ? r.top : H };
     }
-    // the space the puzzle gets: clear of the top row, the drawer, and the tape (stacked, the
-    // whole stack is measured: under the name and its numbers, above the algorithms and solved
-    // card, and above a customize sheet)
+    // the space the puzzle gets: clear of the top row, the customize tools, and the tape (stacked,
+    // the whole stack is measured: under the name and its numbers, above the algorithms and solved
+    // card, and above the tools)
     function nxStage() {
       const d = nxDrawer();
       if (nxStacked()) {

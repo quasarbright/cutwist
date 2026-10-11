@@ -95,9 +95,9 @@ test("prisms: sides, size (cuts per side) and height", async ({ page }) => {
 test("customize opens the editor on presets it can express, and is hidden on the rest", async ({ page }) => {
   await open(page);
   await expect(page.locator(".nx-custombtn")).toBeVisible();
-  await expect(page.locator("#builder")).toBeHidden();
+  await expect(page.locator("#edTools")).toBeHidden();
   await page.click(".nx-custombtn");
-  await expect(page.locator("#builder")).toBeVisible();
+  await expect(page.locator("#edTools")).toBeVisible();
   expect((await info(page)).id).toBe("custom");
   expect((await info(page)).pieces).toBe(27); // the same puzzle, now editable
   await page.click(".nx-done");
