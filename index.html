@@ -1141,11 +1141,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (Q.roundRegions[f]) return Q.roundRegions[f];
       const { outer, holes, back } = regionShape(Q, f);
       // (the outlines are drawn very finely in the picture: a point every ROUND.outline on the sphere
-      // will do, under lines as wide as the chords stray from the arcs)
+      // will do, under lines as wide as the chords stray from the arcs. But never its corners, where
+      // arcs meet: skipped, the fragment's tip was cut off and the core showed where lines cross.)
+      const corners = [];
       const thin = (loop) => {
-        const out = [];
+        const out = [], n = loop.length;
         let last = null;
-        for (const z of loop) { const x = back(z); if (!last || len(sub(x, last)) > ROUND.outline) { out.push(z); last = x; } }
+        loop.forEach((z, i) => {
+          const a = loop[(i - 1 + n) % n], b = loop[(i + 1) % n];
+          const turn = Math.abs(Math.atan2((z[0] - a[0]) * (b[1] - z[1]) - (z[1] - a[1]) * (b[0] - z[0]), (z[0] - a[0]) * (b[0] - z[0]) + (z[1] - a[1]) * (b[1] - z[1])));
+          const x = back(z), corner = turn > 0.15;
+          if (corner) corners.push(x);
+          if (corner || !last || len(sub(x, last)) > ROUND.outline) { out.push(z); last = x; }
+        });
         return out.length >= 3 ? out : loop;
       };
       const loops = [outer, ...holes].map(thin);
@@ -1198,6 +1206,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           const a = add(p, w), b = sub(p, w), c = add(q, w2), d = sub(q, w2);
           lines.push(a, b, c, b, d, c);
         }
+      }
+      // (and a round dot at each corner, so lines meet in a round join, not square ends crossing)
+      for (const p of corners) {
+        const [u, v] = [normalize(cross(p, Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]))].map((u) => [u, cross(p, u)])[0], r = ROUND.lineWidth / 2;
+        const at = (k) => add(p, add(scale(u, r * Math.cos((k * TAU) / 12)), scale(v, r * Math.sin((k * TAU) / 12))));
+        for (let k = 0; k < 12; k++) lines.push(p, at(k), at(k + 1));
       }
       return (Q.roundRegions[f] = { tris, lines });
     }
