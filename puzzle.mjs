@@ -632,14 +632,10 @@ const surfaceAlong = (solid, n) => Math.max(...solid.polys.flatMap((p) => p.vert
 // A custom puzzle's cut sets, as [{ on, depths }] (an older declaration has one on/depths).
 export const cutSets = (spec) => spec.cuts || (spec.on ? [{ on: spec.on, depths: spec.depths || [] }] : []);
 
-// Trim faces: made by cutting off the base solid's corners or edges. Colors are spread
-// around the hue circle, pale for corners and deeper for edges, so they read as their own
-// family next to the base faces.
-const trimColor = (kind, k, n) => `hsl(${Math.round((k * 360) / n + (kind === "vertex" ? 15 : 195))}, ${kind === "vertex" ? 45 : 40}%, ${kind === "vertex" ? 72 : 48}%)`;
-
 // A custom puzzle's solid: the base solid, then optionally its corners and/or edges truncated
 // (cut off flat) at spec.truncate.vertex / .edge, a fraction of the way from the center to
-// the base solid's corner or edge. Truncating adds faces, with their own stickers.
+// the base solid's corner or edge. Truncating adds faces, with their own stickers, colored as every
+// puzzle's truncation faces are (trimFaceColors: each unlike the faces it shares an edge with).
 export function customSolid(spec) {
   const { normals: raw, colors: baseColors } = SOLIDS[spec.solid];
   const baseNormals = raw.map(normalize);
@@ -654,10 +650,17 @@ export function customSolid(spec) {
       const face = normals.length;
       normals.push(n);
       labels.push(kind);
-      colors.push(trimColor(kind, k, dirs.length));
+      colors.push(null);
       const [below] = splitPiece(solid, n, f * surfaceAlong(baseSolid, n), face);
       if (below) solid = below;
     });
+  }
+  // (faces sharing an edge of the truncated solid: two corners in common)
+  if (colors.includes(null)) {
+    const polyOf = new Map(solid.polys.map((p) => [p.color, p]));
+    const shares = (a, b) => !!a && !!b && a.verts.filter((v) => b.verts.some((w) => close(v, w, 1e-6))).length >= 2;
+    const near = normals.map((_, i) => normals.map((_, j) => j).filter((j) => j !== i && shares(polyOf.get(i), polyOf.get(j))));
+    return { baseNormals, baseSolid, normals, colors: trimFaceColors(colors, near), labels, solid };
   }
   return { baseNormals, baseSolid, normals, colors, labels, solid };
 }
@@ -902,6 +905,38 @@ function oklab(css) {
   return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * q, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * q, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * q];
 }
 export const colorDistance = (a, b) => len(sub(oklab(a), oklab(b)));
+
+// Colors for the faces a truncation makes (a solid's, or any tiling's, cut-off corners and edges),
+// the same for every kind of puzzle: from the twisty-puzzle palette (the triacontahedron's 30, then
+// hues round by the golden angle), each the one least like the faces it touches, and each used as
+// few times as can be. given: a color per face, or null for one to choose (the solid's or tiling's
+// own faces' come given); near[i]: the faces face i touches. Greedy, in order.
+// (hex, as three.js takes it: hue h in degrees, saturation and lightness 0 to 1)
+const hslHex = (h, s, l) => { const f = (n) => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return `#${[0, 8, 4].map((n) => Math.round(f(n) * 255).toString(16).padStart(2, "0")).join("")}`; };
+const TRIM_PALETTE = [...PAIRS_15.flat(), ...Array.from({ length: 30 }, (_, i) => hslHex((i * 137.508 + 10) % 360, 0.65, i % 2 ? 0.42 : 0.6))];
+export function trimFaceColors(given, near) {
+  const out = given.slice(), uses = new Map();
+  for (const c of given) if (c) uses.set(c, (uses.get(c) || 0) + 1);
+  for (let i = 0; i < out.length; i++) {
+    if (out[i]) continue;
+    let best = null, score = -Infinity;
+    TRIM_PALETTE.forEach((c, k) => {
+      const d = Math.min(0.25, ...near[i].filter((j) => out[j]).map((j) => colorDistance(c, out[j])));
+      const s = d - 0.06 * (uses.get(c) || 0) - 0.0005 * k;
+      if (s > score) { score = s; best = c; }
+    });
+    out[i] = best;
+    uses.set(best, (uses.get(best) || 0) + 1);
+  }
+  return out;
+}
+// (the faces sharing a tile, as near lists for trimFaceColors: tilesOf[i], the tiles face i is on
+// or touches)
+export function nearByTiles(tilesOf) {
+  const onTile = new Map();
+  tilesOf.forEach((ts, i) => { for (const t of ts) { if (!onTile.has(t)) onTile.set(t, []); onTile.get(t).push(i); } });
+  return tilesOf.map((ts, i) => [...new Set(ts.flatMap((t) => onTile.get(t)))].filter((j) => j !== i));
+}
 
 // A texture index per face. Faces sharing a texture should
 // have colors far apart, so the closest pairs of colors get told apart by texture. Greedy

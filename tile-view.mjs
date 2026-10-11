@@ -10,7 +10,7 @@
 // of its face.
 import { piecePose, nearestCopy, partsNear } from "./tiles.mjs";
 import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
-import { faceTextures, colorDistance, PUZZLE_PALETTES } from "./puzzle.mjs";
+import { faceTextures, colorDistance, PUZZLE_PALETTES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
 
 const MARGIN = 0.75; // how far the copies around reach past the patch, in tile spacings
 const LINE = 0.017; // the lines between stickers, in tile spacings (half that on triangles)
@@ -47,16 +47,14 @@ function faceColors(P) {
     });
     out[i] = palette[best]; used.add(best);
   }
-  for (const kind of ["vertex", "edge"]) {
-    const list = P.faces.map((f, i) => (f.kind === kind ? i : -1)).filter((i) => i >= 0);
-    list.forEach((f, k) => { out[f] = hslHex((k * 360) / list.length + (kind === "vertex" ? 15 : 195), kind === "vertex" ? 45 : 40, kind === "vertex" ? 72 : 48); });
-  }
-  return out;
-}
-function hslHex(h, s, l) {
-  s /= 100; l /= 100;
-  const f = (n) => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
-  return `#${[0, 8, 4].map((n) => Math.round(f(n) * 255).toString(16).padStart(2, "0")).join("")}`;
+  // the truncation's faces, as every puzzle's are (puzzle.mjs's trimFaceColors): each unlike the
+  // faces on the same tiles, the tiles nearest its point (all as near: round a corner, or an edge)
+  const tilesOf = P.faces.map((f, i) => {
+    if (i < n) return [i];
+    const dd = P.tiles.map((t) => nearestCopy(P, t.center, f.center).dd), least = Math.min(...dd);
+    return dd.flatMap((d, t) => (d < least * 1.01 + 1e-12 ? [t] : []));
+  });
+  return trimFaceColors(out.map((c, i) => (i < n ? c : null)), nearByTiles(tilesOf));
 }
 // each face's texture (an index into TEXTURES), so faces of look-alike colors get different
 // ones: the 3D puzzles' assignment (puzzle.mjs), made once per puzzle

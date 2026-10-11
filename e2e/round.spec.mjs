@@ -17,7 +17,9 @@ const stepper = (page, label, dir) => page.click(`button[title="one ${dir === 1 
 test("the Beach Ball opens from the shelf: six wedges, a circle round each, in 3D", async ({ page }) => {
   await pick(page, "ball-beach");
   const s = await settled(page);
-  expect(s).toMatchObject({ sphere: true, N: 2, M: 6, tiles: 6, pieces: 13, kinds: { 1: 6, 2: 6, 6: 1 }, solved: true });
+  // (a piece round each wedge's middle, one where neighbors' circles overlap, and a cap at each pole
+  // past all of them: the circles overlap all round the equator, so the two caps aren't one piece)
+  expect(s).toMatchObject({ sphere: true, N: 2, M: 6, tiles: 6, pieces: 14, kinds: { 1: 6, 2: 6, 6: 2 }, solved: true });
   expect(s.axes.every((a) => a.order === 2)).toBe(true);
   await expect(page.locator("#c")).toBeVisible();
   await expect(page.locator(".nx-pick")).toContainText("Beach Ball");

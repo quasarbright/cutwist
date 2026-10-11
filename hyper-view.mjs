@@ -12,7 +12,7 @@
 import { mobius as Mb, darts, hdist, diskCircle, tileEdges } from "./hyper.mjs";
 import { faceHas } from "./tiles.mjs";
 import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
-import { colorDistance, PUZZLE_PALETTES } from "./puzzle.mjs";
+import { colorDistance, PUZZLE_PALETTES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
 
 const BODY = "#0a0b0e";
 const BLACK = "#1c1f27";
@@ -65,15 +65,22 @@ function hyperColors(P) {
   return out;
 }
 
-// A face's color: a tile's (hyperColor), or a truncated corner's or edge's, round the hue circle as
-// the solids' and the flat tilings' are. kind: "face", "vertex" or "edge"; c: which (its coset).
+// A face's color: a tile's (hyperColor), or a truncated corner's or edge's, chosen as every puzzle's
+// truncation faces are (puzzle.mjs's trimFaceColors: each unlike the faces on the same tiles). kind:
+// "face", "vertex" or "edge"; c: which (its coset).
 const trimSets = new WeakMap();
 export function hyperFaceColor(P, kind, c) {
   if (kind === "face") return hyperColor(P, c);
-  if (!trimSets.has(P)) trimSets.set(P, {});
-  const sets = trimSets.get(P), n = P.H.coset[kind].reps.length;
-  sets[kind] ||= Array.from({ length: n }, (_, k) => `hsl(${Math.round((k * 360) / n + (kind === "vertex" ? 15 : 195))}, ${kind === "vertex" ? 45 : 40}%, ${kind === "vertex" ? 72 : 48}%)`);
-  return sets[kind][c];
+  if (!trimSets.has(P)) {
+    // (every face, the tiles first, then each kind's: the faces a dart is on share its tile)
+    const { H } = P, T = P.tiles, base = { face: 0, vertex: T, edge: T + H.coset.vertex.reps.length };
+    const n = base.edge + H.coset.edge.reps.length, tilesOf = Array.from({ length: n }, (_, i) => (i < T ? [i] : []));
+    for (let x = 0; x < H.n; x++) for (const k of ["vertex", "edge"]) tilesOf[base[k] + H.coset[k].of[x]].push(H.coset.face.of[x]);
+    const given = Array.from({ length: n }, (_, i) => (i < T ? hyperColor(P, i) : null));
+    trimSets.set(P, { base, colors: trimFaceColors(given, nearByTiles(tilesOf.map((ts) => [...new Set(ts)]))) });
+  }
+  const { base, colors } = trimSets.get(P);
+  return colors[base[kind] + c];
 }
 
 // Each fragment of tile 0 (hyper.mjs's P.regions: a piece is some of them, on its tiles) as
@@ -84,6 +91,8 @@ export function hyperFaceColor(P, kind, c) {
 // level samples every arc on its own, so the points where arcs meet (the fragment's corners) are
 // always kept: skipping points of the whole outline cut corners off.
 const STEPS = [1, 2, 4, 8]; // (as stepFor gives)
+// the stretches of a polyline whose points pass a test, each of 2 points or more
+const runsWhere = (pts, ok) => { const out = []; let run = []; for (const p of pts) { if (ok(p)) run.push(p); else { if (run.length > 1) out.push(run); run = []; } } if (run.length > 1) out.push(run); return out; };
 const shapeCache = new WeakMap();
 const arcPoints = ({ c, r, a0, a1 }, step, end) => {
   const k = Math.max(step > 1 ? 2 : 6, Math.ceil((Math.abs(a1 - a0) * r) / (0.004 * step)));
@@ -200,8 +209,12 @@ export class HyperView {
     // (An edge is just its arc, from corner to corner, a and b: past them its circle runs on
     // through other tiles, which a turned ring brings in as stray lines.)
     const seen = new Set();
+    // (truncated: an edge only between the tiles' own faces, see hyper.mjs's tileFaces)
+    const truncated = P.tileFaces && P.tileFaces.length > 1;
     for (const d of this.listVisible().tiles) for (let k = 0; k < G.N; k++) {
-      const [a, m, b] = [G.corners[k], G.mids[k], G.corners[(k + 1) % G.N]].map((p) => Mb.apply(d.m, p)), circle = circleThrough(a, m, b);
+      const run = truncated ? P.tileFaces.edges[k] : { ends: [G.corners[k], G.mids[k], G.corners[(k + 1) % G.N]] };
+      if (!run) continue;
+      const [a, m, b] = run.ends.map((p) => Mb.apply(d.m, p)), circle = circleThrough(a, m, b);
       if (!circle || !meets(circle)) continue;
       const key = [circle.c[0], circle.c[1], circle.r].map((x) => Math.round(x * 1e6)).join();
       if (!seen.has(key)) { seen.add(key); edges.push({ ...circle, a, b }); }
@@ -210,9 +223,8 @@ export class HyperView {
     // straight line of the plane, as the tiles' edges are; the ones along a tile's edge are that edge)
     for (const d of this.listVisible().tiles) for (const fc of P.tileFaces || []) {
       if (fc.kind === "face") continue;
-      const per = fc.disk.length / fc.klein.length;
-      for (let j = 0; j < fc.klein.length; j++) {
-        const [a, m, b] = [fc.disk[j * per], fc.disk[j * per + per / 2], fc.disk[((j + 1) % fc.klein.length) * per]].map((p) => Mb.apply(d.m, p));
+      for (const { ends } of fc.lines) {
+        const [a, m, b] = ends.map((p) => Mb.apply(d.m, p));
         // (one through the disk's middle is straight there, which the 3D view's lines, circles, can't
         // be: where two corners' faces meet, cut deep enough, on the tile in the middle. Left out.)
         const circle = circleThrough(a, m, b);
@@ -492,8 +504,8 @@ export class HyperView {
       if (this.bare) { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.stroke(); }
     }
     if (this.bare) return;
-    ctx.strokeStyle = BODY; ctx.lineWidth = this.edgeWidth(m); ctx.lineJoin = "round";
-    for (const fc of trims) { ctx.beginPath(); this.trace(ctx, fc.disk, m, step); ctx.stroke(); }
+    ctx.strokeStyle = BODY; ctx.lineWidth = this.edgeWidth(m); ctx.lineJoin = "round"; ctx.lineCap = "round";
+    for (const fc of trims) for (const { pts } of fc.lines) { ctx.beginPath(); this.polyline(ctx, pts, m); ctx.stroke(); }
   }
   // the tiles' edges, each once (see firstSide), over the colors
   tileEdges(ctx) {
@@ -507,6 +519,8 @@ export class HyperView {
       ctx.beginPath();
       for (let k = 0; k < G.N; k++) {
         if (!this.firstSide(d.m, k)) continue;
+        // (truncated: just the stretch between the tiles' own faces, see hyper.mjs's tileFaces)
+        if (P.tileFaces.length > 1) { const run = P.tileFaces.edges[k]; if (run) this.polyline(ctx, run.pts, d.m); continue; }
         const pts = [];
         for (let j = 0; j < per; j += step) pts.push(G.poly[k * per + j]);
         pts.push(G.corners[(k + 1) % G.N]);
@@ -552,7 +566,12 @@ export class HyperView {
           const shape = shapes[f][STEPS.indexOf(this.stepFor(px))];
           if (mode === "edges") {
             ctx.lineWidth = this.edgeWidth(m);
-            for (const { pts, k: e } of shape.edges) if (this.firstSide(m, e)) { ctx.beginPath(); this.polyline(ctx, pts, m); ctx.stroke(); }
+            // (truncated: only where they border the tiles' own faces)
+            const core = P.tileFaces.length > 1 ? P.tileFaces.inCore : null;
+            for (const { pts, k: e } of shape.edges) {
+              if (!this.firstSide(m, e)) continue;
+              for (const run of core ? runsWhere(pts, core) : [pts]) { ctx.beginPath(); this.polyline(ctx, run, m); ctx.stroke(); }
+            }
             continue;
           }
           if (mode === "cuts") {

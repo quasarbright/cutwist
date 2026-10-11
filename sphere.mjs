@@ -16,7 +16,7 @@
 // tile, turned how) and a fragment f of tile 0.
 // No drawing here: index.html draws each fragment from regionShape (its outline in the flat
 // picture, and the way back onto the sphere).
-import { dot, add, sub, scale, cross, len, normalize, applyMat, mulMat, rotMat, SOLIDS, buildSolid, faceTextures, TEXTURE_MIN_FACES } from "./puzzle.mjs";
+import { dot, add, sub, scale, cross, len, normalize, applyMat, mulMat, rotMat, SOLIDS, buildSolid, faceTextures, TEXTURE_MIN_FACES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
 import { arrangement, faceInner, faceHas } from "./tiles.mjs";
 import { HYPER_PARAMS } from "./hyper.mjs";
 
@@ -190,8 +190,6 @@ const tileColors = (N, M, n) => {
 // great circles, so it's the flat-faced solid's truncation seen on the ball. f: spec.truncate.vertex,
 // .edge, in (0, 1): what the editor's truncation ruler sets.
 const truncationOf = (spec) => Object.fromEntries(["vertex", "edge"].flatMap((k) => { const f = spec.truncate && spec.truncate[k]; return Number.isFinite(f) && f > 0 && f < 1 ? [[k, f]] : []; }));
-// the corners' and edges' faces' colors, round the hue circle (as the solids' and the flat tilings')
-const trimColor = (kind, k, n) => `hsl(${Math.round((k * 360) / n + (kind === "vertex" ? 15 : 195))}, ${kind === "vertex" ? 45 : 40}%, ${kind === "vertex" ? 72 : 48}%)`;
 
 // ---- building a puzzle: spec { N, M, cuts: [{ on, depths: [radius] }], truncate, blackout }
 export function buildSphere(spec) {
@@ -202,7 +200,11 @@ export function buildSphere(spec) {
   const trims = ["vertex", "edge"].filter((k) => truncate[k] !== undefined);
   const normals = [...H.normals, ...trims.flatMap((k) => H.points[k])], faceBase = { face: 0 };
   trims.reduce((at, k) => { faceBase[k] = at; return at + H.points[k].length; }, T);
-  const colors = [...tileColors(N, M, T).slice(0, T), ...trims.flatMap((k) => H.points[k].map((_, i, all) => trimColor(k, i, all.length)))];
+  // (the truncation's faces colored as every puzzle's are, each unlike the faces on the same tiles)
+  // (a corner's face is on the tiles a corner radius away, an edge's on those an edge's away)
+  const kindOf = ["face", ...trims].flatMap((k) => (k === "face" ? H.normals : H.points[k]).map(() => k));
+  const tilesOf = normals.map((p, i) => (i < T ? [i] : H.normals.flatMap((c, t) => (dot(c, p) > Math.cos((kindOf[i] === "vertex" ? G.Rv : G.Ri) + 1e-6) ? [t] : []))));
+  const colors = trimFaceColors([...tileColors(N, M, T).slice(0, T), ...trims.flatMap((k) => H.points[k].map(() => null))], nearByTiles(tilesOf));
   const which = (p) => normals.findIndex((v) => len(sub(v, p)) < 1e-6);
   const P = {
     kind: "sphere", spec, N, M, G, H, radii, truncate, faceBase, R: 1, size: 2,
@@ -333,7 +335,17 @@ function findPieces(P) {
   const R = P.regions, nR = R.length, T = H.reps.length;
   const bySig = new Map();
   R.forEach((r, i) => { if (!bySig.has(r.sig)) bySig.set(r.sig, []); bySig.get(r.sig).push(i); });
-  const locate = (z) => { const c = bySig.get(sig(z)) || []; return c.length <= 1 ? (c.length ? c[0] : -1) : (c.find((i) => faceHas(R[i].face, z)) ?? c[0]); };
+  // The fragment a point is in: the one inside the same circles; of several, the one in the same
+  // face (truncated); of several still, the one whose outline holds it, or else whose outline it's
+  // nearest. (The outlines are fine polygons, a hair inside the arcs: a point a hair over a tile's
+  // edge, looking for the neighbor's fragment there, can be outside all of them.)
+  const distTo = (poly, z) => { let m = Infinity; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[j], b = poly[i], dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((z[0] - a[0]) * dx + (z[1] - a[1]) * dy) / (dx * dx + dy * dy || 1))); m = Math.min(m, Math.hypot(z[0] - a[0] - t * dx, z[1] - a[1] - t * dy)); } return m; };
+  const locate = (z) => {
+    let c = bySig.get(sig(z)) || [];
+    if (c.length > 1 && trimKinds.length) { const p = partOf(ch.back(z)), same = c.filter((i) => R[i].part.kind === p.kind && R[i].part.i === p.i); if (same.length) c = same; }
+    if (c.length <= 1) return c.length ? c[0] : -1;
+    return c.find((i) => faceHas(R[i].face, z)) ?? c.reduce((b, i) => (distTo(R[i].face.poly(), z) < distTo(R[b].face.poly(), z) ? i : b));
+  };
   // seen from x·R (tile 0's frame turned by R), fragment f is the one its anchor turns into
   const rotIn = R.map((r) => locate(ch.to(applyMat(G.R, r.at))));
   const rotPow = [R.map((_, i) => i)];
@@ -342,7 +354,13 @@ function findPieces(P) {
   // across tile 0's edges: from the middle of each of a fragment's stretches along an edge, a hair
   // over into the neighbor tile, seen from that tile's first element: the fragment there. (Not
   // where a circle runs along the edge: a hair either side is then in different circles.)
-  const edgeOf = new Map(edges.map((e) => [e.c, e])), steps = [];
+  // (And whether the stretch is inside one face, a truncated corner's or edge's that spans both
+  // tiles: then no line's drawn along it, as on the flat tilings, where lines are where colors
+  // change or circles cut. A face is known by its point: its tile's middle, or its corner, or
+  // edge's middle, carried from the fragment's tile's frame.)
+  const facePoint = ({ kind, i }, m) => applyMat(m, kind === "face" ? G.c0 : kind === "vertex" ? G.corners[i] : G.mids[i]);
+  const I3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const edgeOf = new Map(edges.map((e) => [e.c, e])), steps = [], oneFace = new Set();
   R.forEach((r, f) => {
     for (const loop of r.outline) for (const arc of loop) {
       const e = edgeOf.get(arc.c);
@@ -354,7 +372,9 @@ function findPieces(P) {
         if (H.tileOf[d] === 0) continue;
         const back = applyMat(transpose(H.mats[d]), over);
         if (!inTile0(G, back)) continue;
-        steps.push([f, d, locate(ch.to(back))]);
+        const g = locate(ch.to(back));
+        steps.push([f, d, g]);
+        if (g >= 0 && len(sub(facePoint(r.part, I3), facePoint(R[g].part, H.mats[d]))) < 1e-6) oneFace.add(arc);
         break;
       }
     }
@@ -368,7 +388,7 @@ function findPieces(P) {
   R.forEach((r, f) => {
     r.lines = [];
     for (const loop of r.outline) for (const arc of loop) {
-      if (!trimOf.has(arc.c)) { r.lines.push(arc); continue; }
+      if (!trimOf.has(arc.c)) { if (!oneFace.has(arc)) r.lines.push(arc); continue; }
       const t = (arc.a0 + arc.a1) / 2, z = [arc.c[0] + arc.r * Math.cos(t), arc.c[1] + arc.r * Math.sin(t)], e = 1e-4;
       const [g1, g2] = [1, -1].map((s) => locate([z[0] + s * e * Math.cos(t), z[1] + s * e * Math.sin(t)]));
       const g = g1 === f ? g2 : g1;

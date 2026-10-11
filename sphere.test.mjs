@@ -114,6 +114,18 @@ test("truncation: corners' and edges' faces with their own colors, the stickers 
   for (const X of [P, Q]) { const s = play(X, [{ axis: 0, layer: 2, q: 1 }]); assert.equal(isSolved(X, s), false); play(X, [{ axis: 0, layer: 2, q: 3 }], s); assert.ok(isSolved(X, s)); }
 });
 
+test("dual tilings cut by the same circles (a tile's middle is the dual's corner) make the same pieces", () => {
+  // (the beach ball's wedge circles overlap all round the equator: two polar caps outside them all,
+  // which were once wrongly joined into one piece)
+  const ball = build(2, 6, [{ on: "face", depths: [0.654] }]), halves = build(6, 2, [{ on: "vertex", depths: [0.654] }]);
+  assert.equal(ball.n, 14);
+  assert.equal(halves.n, 14);
+  for (const [N, M] of [[4, 3], [5, 3]]) {
+    const a = build(N, M, [{ on: "face", depths: [0.9] }, { on: "vertex", depths: [0.5] }]), b = build(M, N, [{ on: "vertex", depths: [0.9] }, { on: "face", depths: [0.5] }]);
+    assert.equal(a.n, b.n, `{${N},${M}}`);
+  }
+});
+
 test("blacking out a kind takes its stickers off", () => {
   const P = build(4, 3, [{ on: "face", depths: [1.1] }]), corner = P.types[P.pieces.findIndex((pc) => pc.kind === 3)];
   const Q = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [1.1] }], blackout: [corner] });

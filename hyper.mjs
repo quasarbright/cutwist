@@ -287,7 +287,32 @@ export function tileFaces(G, truncate) {
   if (tv !== null) { round("vertex", cs, tv, []); cs.forEach((u) => { core = clipBelow(core, u, tv); }); }
   if (te !== null) { round("edge", ms, te, tv !== null ? cs.map((u) => [u, tv]) : []); ms.forEach((u) => { core = clipBelow(core, u, te); }); }
   if (core.length >= 3) out.unshift({ kind: "face", i: 0, klein: core });
-  for (const fc of out) fc.disk = fc.klein.flatMap((a, j) => { const b = fc.klein[(j + 1) % fc.klein.length]; return Array.from({ length: 24 }, (_, s) => fromKlein([a[0] + ((b[0] - a[0]) * s) / 24, a[1] + ((b[1] - a[1]) * s) / 24])); });
+  // (each side, finely, in the disk: { pts, ends: [a, middle, b] })
+  const side = (a, b) => { const pts = Array.from({ length: 25 }, (_, s) => fromKlein([a[0] + ((b[0] - a[0]) * s) / 24, a[1] + ((b[1] - a[1]) * s) / 24])); return { pts, ends: [pts[0], pts[12], pts[24]] }; };
+  // (a side along one of the tile's edges isn't a line of its own: there the tile's edge is drawn,
+  // where it's drawn at all)
+  const onEdge = (a, b) => tile.some((p, k) => { const q = tile[(k + 1) % tile.length], cr = (r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]); return Math.abs(cr(a)) < 1e-9 && Math.abs(cr(b)) < 1e-9; });
+  for (const fc of out) {
+    fc.disk = fc.klein.flatMap((a, j) => side(a, fc.klein[(j + 1) % fc.klein.length]).pts.slice(0, 24));
+    fc.lines = fc.klein.flatMap((a, j) => { const b = fc.klein[(j + 1) % fc.klein.length]; return onEdge(a, b) ? [] : [side(a, b)]; });
+  }
+  // The stretch of each of the tile's edges that's drawn: where it borders the tiles' own faces, not
+  // inside a corner's or edge's face (which spans both tiles: no line in it, as on the flat tilings).
+  // The tile's own face is convex, so it's one stretch: { pts, ends } as a side's, or null.
+  out.edges = tile.map((a, k) => {
+    const b = tile[(k + 1) % tile.length];
+    let s0 = 0, s1 = 1;
+    // (k(s) = a + s(b − a) with k·u ≤ t, for each cut)
+    const keep = (u, t) => { const ka = a[0] * u[0] + a[1] * u[1], kb = b[0] * u[0] + b[1] * u[1], d = kb - ka; if (Math.abs(d) < 1e-15) { if (ka > t + 1e-12) s1 = -1; return; } const s = (t - ka) / d; if (d > 0) s1 = Math.min(s1, s); else s0 = Math.max(s0, s); };
+    if (tv !== null) cs.forEach((u) => keep(u, tv));
+    if (te !== null) ms.forEach((u) => keep(u, te));
+    if (s1 - s0 < 1e-9) return null;
+    const at = (s) => [a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s];
+    return side(at(s0), at(s1));
+  });
+  // (whether a point of the disk, in tile 0's frame, is in the tile's own face: a hair's slack, for
+  // points along the cuts)
+  out.inCore = (z) => { const k = toKlein(z), dot2 = (u) => k[0] * u[0] + k[1] * u[1]; return (tv === null || cs.every((u) => dot2(u) <= tv + 1e-9)) && (te === null || ms.every((u) => dot2(u) <= te + 1e-9)); };
   return out;
 }
 // Each fragment's faces (the tile's own and the corners' and edges' it overlaps: P.regions[f].faces,
