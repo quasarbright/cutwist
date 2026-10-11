@@ -793,15 +793,16 @@
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
     import {
       TILE_PRESETS, TILE_PARAMS, TILE_CUT_RANGE, TILINGS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves,
-      piecesInLayer as tilePiecesInLayer, signedTurn, snapTiles, nearestCopy, tileSnapCandidates, tileRegularTrims, tileStats, tileDesign, tileCount, tileRadiusCap,
+      piecesInLayer as tilePiecesInLayer, signedTurn, snapTiles, nearestCopy, tileSnapCandidates, tileRegularTrims, tileStats, tileDesign, tileCount, tileRadiusCap, SIZES as TILE_SIZES,
     } from "./tiles.mjs";
     import { TileView, faceColor, circleNear, axisNear, pieceNear, pressAt } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks,
+      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
+    import { buildSphere, isSpherical, sphereGeometry, regionShape, sphereStats, sphereSnapCandidates, sphereCountBreaks, SPHERE_RADIUS_RANGE, ROUND_PRESETS, roundCuts } from "./sphere.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1037,6 +1038,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       puzzleGroup.scale.setScalar(1 / P.R);
       root.add(puzzleGroup);
       pieceObjs = []; bodyMeshes = [];
+      if (isSphere()) puzzleGroup.add(new THREE.Mesh(coreGeo, bodyMat)); // (a round puzzle's core)
       // gaps between stickers shrink with the pieces on bigger puzzles
       // the icosahedron's pieces are small for its size, so it gets thinner lines
       const solidGap = P.spec.solid === "icosahedron" || P.spec.solid === "rhombicTriacontahedron" ? 0.45 : 1;
@@ -1055,7 +1057,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
     // One piece: its black body (child 0) and its stickers, inset by margin and lifted off the
     // body a little. Also used by the about modal's diagrams.
-    function pieceObject(piece, colors, textures, margin, lift) {
+    // (Q: the puzzle it's of, for a round one's: the one showing, or a thumbnail's)
+    function pieceObject(piece, colors, textures, margin, lift, Q = P) {
+      if (piece.polys.length && piece.polys[0].f !== undefined) return roundPieceObject(Q, piece, colors, textures);
       const color = new THREE.Color();
       const pos = [], nor = [], triPoly = [];
       piece.polys.forEach((poly, pi) => {
@@ -1094,6 +1098,140 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       return obj;
     }
+
+    // A round puzzle's piece (sphere.mjs): each of its fragments is a fragment of tile 0 turned onto
+    // its tile, so each fragment of tile 0 is made into triangles once (roundRegion) and turned for
+    // every copy. Its body sits just under the sphere (what a press finds, and what shows where a
+    // sticker's blacked out), its stickers on it, and black lines along every fragment's edges just
+    // above, for the gaps between stickers. (The core, a black ball inside, fills the cracks.)
+    // (step: how far apart the points inside a fragment are on the sphere; split: no triangle's side
+    // longer, so a flat triangle sags under the ball by at most 0.003. The fat triangles hardly ever
+    // need it: a split one's neighbor leaves a crack along their side. The body's well under the
+    // stickers, or from afar the depth buffer can't tell which is in front.)
+    const ROUND = { body: 0.993, line: 1.004, outline: 0.04, step: 0.07, split: 0.15, lineWidth: 0.014 };
+    // Edges flipped till every triangle's circle has no other corner inside it (Delaunay, the
+    // fattest triangles those points make), all but the fixed ones (the outline's). The picture is
+    // stereographic, which keeps circles circles, so they're the sphere's fattest too. pts: [x, y];
+    // tris: [i, j, k]; fixed: Set of "i,j" with i < j.
+    function delaunayFlips(pts, tris, fixed) {
+      const orient = (a, b, c) => (pts[b][0] - pts[a][0]) * (pts[c][1] - pts[a][1]) - (pts[c][0] - pts[a][0]) * (pts[b][1] - pts[a][1]);
+      const incircle = (a, b, c, d) => {
+        const [ax, ay] = [pts[a][0] - pts[d][0], pts[a][1] - pts[d][1]], [bx, by] = [pts[b][0] - pts[d][0], pts[b][1] - pts[d][1]], [cx, cy] = [pts[c][0] - pts[d][0], pts[c][1] - pts[d][1]];
+        return (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) + (cx * cx + cy * cy) * (ax * by - bx * ay);
+      };
+      tris = tris.map(([a, b, c]) => (orient(a, b, c) > 0 ? [a, b, c] : [a, c, b]));
+      for (let pass = 0; pass < 100; pass++) {
+        const own = new Map(), done = new Set();
+        let flipped = 0;
+        tris.forEach((t, i) => { for (let k = 0; k < 3; k++) own.set(t[k] + "," + t[(k + 1) % 3], i); });
+        for (let i = 0; i < tris.length; i++) for (let k = 0; k < 3; k++) {
+          const t = tris[i], a = t[k], b = t[(k + 1) % 3], c = t[(k + 2) % 3];
+          if (done.has(i) || fixed.has(Math.min(a, b) + "," + Math.max(a, b))) continue;
+          const j = own.get(b + "," + a);
+          if (j === undefined || done.has(j)) continue;
+          const d = tris[j].find((v) => v !== a && v !== b);
+          if (incircle(a, b, c, d) > 1e-18 && orient(a, d, c) > 0 && orient(d, b, c) > 0) { tris[i] = [a, d, c]; tris[j] = [d, b, c]; done.add(i); done.add(j); flipped++; }
+        }
+        if (!flipped) break;
+      }
+      return tris;
+    }
+    function roundRegion(Q, f) {
+      Q.roundRegions ??= [];
+      if (Q.roundRegions[f]) return Q.roundRegions[f];
+      const { outer, holes, back } = regionShape(Q, f);
+      // (the outlines are drawn very finely in the picture: a point every ROUND.outline on the sphere
+      // will do, under lines as wide as the chords stray from the arcs)
+      const thin = (loop) => {
+        const out = [];
+        let last = null;
+        for (const z of loop) { const x = back(z); if (!last || len(sub(x, last)) > ROUND.outline) { out.push(z); last = x; } }
+        return out.length >= 3 ? out : loop;
+      };
+      const loops = [outer, ...holes].map(thin);
+      // Points spread inside it, about ROUND.step apart on the sphere, for the triangulation to use
+      // as corners too (a hole of one point is one), then its edges flipped to fat triangles: with
+      // only the outline's points it fans out in long thin triangles, and so does joining in each
+      // inside point, hundreds of thousands once they're split small enough.
+      // (In the picture, the sphere is 2 / (1 + |z|²) times as big: the spacing's set where it's
+      // biggest. Not too near the outline, where they'd make slivers.)
+      const xs = loops[0].map((p) => p[0]), ys = loops[0].map((p) => p[1]);
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      const near0 = Math.hypot(Math.max(0, x0, -x1), Math.max(0, y0, -y1)), h = (ROUND.step * (1 + near0 * near0)) / 2;
+      const within = (p, poly) => { let w = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < a[0] + ((p[1] - a[1]) * (b[0] - a[0])) / (b[1] - a[1])) w = !w; } return w; };
+      const edgePts = loops.flat(), inner = [];
+      // (each nudged a little, the same way every time: points in a straight row made triangles of
+      // no area along it, which neither the triangulation nor the flips handle)
+      const nudge = (i, j) => { const s = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453; return (s - Math.floor(s) - 0.5) * 0.3 * h; };
+      for (let i = 0, x = x0 + h / 2; x < x1; i++, x += h) for (let j = 0, y = y0 + h / 2; y < y1; j++, y += h) {
+        const p = [x + nudge(i, j), y + nudge(j + 101, i)];
+        if (within(p, loops[0]) && !loops.slice(1).some((l) => within(p, l)) && edgePts.every((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) > 0.6 * h)) inner.push(p);
+      }
+      const v2 = [...loops, ...inner.map((p) => [p])].map((l) => l.map(([x, y]) => new THREE.Vector2(x, y)));
+      const flat = [...loops.flat(), ...inner], tris = [], fixed = new Set();
+      let o = 0;
+      for (const l of loops) { l.forEach((_, i) => { const a = o + i, b = o + ((i + 1) % l.length); fixed.add(Math.min(a, b) + "," + Math.max(a, b)); }); o += l.length; }
+      // (a triangle still too big, halved across its longest side until it isn't)
+      const split = (a, b, c, depth) => {
+        const A = back(a), B = back(b), C = back(c), ab = len(sub(A, B)), bc = len(sub(B, C)), ca = len(sub(C, A));
+        if (depth > 16 || Math.max(ab, bc, ca) < ROUND.split) { tris.push(A, B, C); return; }
+        const m = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+        if (ab >= bc && ab >= ca) { const d = m(a, b); split(a, d, c, depth + 1); split(d, b, c, depth + 1); }
+        else if (bc >= ca) { const d = m(b, c); split(a, b, d, depth + 1); split(a, d, c, depth + 1); }
+        else { const d = m(c, a); split(a, b, d, depth + 1); split(d, b, c, depth + 1); }
+      };
+      // (facing out of the sphere: counterclockwise in the picture is out, or in if the picture's
+      // mirrored, the same all over it: tried on a tiny triangle. A thin triangle's own corners on
+      // the sphere can't say: along a curved edge they bend the other way.)
+      const z = flat[0], e = 1e-4, Z = back(z), mirrored = dot(cross(sub(back([z[0] + e, z[1]]), Z), sub(back([z[0], z[1] + e]), Z)), Z) < 0;
+      for (const [i, j, k] of delaunayFlips(flat, THREE.ShapeUtils.triangulateShape(v2[0], v2.slice(1)), fixed)) {
+        const [a, b, c] = [flat[i], flat[j], flat[k]], ccw = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]) > 0;
+        if (ccw !== mirrored) split(a, b, c, 0); else split(a, c, b, 0);
+      }
+      // the lines: a ribbon along each loop, as wide as ROUND.lineWidth
+      const lines = [];
+      for (const loop of loops) {
+        const pts = loop.map(back), n = pts.length;
+        for (let i = 0; i < n; i++) {
+          const p = pts[i], q = pts[(i + 1) % n], t = normalize(sub(q, p)), w = scale(normalize(cross(p, t)), ROUND.lineWidth / 2);
+          const w2 = scale(normalize(cross(q, t)), ROUND.lineWidth / 2);
+          const a = add(p, w), b = sub(p, w), c = add(q, w2), d = sub(q, w2);
+          lines.push(a, b, c, b, d, c);
+        }
+      }
+      return (Q.roundRegions[f] = { tris, lines });
+    }
+    const coreGeo = new THREE.SphereGeometry(0.985, 48, 32);
+    function roundPieceObject(Q, piece, colors, textures) {
+      const color = new THREE.Color(), mats = Q.group.mats;
+      const pos = [], nor = [], triPoly = [], sp = [], sn = [], sc = [], sx = [], lp = [];
+      piece.polys.forEach((poly, pi) => {
+        const m = mats[poly.x], { tris, lines } = roundRegion(Q, poly.f);
+        const placed = tris.map((v) => applyMat(m, v));
+        for (const v of placed) { pos.push(...scale(v, ROUND.body)); nor.push(...v); }
+        for (let t = 0; t < placed.length / 3; t++) triPoly.push(pi);
+        if (poly.color >= 0) {
+          color.set(colors[poly.color]);
+          const kind = textures ? textures[poly.color] : 0;
+          for (const v of placed) { sp.push(...v); sn.push(...v); sc.push(color.r, color.g, color.b); sx.push(kind); }
+        }
+        for (const v of lines) lp.push(...scale(applyMat(m, v), ROUND.line));
+      });
+      const mesh = (attrs, mat) => {
+        const g = new THREE.BufferGeometry();
+        for (const [name, data, k] of attrs) g.setAttribute(name, new THREE.Float32BufferAttribute(data, k));
+        return new THREE.Mesh(g, mat);
+      };
+      const body = mesh([["position", pos, 3], ["normal", nor, 3]], bodyMat);
+      body.userData = { triPoly };
+      const obj = new THREE.Group();
+      obj.matrixAutoUpdate = false;
+      obj.add(body);
+      obj.add(sp.length ? mesh([["position", sp, 3], ["normal", sn, 3], ["color", sc, 3], ["tex", sx, 1]], stickerMat) : new THREE.Group());
+      if (lp.length) obj.add(mesh([["position", lp, 3]], roundLineMat));
+      return obj;
+    }
+    const roundLineMat = new THREE.MeshBasicMaterial({ color: 0x0a0b0e, side: THREE.DoubleSide });
 
     // ---------- turn handles: the axes sticking out of the puzzle ----------
     // Each turn axis shows a stub past the surface at both ends, split into one segment per
@@ -1202,6 +1340,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (a hyperbolic tile puzzle, hyper.mjs: drawn in the Poincaré disk; in 3D too when it's a
     // two-holed surface, once that's laid out: see hyperShape)
     const isHyper = () => !!P && P.kind === "hyper";
+    // (a round one, sphere.mjs: a solid as far as turning goes, with curved stickers)
+    const isSphere = () => !!P && P.kind === "sphere";
     function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles" || P.kind === "hyper"); } // (hoisted: the camera asks before this line runs)
     const has3D = () => !isHyper() || !!hyperShape();
     // A hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel, the tiles laid on it ahead
@@ -1351,6 +1491,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // neighbor on top, so three faces show (for the cube: F, R and U, white up).
     // (Q: the puzzle to look at, the current one by default)
     function startView(Q = P) {
+      // a beach ball (or its two hemispheres): poles up, tipped toward you, a wedge (a corner) in front
+      if (Q.kind === "sphere" && (Q.N === 2 || Q.M === 2)) {
+        const front = Q.N === 2 ? Q.normals[0] : Q.G.corners[0], z = normalize(add(normalize([front[0], 0, front[2]]), [0, 0.85, 0]));
+        const y = normalize(sub([0, 1, 0], scale(z, z[1]))), x = cross(y, z);
+        return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().set(...x, 0, ...y, 0, ...z, 0, 0, 0, 0, 1));
+      }
       const ns = Q.normals, n0 = ns[0];
       const byAngle = (ref, list) => [...list].sort((a, b) => dot(b, ref) - dot(a, ref));
       let [a, ...rest] = byAngle(n0, ns.slice(1));
@@ -1438,12 +1584,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
       return tileCustom({ rule: "tiles", tiling: c.tiling, a: int(c.a, 1, 8, 3), b: int(c.b, 0, 8, 0), truncate, cuts, blackout });
     }
-    // a hyperbolic design from a link, its numbers kept in range (radii past a circle's cap are
-    // dropped when it's built)
+    // a hyperbolic (or round) design from a link, its numbers kept in range (radii past a circle's
+    // cap are dropped when it's built)
     function readHyperDesign(c) {
       const int = (v, lo, hi, d) => (Number.isInteger(v) ? Math.max(lo, Math.min(hi, v)) : d);
-      const N = int(c.N, 3, 12, 7), M = int(c.M, 3, 12, 3);
-      if (!isHyperbolic(N, M)) return null;
+      const N = int(c.N, 2, 12, 7), M = int(c.M, 2, 12, 3);
+      if (!isHyperbolic(N, M) && !isSpherical(N, M)) return null;
       const cuts = (Array.isArray(c.cuts) ? c.cuts : []).filter((s) => ON_NAMES[s.on])
         .map((s) => ({ on: s.on, depths: (Array.isArray(s.depths) ? s.depths : []).map(Number).filter((d) => Number.isFinite(d) && d > 0.05 && d < 5) }));
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
@@ -1515,8 +1661,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function stepEdit(from, to) {
       if (!from.length) return;
       to.push(snapshot());
-      Object.assign(custom, JSON.parse(from.pop()));
+      // (as a whole design: an edit can turn a solid into a tiling, or a torus into a ball)
+      const d = JSON.parse(from.pop());
+      custom = d.rule === "tiles" ? tileCustom(d) : d.rule === "hyper" ? hyperCustom(d) : { name: "Custom", rule: "custom", size: 2, fixed: true, ...d };
       showHistory();
+      renderParams();
       renderBuilder();
       load(false);
       computeSnaps();
@@ -1566,6 +1715,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
             if (at < 0) return;
             snaps[r][i] = hyperSnapCandidates(P, kind, at);
             work.push([r, i, hyperCountBreaks(P, kind, at, 0.05, hyperRulerMax(kind), snaps[r][i].slice())]);
+          }
+          // (a ball's: the same, on the sphere)
+          if (!t.trim && isSphere()) {
+            const kind = CUT_KINDS[t.s], at = P.radii[kind].findIndex((x) => Math.abs(x - v) < 1e-5);
+            if (at < 0) return;
+            snaps[r][i] = sphereSnapCandidates(P, kind, at);
+            work.push([r, i, sphereCountBreaks(P, kind, at, ...SPHERE_RADIUS_RANGE, snaps[r][i].slice())]);
           }
           return;
         }
@@ -1627,7 +1783,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (a tiling's radii stop where a circle would reach around the torus to overlap itself; a
       // hyperbolic one's, around its surface: the built puzzle knows how far that is)
       get range() {
-        if (isHyperDesign()) return [0.05, isHyper() ? hyperRulerMax(on) : 2];
+        if (isHyperDesign()) return isSphere() ? SPHERE_RADIUS_RANGE : [0.05, isHyper() ? hyperRulerMax(on) : 2];
         return isTileDesign() ? [TILE_CUT_RANGE[0], Math.min(TILE_CUT_RANGE[1], tileRadiusCap(custom))] : CUT_RANGE;
       },
       get center() { return !isCircleDesign(); },
@@ -1764,7 +1920,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       let v = 0.15;
       if (R.max !== 1) {
         // (a tiling's: out to the next tile's middle, or the cap; a hyperbolic one's, a tile's corners or the cap)
-        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(isHyper() ? hyperRulerMax(CUT_KINDS[r - 2], true) : 2, 1.2 * (isHyper() ? P.G.Rv : 1))] : [0, 0.95];
+        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(isHyper() ? hyperRulerMax(CUT_KINDS[r - 2], true) : isSphere() ? R.range[1] : 2, 1.2 * (isHyper() || isSphere() ? P.G.Rv : 1))] : [0, 0.95];
         const pts = [lo, ...R.values().filter((d) => d > lo && d < hi), hi].sort((a, b) => a - b);
         let gap = -1;
         for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1] - pts[k] > gap) { gap = pts[k + 1] - pts[k]; v = (pts[k] + pts[k + 1]) / 2; }
@@ -1884,16 +2040,30 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function renderBuilder() {
       // a solid, or a tile-turning design's tiling
       const tiles = isTileDesign();
-      // (a hyperbolic design's tiling is set by its steppers; and there's no truncating it yet)
+      // (a hyperbolic or round design's tiling is set by its steppers; and there's no truncating it yet)
       // (by style: the builder's sections are flex boxes, which the hidden attribute doesn't beat)
-      $("bSolid").closest("section").style.display = isHyperDesign() ? "none" : "";
       $("bTrim").closest("section").style.display = isHyperDesign() ? "none" : "";
       $("bSolidLabel").textContent = tiles ? "tiling" : "solid";
       $("bSolidLabel").title = tiles ? "the tiles on the torus before it's cut" : "the shape before it's cut";
       if (tiles) radio($("bSolid"), Object.keys(TILINGS).map((k) => [k, TILINGS[k].name + "s", `${TILINGS[k].name}s on a torus`]), custom.tiling,
         (k) => { pushUndo(); custom.tiling = k; changed(); computeSnaps(); });
-      else radio($("bSolid"), Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]), custom.solid,
-        (k) => { pushUndo(); custom.solid = k; changed(); computeSnaps(); });
+      // A solid, or {N,M}: a tiling cut by circles, M N-gons at each corner (a solid's own {N,M} to
+      // start: the cube's is {4,3}), round, flat or hyperbolic by its steppers. Its circles start as
+      // a preset's, as a solid's depths aren't radii; and back to a solid, the cuts start over too.
+      else radio($("bSolid"), [...Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]),
+        ["nm", "{N,M}", "a tiling of N-gons, M at each corner, cut by circles: on a ball (where the tiles are a solid's faces, and more: a beach ball's wedges), on a torus, or on a hyperbolic surface"]],
+        isHyperDesign() ? "nm" : custom.solid,
+        (k) => {
+          pushUndo();
+          if (k === "nm") {
+            const [N, M] = { tetrahedron: [3, 3], octahedron: [3, 4], dodecahedron: [5, 3], icosahedron: [3, 5] }[custom.solid] || [4, 3];
+            custom = hyperCustom({ rule: "hyper", N, M, surface: 0, cuts: roundCuts(N, M), blackout: [] });
+          } else if (isHyperDesign()) custom = { name: "Custom", rule: "custom", size: 2, fixed: true, solid: k, truncate: {}, cuts: threeSets([{ on: "face", depths: [0.33] }]), blackout: [] };
+          else custom.solid = k;
+          renderParams();
+          changed();
+          computeSnaps();
+        });
       renderRulers();
     }
     // The solid or cuts changed. rerender: rebuild the builder's controls too (not while a
@@ -1917,15 +2087,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         $("bStats").innerHTML = `${st.pieces} pieces<br>smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
         return;
       }
-      const st = puzzleStats(P);
+      const st = isSphere() ? sphereStats(P) : puzzleStats(P);
       const pct = st.smallest * 100;
-      $("bStats").title = "how many pieces show, and the smallest sticker as a share of its face (red: slivers)";
+      $("bStats").title = `how many pieces show, and the smallest sticker as a share of its ${isSphere() ? "tile" : "face"} (red: slivers)`;
       $("bStats").innerHTML = `${st.pieces} pieces<br>smallest ` +
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 
     // the menu: the 3D presets, then the sliding ones, then the tile-turning ones
-    const MENU = [...PRESETS, ...PLANAR_PRESETS, ...TILE_PRESETS, ...HYPER_PRESETS];
+    const MENU = [...PRESETS, ...PLANAR_PRESETS, ...TILE_PRESETS, ...HYPER_PRESETS, ...ROUND_PRESETS];
     let presetIdx = 0, size = MENU[0].size;
     // a family's own numbers (a cuboid's lengths, a prism's sides), over the preset's defaults
     let paramVals = {};
@@ -1948,25 +2118,63 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const hyperFileFor = (spec) => hyperFiles.get(`${spec.N}-${spec.M}`);
     // whether there are surfaces for M N-gons at a corner (before the index is in: whether it's hyperbolic)
     const hyperHas = (N, M) => (hyperIndex ? !!hyperIndex[`${N},${M}`] : isHyperbolic(N, M));
-    // a hyperbolic puzzle's steppers: sides and tiles at a corner, then its surfaces by size
+    // The same steppers reach the round tilings ({N,M} with 1/N + 1/M > 1/2): those build a ball
+    // (sphere.mjs), its circles' radii angles. A preset's circle is worked out for the tiling, as on
+    // the hyperbolic ones: round each tile, a bit past its corners.
+    const isRound = (spec) => spec.rule === "hyper" && isSpherical(spec.N, spec.M);
+    // And the flat ones: the torus puzzles (tiles.mjs), by their tiling. So every tile-turning
+    // puzzle has the sides and at-a-corner steppers, and stepping them goes wherever {N,M} is: a
+    // ball, a torus or a hyperbolic surface (see stepTiling).
+    const FLAT = { "6,3": "hex", "4,4": "square", "3,6": "triangle" };
+    const tilingNM = (spec) => (spec.rule === "tiles" ? { hex: { N: 6, M: 3 }, square: { N: 4, M: 4 }, triangle: { N: 3, M: 6 } }[spec.tiling] : { N: spec.N, M: spec.M });
+    const specValue = (spec, key) => (key === "N" || key === "M" ? tilingNM(spec)[key] : spec[key]);
+    // (a tile's middle to its corner, in its own geometry's distance: a flat one's in tile spacings)
+    const cornerRadius = (N, M) => (FLAT[`${N},${M}`] ? { hex: 1 / Math.sqrt(3), square: Math.SQRT1_2, triangle: 1 / Math.sqrt(3) }[FLAT[`${N},${M}`]]
+      : isSpherical(N, M) ? sphereGeometry(N, M).Rv : hyperGeometry(N, M).Rv);
+    // Changing sides or tiles at a corner: the other one moves up until there's a puzzle for it (a
+    // hyperbolic tiling with no surfaces here has none). A preset goes to its family's for the new
+    // tiling (the torus puzzle round each tile; the beach ball's or the Klein quartic's preset,
+    // which work out their circle for any tiling); a design keeps its circles, the same size to the
+    // tiles (a radius in corner radii), and a torus design its truncation.
+    function stepTiling(key, v) {
+      const s = currentSpec(), cur = tilingNM(s), next = { ...cur, [key]: v }, other = key === "N" ? "M" : "N";
+      const ok = (t) => isSpherical(t.N, t.M) || !!FLAT[`${t.N},${t.M}`] || hyperHas(t.N, t.M);
+      while (!ok(next) && next[other] < 12) next[other]++;
+      if (!ok(next)) return;
+      const flat = FLAT[`${next.N},${next.M}`];
+      if (isCustom()) {
+        pushUndo();
+        const k = cornerRadius(next.N, next.M) / cornerRadius(cur.N, cur.M), cuts = custom.cuts.map((c) => ({ ...c, depths: c.depths.map((d) => d * k) }));
+        custom = flat ? tileCustom({ rule: "tiles", tiling: flat, ...(custom.rule === "tiles" ? { a: custom.a, b: custom.b } : TILE_SIZES[flat]), truncate: custom.rule === "tiles" ? custom.truncate : {}, cuts, blackout: [] })
+          : hyperCustom({ rule: "hyper", N: next.N, M: next.M, surface: 0, cuts, blackout: [] });
+        changed();
+        computeSnaps();
+      } else {
+        if (flat) { presetIdx = MENU.findIndex((p) => p.id === `tiles-${flat}`); paramVals = {}; }
+        else {
+          if (s.rule !== "hyper") presetIdx = MENU.findIndex((p) => p.id === (isSpherical(next.N, next.M) ? "ball-beach" : "hyper-klein"));
+          paramVals = { N: next.N, M: next.M, surface: 0 };
+        }
+        size = currentSpec().size;
+        load(); // (new shape: new starting view)
+      }
+      renderParams();
+    }
+    const roundSpec = (spec) => ({ N: spec.N, M: spec.M, cuts: spec.autoCut ? roundCuts(spec.N, spec.M) : spec.cuts, blackout: spec.blackout || [] });
+    // a hyperbolic puzzle's steppers: sides and tiles at a corner, then its surfaces by size (a ball
+    // has just the one)
     function hyperParams(spec) {
+      if (isRound(spec)) return [HYPER_PARAMS[0], HYPER_PARAMS[1]];
       const file = hyperFileFor(spec), list = file ? hyperSurfaces(file) : [];
       return [HYPER_PARAMS[0], HYPER_PARAMS[1], { ...HYPER_PARAMS[2], options: list.map((_, i) => [String(i), surfaceLabel(list, i)]) }];
     }
-    // changing sides or tiles at a corner: the other one moves up until there are surfaces
-    // (a flat or round tiling has none here), and the size goes back to the smallest
-    function hyperStep(spec, key, v) {
-      const next = { ...spec, [key]: v, surface: 0 }, other = key === "N" ? "M" : "N";
-      while (!hyperHas(next.N, next.M) && next[other] < 12) next[other]++;
-      return hyperHas(next.N, next.M) ? next : null;
-    }
-
     // One −/+ row per number the family has, built like the size control.
     function renderParams() {
       const spec = currentSpec(), host = $("paramControls");
       host.replaceChildren();
-      // (a tile-turning design keeps its torus's steppers, a hyperbolic one its tiling's and size)
-      const params = spec.rule === "hyper" ? hyperParams(spec) : spec.params;
+      // (a tile-turning design keeps its torus's steppers, a hyperbolic one its tiling's and size;
+      // a torus its tiling's sides and tiles at a corner too, the same as the others')
+      const params = spec.rule === "hyper" ? hyperParams(spec) : spec.rule === "tiles" ? [HYPER_PARAMS[0], HYPER_PARAMS[1], ...spec.params] : spec.params;
       for (const q of ((!isCustom() || isTileDesign() || spec.rule === "hyper") && params) || []) {
         const row = document.createElement("div");
         row.className = "control";
@@ -1992,22 +2200,21 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (q.title) row.querySelector(".name").title = q.title;
         const [down, up] = row.querySelectorAll("button"), input = row.querySelector("input");
         const max = q.max ?? Infinity;
-        input.min = q.min; if (q.max !== undefined) input.max = q.max; input.value = spec[q.key];
+        input.min = q.min; if (q.max !== undefined) input.max = q.max; input.value = specValue(spec, q.key);
         input.setAttribute("aria-label", q.label);
         const set = (v) => {
-          v = Number.isFinite(v) ? Math.max(q.min, Math.min(max, Math.round(v))) : currentSpec()[q.key];
-          if (v !== currentSpec()[q.key]) {
-            // (a hyperbolic tiling: the other number follows, so there are surfaces for it)
-            const next = currentSpec().rule === "hyper" ? hyperStep(currentSpec(), q.key, v) : { [q.key]: v };
-            if (next && isCustom()) { pushUndo(); Object.assign(custom, { N: next.N ?? custom.N, M: next.M ?? custom.M, surface: next.surface ?? custom.surface, [q.key]: v }); changed(); } // (a design's: an edit, undoable)
-            else if (next) { for (const k of currentSpec().rule === "hyper" ? ["N", "M", "surface"] : [q.key]) paramVals[k] = next[k]; load(); } // new shape: new starting view
+          v = Number.isFinite(v) ? Math.max(q.min, Math.min(max, Math.round(v))) : specValue(currentSpec(), q.key);
+          if (v !== specValue(currentSpec(), q.key)) {
+            if (q.key === "N" || q.key === "M") { stepTiling(q.key, v); return; } // (the tiling: maybe another kind of puzzle)
+            if (isCustom()) { pushUndo(); custom[q.key] = v; changed(); } // (a design's: an edit, undoable)
+            else { paramVals[q.key] = v; load(); } // new shape: new starting view
           }
           renderParams();
         };
-        down.disabled = spec[q.key] <= q.min; up.disabled = spec[q.key] >= max;
+        down.disabled = specValue(spec, q.key) <= q.min; up.disabled = specValue(spec, q.key) >= max;
         down.title = `one fewer (${q.label})`; up.title = `one more (${q.label})`;
-        down.onclick = () => set(currentSpec()[q.key] - 1);
-        up.onclick = () => set(currentSpec()[q.key] + 1);
+        down.onclick = () => set(specValue(currentSpec(), q.key) - 1);
+        up.onclick = () => set(specValue(currentSpec(), q.key) + 1);
         input.onchange = () => set(+input.value);
         host.append(row);
       }
@@ -2043,12 +2250,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (fit.a !== spec.a) { paramVals.a = fit.a; spec = currentSpec(); renderParams(); }
         }
       }
-      if (spec.rule === "hyper" && !hyperFileFor(spec)) {
+      if (spec.rule === "hyper" && !isRound(spec) && !hyperFileFor(spec)) {
         // (its surfaces aren't in yet: fetch them, then come back; the puzzle showing stays till then)
         fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); if (isCustom()) computeSnaps(); }).catch((err) => console.error(err));
         return;
       }
-      let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
+      let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : isRound(spec) ? buildSphere(roundSpec(spec))
+        : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
       if (spec.rule === "hyper" && isCustom() && next.shrunk) {
         // (a design's circles too big for this surface, or too many to work out, came in till they
         // fit: the design takes them as built, and its rulers show them, unless one's being dragged)
@@ -2080,9 +2288,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         refG = 0;
         updateReferenceTarget(true);
       }
-      puzzleName = isHyper() ? `${P.tiles} ${P.N}-gons, ${P.M} at a corner` : puzzleTitle(spec, size);
+      puzzleName = isHyper() || isSphere() ? `${P.tiles} ${P.N === 2 ? "digon" : `${P.N}-gon`}s, ${P.M} at a corner` : puzzleTitle(spec, size);
       // (the picker: just the puzzle, its numbers are in the steppers under it)
-      nx.pickName.textContent = isCustom() ? "Custom" : spec.name;
+      // (an {N,M} preset stepped to another tiling isn't the one it's named for: named by its tiling)
+      const own = MENU[presetIdx] || {};
+      nx.pickName.textContent = isCustom() ? "Custom" : spec.rule === "hyper" && (spec.N !== own.N || spec.M !== own.M) ? `{${spec.N},${spec.M}} Tiling` : spec.name;
       $("size").value = size;
       $("sizeDown").disabled = size <= 0;
       $("sizeControl").hidden = !!spec.fixed;
@@ -2132,7 +2342,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function customizePreset() {
       resetEdits();
       if (isTiles()) custom = tileCustom(tileDesign(currentSpec()));
-      else if (isHyper()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: P.spec.cuts, blackout: [] }); } // (the built cuts: a preset's circle is sized for its tiling)
+      else if (isHyper() || isSphere()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: P.spec.cuts, blackout: [] }); } // (the built cuts: a preset's circle is sized for its tiling)
       else {
         custom = toCustom(P);
         custom.cuts = threeSets(custom.cuts);
@@ -2414,7 +2624,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const poly = P.pieces[i].polys[hit.object.userData.triPoly[hit.faceIndex]];
         const point = puzzleGroup.worldToLocal(hit.point.clone());
         drag = { mode: "press", x: e.clientX, y: e.clientY, piece: i, point: [point.x, point.y, point.z],
-                 normal: applyMat(P.group.mats[state[i]], poly.normal) };
+                 // (on a round puzzle, straight out from the ball where it's pressed)
+                 normal: isSphere() ? normalize([point.x, point.y, point.z]) : applyMat(P.group.mats[state[i]], poly.normal) };
       } else {
         drag = { mode: "orbit", x: e.clientX, y: e.clientY };
       }
@@ -4465,7 +4676,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
       if (spec.rule === "tiles") return { hex: "hexagon tilings", square: "square tilings", triangle: "triangle tilings" }[spec.tiling];
-      if (spec.rule === "hyper") return "hyperbolic tilings";
+      if (spec.rule === "hyper") return isRound(spec) ? "round tilings" : "hyperbolic tilings";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
       if (spec.truncate) return "other solids"; // (a truncated solid isn't its base's shape: the soccer ball)
       return { cube: "cubes", tetrahedron: "tetrahedra", octahedron: "octahedra", dodecahedron: "dodecahedra", icosahedron: "icosahedra" }[spec.solid] || "other solids";
@@ -4485,7 +4696,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         v.draw(solvedTileState(Q), null, { hover: null, lit: null });
         return (nxThumbs[spec.id] = cv.toDataURL());
       }
-      if (spec.rule === "hyper") {
+      if (spec.rule === "hyper" && !isRound(spec)) {
         // the disk, solved
         new HyperView(cv).drawSolvedCard(buildHyper(spec, hyperFileFor(spec)), {}, 4);
         return (nxThumbs[spec.id] = cv.toDataURL());
@@ -4518,9 +4729,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const tilt = { torus: [0.55, 0], klein: [0.15, 0.45], rp2: [0, 0] }[topology];
         sc.root.quaternion.setFromEuler(new THREE.Euler(tilt[0], tilt[1], 0));
       } else {
-        const Q = buildPuzzle(spec, spec.size);
+        const Q = isRound(spec) ? buildSphere(roundSpec(spec)) : buildPuzzle(spec, spec.size);
         group.scale.setScalar(1 / Q.R);
-        for (const p of Q.pieces) { const o = pieceObject(p, Q.colors, null, 0.028 * Q.R, 0.004 * Q.R); vizPlace(o, Q.group.mats[0]); group.add(o); }
+        if (isRound(spec)) group.add(new THREE.Mesh(new THREE.SphereGeometry(0.985, 48, 32), bodyMat)); // (its own: the group's geometry is thrown away after)
+        for (const p of Q.pieces) { const o = pieceObject(p, Q.colors, null, 0.028 * Q.R, 0.004 * Q.R, Q); vizPlace(o, Q.group.mats[0]); group.add(o); }
         sc.root.quaternion.copy(startView(Q)); // (as it opens: three faces showing, not one face-on)
       }
       sc.cam.aspect = 1; sc.cam.position.set(0, 0, 4.6); sc.cam.updateProjectionMatrix();
@@ -4574,7 +4786,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (nx.shelf.hidden || !pending.length) return;
         const [spec, img] = pending.shift();
         // (a hyperbolic one's surfaces may not be in yet: its picture follows them)
-        if (spec.rule === "hyper" && !hyperFileFor(spec)) fetchHyper(spec.N, spec.M).then(() => { img.src = nxThumb(spec); }).catch(() => {});
+        if (spec.rule === "hyper" && !isRound(spec) && !hyperFileFor(spec)) fetchHyper(spec.N, spec.M).then(() => { img.src = nxThumb(spec); }).catch(() => {});
         else try { img.src = nxThumb(spec); } catch { /* (a puzzle too big to picture quickly) */ }
         requestAnimationFrame(next);
       };
@@ -4666,14 +4878,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // the pieces (planar: cells) lit by hovering an algorithm's play or reverse button, or null
       lit() { return algLit ? [...algLit].sort((a, b) => a - b) : null; },
       // what the main renderer holds on the GPU (for catching leaks)
-      gpu() { return { ...renderer.info.memory, programs: renderer.info.programs.length }; },
+      gpu() {
+        let triangles = 0; // (the puzzle's meshes': what a frame draws, about)
+        if (puzzleGroup) puzzleGroup.traverse((o) => { if (o.isMesh && o.visible) triangles += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; });
+        return { ...renderer.info.memory, programs: renderer.info.programs.length, triangles };
+      },
       // pick a puzzle by preset id, like the menu, then optionally its size and a family's
       // own numbers (params: { sides: 5 }, { a: 2, b: 3, c: 4 })
       // (a hyperbolic puzzle builds once its surfaces are fetched: wait till the one asked for is up)
       async settled() {
         for (const t0 = performance.now(); performance.now() - t0 < 10000;) {
           const s = currentSpec();
-          if (s.rule !== "hyper" || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
+          if (s.rule !== "hyper" || (isRound(s) && isSphere() && P.N === s.N && P.M === s.M) || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
           await new Promise((r) => setTimeout(r, 25));
         }
         const s = currentSpec();
@@ -4722,6 +4938,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
                 kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}), hover: tileHover && tileHover.axis,
                 sizes: hyperSurfaces(hyperFileFor(P.spec)).map((s) => s.tiles), panned: hyperView.start ? hyperView.start.e !== 0 || Math.hypot(...mobius.apply(hyperView.start.m, [0, 0])) > 1e-6 : false,
                 surface3D: has3D(), views: { flat: viewFlat, surface: view3D } }
+            : isSphere()
+            ? { sphere: true, N: P.N, M: P.M, tiles: P.tiles, pieces: P.n, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })),
+                kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}) }
             : { pieces: P.pieces.length, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })) }),
           solved: solvedAny(state), scrambled, idle: !anim && !queue.length,
           moves: history.movesDone, canUndo: history.canUndo, canRedo: history.canRedo,
@@ -4802,7 +5021,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         P.pieces.forEach((piece, i) => {
           const M = P.group.mats[state[i]];
           for (const st of piece.stickers) {
-            const c = applyMat(M, scale(st.verts.reduce(add, [0, 0, 0]), 1 / st.verts.length));
+            // (a round puzzle's sticker: a point inside it on the ball, which is also its normal)
+            const c = applyMat(M, st.verts ? scale(st.verts.reduce(add, [0, 0, 0]), 1 / st.verts.length) : st.normal);
             const n = new THREE.Vector3(...applyMat(M, st.normal)).applyQuaternion(root.quaternion);
             const w = new THREE.Vector3(...c); puzzleGroup.localToWorld(w);
             if (n.dot(toCam.copy(cam.position).sub(w).normalize()) < 0.3) continue;
@@ -4823,7 +5043,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     resize();
     applyURL();
     // (a hyperbolic puzzle's surfaces first: there's nothing to show till they're in)
-    if (currentSpec().rule === "hyper") await fetchHyper(currentSpec().N, currentSpec().M).catch((err) => { console.error(err); presetIdx = 0; paramVals = {}; });
+    if (currentSpec().rule === "hyper" && !isRound(currentSpec())) await fetchHyper(currentSpec().N, currentSpec().M).catch((err) => { console.error(err); presetIdx = 0; paramVals = {}; });
     renderParams();
     load();
     // (a share link opens in the editor, with its rulers' marks worked out on the puzzle just built:

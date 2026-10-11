@@ -158,7 +158,7 @@ test("dragging away from the circles slides the plane, and turns nothing", async
   expect(s).toMatchObject({ panned: true, moves: 0, solved: true });
 });
 
-test("customize: the circles' rulers (no solid, no truncation), a corner circle, a share link back, blacking out", async ({ page }) => {
+test("customize: the circles' rulers ({N,M} picked over the solids, no truncation), a corner circle, a share link back, blacking out", async ({ page }) => {
   // (on the 6 octagons: a corner circle on the Klein quartic makes 668 pieces, slow to build and
   // reload under a loaded run)
   await pick(page, "hyper-octagons");
@@ -166,7 +166,7 @@ test("customize: the circles' rulers (no solid, no truncation), a corner circle,
   await page.click("#customize");
   let s = await settled(page);
   expect(s).toMatchObject({ id: "custom", hyper: true, pieces: 46 });
-  await expect(page.locator("#bSolid")).toBeHidden();
+  await expect(page.locator("#bSolid button", { hasText: "{N,M}" })).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("#bTrim")).toBeHidden();
   await expect(page.locator("#bStats")).toContainText("46 pieces");
   // (+ cut on the corners' ruler: more pieces, and the corners turn in thirds)
@@ -209,7 +209,7 @@ test("nudging a cut redraws it, even when the pieces count stays the same", asyn
   expect(await picture()).not.toBe(before);
 });
 
-test("sides and tiles at a corner: the other one follows to a hyperbolic tiling; the size menu lists its surfaces", async ({ page }) => {
+test("sides and tiles at a corner: the size menu lists a tiling's surfaces; a flat tiling is its torus puzzle", async ({ page }) => {
   await pick(page, "hyper-klein");
   await settled(page);
   await page.locator("#paramControls .control").nth(0).locator("button").nth(1).click(); // (sides +1: 8)
@@ -218,11 +218,11 @@ test("sides and tiles at a corner: the other one follows to a hyperbolic tiling;
   await page.locator("#paramControls select").selectOption("1");
   s = await settled(page);
   expect(s.tiles).toBe(12);
-  // (down to 6 sides: 3 at a corner is flat, so the corners go up to 4)
+  // (down to 6 sides: 3 at a corner is flat, the hexagons' torus)
   await page.locator("#paramControls .control").nth(0).locator("button").nth(0).click();
+  await settled(page);
   await page.locator("#paramControls .control").nth(0).locator("button").nth(0).click();
-  s = await settled(page);
-  expect(s).toMatchObject({ N: 6, M: 4 });
+  await expect.poll(async () => (await info(page)).tiling).toBe("hex");
 });
 
 // (the marks were worked out when the link was read, before the puzzle was built, so a design

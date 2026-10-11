@@ -153,8 +153,10 @@ function axisPoints(G, H, d) {
 
 // ---- presets and parameters
 export const HYPER_PARAMS = [
-  { key: "N", label: "sides", min: 3, max: 12, title: "how many sides each tile has" },
-  { key: "M", label: "at a corner", min: 3, max: 12, title: "how many tiles meet at each corner" },
+  // (down to 2: few enough tiles round a corner, or sides, make a ball, see sphere.mjs; 2 sides is a
+  // beach ball's wedge)
+  { key: "N", label: "sides", min: 2, max: 12, title: "how many sides each tile has" },
+  { key: "M", label: "at a corner", min: 2, max: 12, title: "how many tiles meet at each corner" },
   { key: "surface", label: "size", min: 0, title: "which closed surface the tiling wraps onto: a tiling has only a few, fewest tiles first" },
 ];
 // (surface: an index into the tiling's two-sided surfaces, fewest tiles first. autoCut: the

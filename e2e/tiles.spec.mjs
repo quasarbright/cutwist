@@ -149,7 +149,7 @@ test("textures: off up to 12 tiles, on from 13; the button toggles them and goes
 // ---- customizing: the solids' editor, on a tiling ----
 const block = (page, group, name) => page.locator(`#${group} .tw-rblock`).filter({ has: page.locator(".tw-rname", { hasText: new RegExp(`^${name}$`) }) });
 
-test("customize opens the editor on the tiling: tilings for solids, the same rulers, the torus's steppers", async ({ page }) => {
+test("customize opens the editor on the tiling: tilings for solids, the same rulers, the torus's and the tiling's steppers", async ({ page }) => {
   await load(page, "hex", { a: 3, b: 0 });
   await page.click(".nx-custombtn");
   const s = await info(page);
@@ -157,7 +157,7 @@ test("customize opens the editor on the tiling: tilings for solids, the same rul
   await expect(page.locator("#bSolidLabel")).toHaveText("tiling");
   await expect(page.locator("#bSolid").getByRole("radio", { name: "hexagons" })).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("#bStats")).toContainText("54 pieces");
-  await expect(page.locator("#paramControls .control")).toHaveCount(2); // (size and skew)
+  await expect(page.locator("#paramControls .control")).toHaveCount(4); // (sides, at a corner, size and skew)
   // another tiling, then undo
   await page.locator("#bSolid").getByRole("radio", { name: "squares" }).click();
   expect((await info(page)).tiling).toBe("square");

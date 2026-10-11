@@ -79,7 +79,7 @@ const PARAMS = [
   { key: "b", label: "skew", min: 0, max: 8, title: "how many more tiles the step takes after turning (0: straight across; otherwise the torus twists, and swapping size and skew mirrors it)" },
 ];
 // (hexagons: (2, 2), 12 of them, roomy enough for turns that don't touch)
-const SIZES = { hex: { a: 2, b: 2 }, square: { a: 3, b: 0 }, triangle: { a: 2, b: 0 } };
+export const SIZES = { hex: { a: 2, b: 2 }, square: { a: 3, b: 0 }, triangle: { a: 2, b: 0 } };
 const tilePreset = (id, name, tiling, cuts) => ({
   id, name, rule: "tiles", size: 2, fixed: true, tiling, ...SIZES[tiling], truncate: {}, cuts, params: PARAMS,
   title: (n, s) => `${tileCount(s)} ${TILINGS[s.tiling].name}s on a torus`,

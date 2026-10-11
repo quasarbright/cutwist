@@ -1,0 +1,102 @@
+// Unit tests for the round tile-turning puzzles (sphere.mjs), played with puzzle.mjs's moves.
+// Run: node --test
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { buildSphere, sphereGeometry, sphereGroup, isSpherical, sphereStats, regionArea } from "./sphere.mjs";
+import { solvedState, applyMove, inverseMove, isSolved, scrambleMoves, piecesInLayer, applyMat, mulMat, dot } from "./puzzle.mjs";
+
+const TILINGS = [[3, 3], [4, 3], [3, 4], [5, 3], [3, 5], [2, 3], [2, 6], [3, 2], [6, 2]];
+function seeded(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32); }
+const kinds = (P) => P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {});
+const build = (N, M, cuts) => buildSphere({ N, M, cuts, blackout: [] });
+const play = (P, moves, s = solvedState(P)) => { for (const m of moves) applyMove(P, s, m); return s; };
+
+test("which tilings are round", () => {
+  for (const [N, M] of TILINGS) assert.ok(isSpherical(N, M), `{${N},${M}}`);
+  for (const [N, M] of [[2, 2], [4, 4], [6, 3], [3, 6], [7, 3], [1, 5]]) assert.ok(!isSpherical(N, M), `{${N},${M}}`);
+});
+
+test("each tiling's group: 2 × its edges, with R^N = S^M = (RS)² = 1", () => {
+  for (const [N, M] of TILINGS) {
+    const G = sphereGeometry(N, M), H = sphereGroup(N, M), I = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const pow = (X, n) => Array.from({ length: n }, () => X).reduce(mulMat, I);
+    const same = (A, B) => A.every((x, i) => Math.abs(x - B[i]) < 1e-9);
+    assert.ok(same(pow(G.R, N), I) && same(pow(G.S, M), I) && same(pow(mulMat(G.R, G.S), 2), I), `{${N},${M}}`);
+    assert.equal(H.n, 2 * H.points.edge.length, `{${N},${M}}`);
+    assert.equal(H.normals.length * N, 2 * H.points.edge.length, `{${N},${M}}`); // (every tile has N edges, each shared by two)
+    assert.equal(H.points.vertex.length * M, 2 * H.points.edge.length, `{${N},${M}}`);
+  }
+});
+
+test("a Platonic tiling sits on its solid, tile k on face k", () => {
+  const H = sphereGroup(4, 3);
+  assert.deepEqual(H.normals.map((v) => v.map((x) => Math.round(x))), [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]);
+  assert.equal(build(4, 3, []).colors[2], "#f4f4ee"); // (white on top)
+});
+
+test("a cube with circles round its faces past the corners: a 3×3×3's 26 pieces", () => {
+  const P = build(4, 3, [{ on: "face", depths: [1.1] }]);
+  assert.deepEqual(kinds(P), { 1: 6, 2: 12, 3: 8 });
+  assert.equal(P.axes.length, 3);
+  assert.ok(P.axes.every((a) => a.order === 4 && a.layers === 3));
+});
+
+test("the beach ball and the two hemispheres", () => {
+  // circles round the poles: two caps and the band between (every wedge in each)
+  assert.deepEqual(kinds(build(2, 6, [{ on: "vertex", depths: [0.8] }])), { 6: 3 });
+  // a small circle round each wedge's middle: a piece each, and the rest of the ball
+  assert.deepEqual(kinds(build(2, 6, [{ on: "face", depths: [0.4] }])), { 1: 6, 6: 1 });
+  // circles round the equator's corners, overlapping their neighbors: lenses and what's left of
+  // each cap, both across the equator, and the two polar caps
+  const P = build(6, 2, [{ on: "vertex", depths: [0.8] }]);
+  assert.deepEqual(kinds(P), { 1: 2, 2: 12 });
+  assert.ok(P.axes.every((a) => a.order === 2));
+});
+
+test("the circles' pieces are the sphere's: the pieces' stickers cover every tile exactly once, and a piece is inside the same circles all over", () => {
+  for (const [N, M] of TILINGS) {
+    const G = sphereGeometry(N, M);
+    const P = build(N, M, [{ on: "face", depths: [1.1 * G.Rv] }, { on: "vertex", depths: [0.6 * G.Ri + 0.1] }, { on: "edge", depths: [0.45] }]);
+    const area = new Array(P.tiles).fill(0);
+    for (const pc of P.pieces) {
+      const sig = (x, f) => P.caps.map((k) => dot(k.p, applyMat(P.H.mats[x], P.regions[f].at)) > k.c).join();
+      const s0 = sig(pc.frags[0].x, pc.frags[0].f);
+      for (const { x, f } of pc.frags) assert.equal(sig(x, f), s0, `{${N},${M}}`);
+      for (const s of pc.stickers) area[s.color] += regionArea(P, s.f);
+    }
+    for (const a of area) assert.ok(Math.abs(a - (4 * Math.PI) / P.tiles) < 1e-4, `{${N},${M}}: a tile's stickers add up to ${a}`);
+  }
+});
+
+test("a turn's order is no change, and scrambles undo exactly", () => {
+  for (const [N, M] of TILINGS) {
+    const G = sphereGeometry(N, M);
+    const P = build(N, M, [{ on: "face", depths: [1.15 * G.Rv] }, { on: "vertex", depths: [0.5] }]);
+    for (let axis = 0; axis < P.axes.length; axis++) {
+      const ax = P.axes[axis], s = play(P, [{ axis, layer: ax.layers - 1, q: 1 }]);
+      play(P, Array(ax.order - 1).fill({ axis, layer: ax.layers - 1, q: 1 }), s);
+      assert.ok(s.every((v) => v === 0), `{${N},${M}} axis ${axis}`);
+    }
+    const moves = scrambleMoves(P, 60, seeded(5)), s = play(P, moves);
+    assert.equal(isSolved(P, s), false, `{${N},${M}}`);
+    play(P, moves.slice().reverse().map((m) => inverseMove(P, m)), s);
+    assert.ok(isSolved(P, s) && s.every((v) => v === 0), `{${N},${M}}`);
+  }
+});
+
+test("a turn moves the pieces in its cap, and they land on pieces' places", () => {
+  const P = build(4, 3, [{ on: "face", depths: [1.1] }]), s = solvedState(P);
+  const top = P.axes.findIndex((a) => Math.abs(a.dir[1]) > 0.99), layer = P.axes[top].dir[1] > 0 ? 2 : 0;
+  assert.equal(piecesInLayer(P, s, top, layer).length, 9);
+  applyMove(P, s, { axis: top, layer, q: 1 });
+  assert.equal(isSolved(P, s), false);
+  // (every piece's middle, turned, is some piece's middle)
+  const mids = P.pieces.map((pc) => pc.centroid);
+  P.pieces.forEach((pc, i) => { const c = applyMat(P.group.mats[s[i]], pc.centroid); assert.ok(mids.some((m) => Math.hypot(m[0] - c[0], m[1] - c[1], m[2] - c[2]) < 1e-9)); });
+});
+
+test("blacking out a kind takes its stickers off", () => {
+  const P = build(4, 3, [{ on: "face", depths: [1.1] }]), corner = P.types[P.pieces.findIndex((pc) => pc.kind === 3)];
+  const Q = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [1.1] }], blackout: [corner] });
+  assert.equal(sphereStats(Q).pieces, 26 - 8);
+});
