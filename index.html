@@ -1495,9 +1495,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       statusText = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
-        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
+        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() || isSphere() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
         : isPlanar() ? "drag a row or column to slide it"
         : isTiles() ? "drag a circle · tap a tile's middle"
+        : isSphere() ? "drag a circle · tap its middle · drag outside to rotate"
         : isHyper() ? "drag a circle · tap a tile's middle · drag elsewhere to slide"
         : "drag a sticker to turn · drag outside to rotate";
       nxRenderTape(solved);
@@ -2608,11 +2609,77 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       return best;
     }
 
+    // ---------- round puzzles: circles to drag, as on the flat and hyperbolic tilings ----------
+    // Press a circle's line and drag: the ring just inside it turns after the pointer, round the
+    // circle's middle, and snaps to whole steps on release. Tap a middle (where circles are centered)
+    // to turn its innermost ring a step (left clockwise, right counterclockwise, as seen from there).
+    // Anywhere else on the ball, a sticker drag still turns, as on the solids.
+    // where the pointer is on the ball (in the puzzle's frame), or null: where its ray meets the ball
+    function ballPoint(x, y) {
+      ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, inputCam);
+      const o = puzzleGroup.worldToLocal(raycaster.ray.origin.clone()), e = puzzleGroup.worldToLocal(raycaster.ray.origin.clone().add(raycaster.ray.direction));
+      const O = [o.x, o.y, o.z], d = normalize([e.x - o.x, e.y - o.y, e.z - o.z]), b = dot(O, d), disc = b * b - (dot(O, O) - 1);
+      if (disc < 0) return null;
+      const t = -b - Math.sqrt(disc);
+      return t > 0 ? normalize(add(O, scale(d, t))) : null;
+    }
+    // (screen px per radian along the ball at p)
+    function pxPerRadian(p) {
+      const t = normalize(cross(p, Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), a = toScreen(p), b = toScreen(normalize(add(p, scale(t, 0.01))));
+      return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.01;
+    }
+    const angleTo = (p, q) => Math.acos(Math.max(-1, Math.min(1, dot(p, q))));
+    // The circle whose line is nearest p, within tol px: { axis, layer (the ring just inside it: on
+    // the side of the smaller of the two caps it bounds), px }; or null. Every circle is a plane cut
+    // x·dir = offset of an axis (see sphere.mjs).
+    function roundCircleAt(p, tol = 10) {
+      const k = pxPerRadian(p);
+      let best = null;
+      P.axes.forEach((ax, axis) => {
+        const a = angleTo(p, ax.dir);
+        ax.offsets.forEach((o, j) => {
+          const px = Math.abs(a - Math.acos(o)) * k, layer = o >= 0 ? j + 1 : j;
+          if (px <= tol && (!best || px < best.px) && !ax.empty[layer]) best = { axis, layer, px };
+        });
+      });
+      return best;
+    }
+    // The middle a tap at p turns, or null: { axis, layer (the innermost ring there), end (+1: the
+    // axis's own way, −1: the other) }. A middle's zone: half its smallest circle, and no more than
+    // a third of the way to the nearest other axis's middle.
+    function roundMiddleAt(p) {
+      let best = null;
+      const ends = P.axes.flatMap((ax, axis) => [1, -1].map((end) => ({ axis, end, at: scale(ax.dir, end) })));
+      for (const { axis, end, at } of ends) {
+        const ax = P.axes[axis], radii = ax.offsets.map((o) => end * o).filter((o) => o > 0).map(Math.acos);
+        if (!radii.length) continue;
+        const near = Math.min(...ends.filter((q) => q.axis !== axis).map((q) => angleTo(at, q.at)));
+        const zone = Math.min(0.5 * Math.min(...radii), near / 3), d = angleTo(p, at), layer = end > 0 ? ax.layers - 1 : 0;
+        if (d < zone && (!best || d < best.d) && !ax.empty[layer]) best = { axis, layer, end, d };
+      }
+      return best;
+    }
+    // the pointer's angle round an axis, counterclockwise looking down it (as rotMat turns)
+    function angleAbout(p, dir) {
+      const u = normalize(cross(dir, Math.abs(dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(dir, u);
+      return Math.atan2(dot(p, v), dot(p, u));
+    }
+    // hovering: the ring a press would grab (or the middle a tap would turn) lit, and the cursor to say so
+    // (x null: the pointer's gone; lit again only when what's under it changes)
+    let ballHover = "";
+    function hoverBall(x, y) {
+      const p = painting || x === null ? null : ballPoint(x, y), c = p && roundCircleAt(p), m = p && !c && roundMiddleAt(p), h = c || m;
+      const key = h ? `${h.axis}:${h.layer}` : "";
+      if (key !== ballHover) { ballHover = key; lightPieces(h ? new Set(piecesInLayer(P, state, h.axis, h.layer)) : null); }
+      canvas.style.cursor = c ? "grab" : m ? "pointer" : "";
+    }
+
     canvas.addEventListener("pointerdown", (e) => {
       try { canvas.setPointerCapture(e.pointerId); } catch {} // synthetic pointers can't be captured
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
-        if (drag && drag.mode === "turn") releaseTurn();
+        if (drag && (drag.mode === "turn" || drag.mode === "ring")) releaseTurn();
         if (drag && drag.mode === "tpress") releaseTileDrag();
         const [a, b] = [...pointers.values()];
         drag = { mode: "pinch", dist: Math.hypot(a.x - b.x, a.y - b.y), zoom };
@@ -2654,6 +2721,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // a click (no drag) on an axis segment turns its layer; see endPointer
       const seg = (e.button === 0 || e.button === 2) && !e.shiftKey && !painting ? pickSegment(e.clientX, e.clientY) : null;
       if (seg) { drag = { mode: "segment", x: e.clientX, y: e.clientY, seg, clockwise: e.button === 0 }; return; }
+      // (a ball: a circle's line grabs its ring, a middle is a tap to turn; see roundCircleAt)
+      if (isSphere() && !e.shiftKey && !painting && (e.button === 0 || e.button === 2)) {
+        const p = ballPoint(e.clientX, e.clientY), c = p && e.button === 0 ? roundCircleAt(p) : null, m = p && !c ? roundMiddleAt(p) : null;
+        if (c) {
+          flush();
+          drag = { mode: "ring", x: e.clientX, y: e.clientY, axis: c.axis, layer: c.layer, last: angleAbout(p, P.axes[c.axis].dir), theta: 0 };
+          anim = { live: true, axis: c.axis, theta: 0, pieces: new Set(piecesInLayer(P, state, c.axis, c.layer)) };
+          canvas.style.cursor = "grabbing";
+          return;
+        }
+        if (m) { drag = { mode: "rclick", x: e.clientX, y: e.clientY, seg: { userData: { axis: m.axis, layer: m.layer, end: m.end } }, clockwise: e.button === 0 }; return; }
+      }
       const hit = e.shiftKey || e.button !== 0 ? null : pick(e.clientX, e.clientY);
       if (hit && painting && isCustom()) {
         // a click (no drag) on a piece toggles its type; see endPointer
@@ -2683,8 +2762,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           const type = hit ? P.types[hit.object.userData.piece] : null;
           if (type !== hoverType) setHover(type);
         } else {
-          // over an axis segment: light it and the layer it turns
-          setHoverSeg(pickSegment(e.clientX, e.clientY));
+          // over an axis segment: light it and the layer it turns (a ball's circles and middles too)
+          const seg = pickSegment(e.clientX, e.clientY);
+          if (isSphere() && !seg) { setHoverSeg(null); hoverBall(e.clientX, e.clientY); }
+          else { if (isSphere()) canvas.style.cursor = ""; setHoverSeg(seg); }
         }
         return;
       }
@@ -2696,12 +2777,24 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         placeCamera();
         return;
       }
-      if ((drag.mode === "paint" || drag.mode === "segment" || drag.mode === "tclick") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
+      if ((drag.mode === "paint" || drag.mode === "segment" || drag.mode === "tclick" || drag.mode === "rclick") && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6)
         drag = { mode: "orbit", x: drag.x, y: drag.y }; // it's a drag after all: rotate the view
       if (drag.mode === "tpress") {
         // the circle follows the pointer around its center, on the surface (off it: stays put)
         const hit = surfaceHit(e.clientX, e.clientY);
         if (hit) { tilePointer = { at: tilePoint(hit), real: false, cursor: "grabbing" }; dragTileTo(tilePointer.at, true); }
+        return;
+      }
+      if (drag.mode === "ring") {
+        // (the angle round the axis, counted on past a full turn; off the ball, or right at the
+        // middle where the angle jumps about, it stays put)
+        const p = ballPoint(e.clientX, e.clientY), dir = P.axes[drag.axis].dir;
+        if (p && angleTo(p, dir) > 0.03 && angleTo(p, dir) < Math.PI - 0.03) {
+          const a = angleAbout(p, dir);
+          drag.theta += ((a - drag.last + 3 * Math.PI) % TAU) - Math.PI;
+          drag.last = a;
+          if (anim && anim.live) anim.theta = drag.theta;
+        }
         return;
       }
       if (drag.mode === "orbit") {
@@ -2753,6 +2846,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function endPointer(e) {
       pointers.delete(e.pointerId);
       if (drag && drag.mode === "turn") releaseTurn();
+      if (drag && drag.mode === "ring") { releaseTurn(); canvas.style.cursor = "grab"; }
+      if (drag && drag.mode === "rclick") turnSegment(drag.seg, drag.clockwise);
       if (drag && drag.mode === "sslide" && anim && anim.live) { releaseSlide(); canvas.style.cursor = ""; }
       if (drag && drag.mode === "spress") edgeClick(drag);
       if (drag && drag.mode === "tpress") {
@@ -2770,6 +2865,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     canvas.addEventListener("pointerleave", () => {
       if (hoverType !== null) setHover(null);
       setHoverSeg(null);
+      if (isSphere() && !drag) hoverBall(null);
       if (isPlanar()) hoverSurface(null);
       if (isTiles() && !tdrag) { tileHover = null; tilePointer = null; canvas.style.cursor = ""; }
     });
@@ -5073,6 +5169,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         inputCam = was;
         return out;
       },
+      // a ball's circle (axis's plane cut j) at an angle round the axis, or an axis's end (+1, −1): where
+      // it is in CSS px, and whether it's on the side of the ball facing the camera
+      ballCircle(axis, j, angle = 0) {
+        this.sync(); inputCam = camera;
+        const ax = P.axes[axis], o = ax.offsets[j], s = Math.sqrt(1 - o * o), u = normalize(cross(ax.dir, Math.abs(ax.dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(ax.dir, u);
+        return this.ballAt(add(scale(ax.dir, o), add(scale(u, s * Math.cos(angle)), scale(v, s * Math.sin(angle)))));
+      },
+      ballMiddle(axis, end = 1) { this.sync(); inputCam = camera; return this.ballAt(scale(P.axes[axis].dir, end)); },
+      ballAt(p) { const [x, y] = toScreen(p), q = ballPoint(x, y); return { x, y, front: !!q && len(sub(q, p)) < 1e-3 }; },
       view() { return root.quaternion.toArray(); },
       // the chevrons on the hovered 3D cell: { x, y, edge } or null
       edgeHints() { return edgeHints; },

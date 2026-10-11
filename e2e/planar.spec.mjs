@@ -158,9 +158,9 @@ test("views: flat alone at first; 3D turned on, side by side on a wide screen; t
   expect((await info(page)).views).toEqual({ flat: true, surface: true });
   await expect(page.locator("#plane")).toBeVisible();
   await expect(page.locator("#c")).toBeVisible();
-  // the flat view's canvas takes the left part of the screen
-  const box = await page.locator("#plane").boundingBox(), vw = page.viewportSize().width;
-  expect(box.x + box.width).toBeLessThan(vw * 0.6);
+  // the flat view's canvas takes the left part of the screen (from the next frame, which lays it out)
+  const vw = page.viewportSize().width;
+  await expect.poll(async () => { const box = await page.locator("#plane").boundingBox(); return box.x + box.width; }).toBeLessThan(vw * 0.6);
   await page.locator("#viewFlat").uncheck();
   expect((await info(page)).views).toEqual({ flat: false, surface: true });
   await expect(page.locator("#plane")).toBeHidden();

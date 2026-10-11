@@ -46,6 +46,33 @@ test("dragging a sticker on the ball turns a layer; a scramble undoes", async ({
   expect(await info(page)).toMatchObject({ moves: 1, solved: false });
 });
 
+test("dragging a circle on the ball turns its ring after the pointer, snapping to whole steps; tapping a middle turns it a step", async ({ page }) => {
+  await open(page, "?puzzle=hyper-klein&N=4&M=3&rear=off");
+  await settled(page);
+  // (the hook's turn of the same ring, from solved, to compare with)
+  const after = (axis, layer, q) => page.evaluate(({ axis, layer, q }) => { const c = window.cutwist; document.getElementById("reset").click(); c.turn(axis, layer, q); c.finish(); const s = c.state; document.getElementById("reset").click(); c.finish(); return s; }, { axis, layer, q });
+  const ccw = await after(1, 2, 1), cw = await after(1, 2, -1);
+  // (axis 1 is up; its circle 1 bounds the top ring: from a quarter of the way round it, a bit
+  // past another quarter, counterclockwise as seen from above)
+  const at = (t) => page.evaluate((t) => window.cutwist.ballCircle(1, 1, t), t);
+  const start = await at((3 * Math.PI) / 4);
+  expect(start.front).toBe(true);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (let k = 1; k <= 12; k++) { const p = await at((3 * Math.PI) / 4 + (k / 12) * (Math.PI / 2 + 0.15)); await page.mouse.move(p.x, p.y); }
+  await page.mouse.up();
+  await finish(page);
+  expect(await info(page)).toMatchObject({ moves: 1, solved: false });
+  expect(await page.evaluate(() => window.cutwist.state)).toEqual(ccw);
+  // a tap on the top's middle: a step clockwise, as seen from there
+  await page.click("#reset");
+  await finish(page);
+  const m = await page.evaluate(() => window.cutwist.ballMiddle(1, 1));
+  await page.mouse.click(m.x, m.y);
+  await finish(page);
+  expect(await page.evaluate(() => window.cutwist.state)).toEqual(cw);
+});
+
 test("the steppers go wherever {N,M} is: a torus, a ball, a hyperbolic surface", async ({ page }) => {
   await open(page, "?puzzle=tiles-hex&rear=off");
   expect((await info(page)).tiling).toBe("hex");
