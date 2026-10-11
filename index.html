@@ -1040,7 +1040,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       root.add(puzzleGroup);
       pieceObjs = []; bodyMeshes = [];
       if (isSphere()) puzzleGroup.add(new THREE.Mesh(coreGeo, bodyMat)); // (a round puzzle's core)
-      if (ringMesh) { ringMesh.geometry.dispose(); ringMesh = null; } // (a ring outlined on the last puzzle)
+      if (ringMesh) { ringMesh.traverse((o) => o.geometry && o.geometry.dispose()); ringMesh = null; } // (a ring outlined on the last puzzle)
       ringShown = "";
       // gaps between stickers shrink with the pieces on bigger puzzles
       // the icosahedron's pieces are small for its size, so it gets thinner lines
@@ -2669,29 +2669,35 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const u = normalize(cross(dir, Math.abs(dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(dir, u);
       return Math.atan2(dot(p, v), dot(p, u));
     }
-    // The ring a press would grab (hovering), or that's being dragged, outlined in yellow as the tile
-    // puzzles do: a thin band just over the ball along each circle bounding it (rebuilt only when
-    // it's another ring). axis null: none.
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide });
+    // The ring a press would grab (hovering), or that's being dragged, outlined as every tile puzzle
+    // outlines it: yellow on black (tile-view.mjs's 5 px black under 2.6 px yellow), a band of each
+    // just over the ball along each circle bounding it (rebuilt only when it's another ring). axis
+    // null: none.
+    const ringMats = [new THREE.MeshBasicMaterial({ color: 0x0a0b0e, side: THREE.DoubleSide }), new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide })];
     let ringShown = "", ringMesh = null;
     function showRing(axis, layer) {
       const key = axis === null ? "" : `${axis}:${layer}`;
       if (key === ringShown && (!ringMesh || ringMesh.parent === puzzleGroup)) return;
       ringShown = key;
-      if (ringMesh) { ringMesh.parent?.remove(ringMesh); ringMesh.geometry.dispose(); ringMesh = null; }
+      if (ringMesh) { ringMesh.parent?.remove(ringMesh); ringMesh.traverse((o) => o.geometry && o.geometry.dispose()); ringMesh = null; }
       if (axis === null) return;
-      const ax = P.axes[axis], u = normalize(cross(ax.dir, Math.abs(ax.dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(ax.dir, u), w = 0.011, pos = [];
-      for (const o of [ax.offsets[layer - 1], ax.offsets[layer]].filter((o) => o !== undefined)) {
-        const s = Math.sqrt(1 - o * o), n = Math.max(48, Math.ceil(s * 160));
-        const at = (t, d) => { const a = Math.acos(o) + d, r = Math.sin(a), h = Math.cos(a); return scale(add(scale(ax.dir, h), add(scale(u, r * Math.cos(t)), scale(v, r * Math.sin(t)))), 1.006); };
-        for (let k = 0; k < n; k++) {
-          const t0 = (k * TAU) / n, t1 = ((k + 1) * TAU) / n, [a, b, c, d] = [at(t0, -w), at(t0, w), at(t1, -w), at(t1, w)];
-          pos.push(...a, ...b, ...c, ...b, ...d, ...c);
+      const ax = P.axes[axis], u = normalize(cross(ax.dir, Math.abs(ax.dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])), v = cross(ax.dir, u);
+      ringMesh = new THREE.Group();
+      // (half widths, as angles; the yellow a hair further out, so it's in front)
+      [[0.021, 1.005], [0.011, 1.007]].forEach(([w, lift], m) => {
+        const pos = [];
+        for (const o of [ax.offsets[layer - 1], ax.offsets[layer]].filter((o) => o !== undefined)) {
+          const s = Math.sqrt(1 - o * o), n = Math.max(48, Math.ceil(s * 160));
+          const at = (t, d) => { const a = Math.acos(o) + d, r = Math.sin(a), h = Math.cos(a); return scale(add(scale(ax.dir, h), add(scale(u, r * Math.cos(t)), scale(v, r * Math.sin(t)))), lift); };
+          for (let k = 0; k < n; k++) {
+            const t0 = (k * TAU) / n, t1 = ((k + 1) * TAU) / n, [a, b, c, d] = [at(t0, -w), at(t0, w), at(t1, -w), at(t1, w)];
+            pos.push(...a, ...b, ...c, ...b, ...d, ...c);
+          }
         }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      ringMesh = new THREE.Mesh(g, ringMat);
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        ringMesh.add(new THREE.Mesh(g, ringMats[m]));
+      });
       puzzleGroup.add(ringMesh);
     }
     // hovering: the ring a press would grab outlined, and the cursor to say what a press does

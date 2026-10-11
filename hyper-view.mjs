@@ -579,7 +579,8 @@ export class HyperView {
       });
     }
   }
-  // the rings of an axis's layer (hover), at every visible copy of it
+  // the rings of an axis's layer (hover, or being dragged), at every visible copy of it: yellow
+  // outlined in black, as every tile puzzle shows them (tile-view.mjs, the balls), thinner toward the rim
   drawRings(ctx, { axis, layer }) {
     const { P } = this, ax = P.axes[axis];
     if (!ax) return;
@@ -590,8 +591,10 @@ export class HyperView {
       for (const rr of inner ? [r, inner] : [r]) {
         const { c, r: er } = diskCircle(at, rr), p = this.toScreen(c);
         if (er * this.R < 1.5) continue;
+        const w = Math.max(0.8, Math.min(2.6, er * this.R * 0.04));
         ctx.beginPath(); ctx.arc(p.x, p.y, er * this.R, 0, 2 * Math.PI);
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(1, Math.min(3, er * this.R * 0.04)); ctx.stroke();
+        ctx.strokeStyle = BODY; ctx.lineWidth = w * (5 / 2.6); ctx.stroke();
+        ctx.strokeStyle = "#f5c518"; ctx.lineWidth = w; ctx.stroke();
       }
     }
     ctx.restore();
