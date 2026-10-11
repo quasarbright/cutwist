@@ -401,6 +401,16 @@ function findPieces(P) {
   const up = new Int32Array(T * nR).map((_, i) => i), root = (i) => (up[i] === i ? i : (up[i] = root(up[i])));
   for (const h of H.reps) for (const [f, d, g] of steps) if (g >= 0) { const a = root(canon(h, f)), b = root(canon(H.mul[h][d], g)); if (a !== b) up[Math.max(a, b)] = Math.min(a, b); }
   for (const h of H.reps) for (const [f, g] of inside) { const a = root(canon(h, f)), b = root(canon(h, g)); if (a !== b) up[Math.max(a, b)] = Math.min(a, b); }
+  // and fragments inside the same circles anywhere on the ball: a piece is a cell of the planes in
+  // the solid ball, as on puzzle.mjs's solids, and stickers that only touch at a point on the
+  // surface (where two circles touch) are joined through the inside, turning together always
+  const cellOf = new Map();
+  for (const h of H.reps) for (let f = 0; f < nR; f++) {
+    const s = sigOf(caps, applyMat(H.mats[h], R[f].at)), i = canon(h, f);
+    if (!cellOf.has(s)) { cellOf.set(s, i); continue; }
+    const a = root(cellOf.get(s)), b = root(i);
+    if (a !== b) up[Math.max(a, b)] = Math.min(a, b);
+  }
   const groupsOf = new Map();
   for (let t = 0; t < T; t++) for (let f = 0; f < nR; f++) {
     const top = root(t * nR + f);

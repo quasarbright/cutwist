@@ -47,9 +47,10 @@ test("the beach ball and the two hemispheres", () => {
   // a small circle round each wedge's middle: a piece each, and the rest of the ball
   assert.deepEqual(kinds(build(2, 6, [{ on: "face", depths: [0.4] }])), { 1: 6, 6: 1 });
   // circles round the equator's corners, overlapping their neighbors: lenses and what's left of
-  // each cap, both across the equator, and the two polar caps
+  // each cap, both across the equator, and the two polar caps, one piece (inside no circle, they're
+  // joined through the ball's inside and always turn together)
   const P = build(6, 2, [{ on: "vertex", depths: [0.8] }]);
-  assert.deepEqual(kinds(P), { 1: 2, 2: 12 });
+  assert.deepEqual(kinds(P), { 2: 13 });
   assert.ok(P.axes.every((a) => a.order === 2));
 });
 
@@ -116,13 +117,23 @@ test("truncation: corners' and edges' faces with their own colors, the stickers 
 
 test("dual tilings cut by the same circles (a tile's middle is the dual's corner) make the same pieces", () => {
   // (the beach ball's wedge circles overlap all round the equator: two polar caps outside them all,
-  // which were once wrongly joined into one piece)
+  // one piece through the ball's inside)
   const ball = build(2, 6, [{ on: "face", depths: [0.654] }]), halves = build(6, 2, [{ on: "vertex", depths: [0.654] }]);
-  assert.equal(ball.n, 14);
-  assert.equal(halves.n, 14);
+  assert.equal(ball.n, 13);
+  assert.equal(halves.n, 13);
   for (const [N, M] of [[4, 3], [5, 3]]) {
     const a = build(N, M, [{ on: "face", depths: [0.9] }, { on: "vertex", depths: [0.5] }]), b = build(M, N, [{ on: "vertex", depths: [0.9] }, { on: "face", depths: [0.5] }]);
     assert.equal(a.n, b.n, `{${N},${M}}`);
+  }
+});
+
+test("circles that just touch make the same pieces as a hair smaller: what's between them is one piece, joined through the inside", () => {
+  // (the icosahedron's circles at its triangles' inner radius touch at every edge's middle)
+  const G = sphereGeometry(3, 5);
+  for (const truncate of [undefined, { edge: 0.7 }]) {
+    const at = (r) => kinds(buildSphere({ N: 3, M: 5, cuts: [{ on: "face", depths: [r] }], truncate, blackout: [] }));
+    assert.deepEqual(at(G.Ri), { 1: 20, 20: 1 });
+    assert.deepEqual(at(G.Ri - 0.01), at(G.Ri));
   }
 });
 
