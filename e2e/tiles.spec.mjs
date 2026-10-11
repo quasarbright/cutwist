@@ -160,7 +160,7 @@ test("customize opens the editor on the tiling: tilings for solids in the name's
   // another tiling, then undo
   await editShape(page, "squares");
   expect((await info(page)).tiling).toBe("square");
-  await page.click("#undo");
+  await page.click("#edUndo");
   expect((await info(page)).tiling).toBe("hex");
 });
 

@@ -109,10 +109,10 @@ test("customizing: a solid design turns into an arbitrary tiling's and back, and
   expect((await info(page)).faces).toBe(8);
 });
 
-test("the name's menu has the tiling's steppers too: a cube design's are {4,3}, and stepping one makes it a tiling", async ({ page }) => {
+test("the name's menu has the tiling's steppers for an arbitrary design: the cube's {4,3}, and stepping one makes it a torus", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
-  await page.click(".nx-pick");
+  await editShape(page, "arbitrary");
   const panel = (label) => page.locator("#bNM .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
   await expect(panel("sides").locator("input")).toHaveValue("4");
   await expect(panel("at a corner").locator("input")).toHaveValue("3");

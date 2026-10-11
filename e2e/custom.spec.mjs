@@ -15,11 +15,12 @@ test("customize a cube: the tools, the dots and the numbers", async ({ page }) =
   // (a dot on each face, corner and edge showing: three faces, seven corners, nine edges)
   const by = (sites) => sites.reduce((m, s) => ({ ...m, [s.label]: (m[s.label] || 0) + 1 }), {});
   expect(by(await editSites(page))).toEqual({ faces: 3, corners: 7, edges: 9 });
-  // (no turning while customizing: the scramble and the tape are gone)
-  await expect(page.locator("#scramble")).toBeHidden();
+  // (the puzzle still turns while customizing; the solved card is gone)
+  await expect(page.locator("#scramble")).toBeVisible();
+  await expect(page.locator("#reference")).toBeHidden();
   await page.click("#customizeDone");
   await expect(page.locator("#edTools")).toBeHidden();
-  await expect(page.locator("#scramble")).toBeVisible();
+  await expect(page.locator("#reference")).toBeVisible();
 });
 
 test("picking a solid from the name's menu rebuilds the puzzle; undo goes back", async ({ page }) => {
@@ -28,9 +29,9 @@ test("picking a solid from the name's menu rebuilds the puzzle; undo goes back",
   await editShape(page, "dodeca");
   expect((await info(page)).faces).toBe(12);
   await expect(page.locator("#bSolid").getByRole("radio", { name: "dodeca" })).toHaveAttribute("aria-checked", "true");
-  await page.click("#undo");
+  await page.click("#edUndo");
   expect((await info(page)).faces).toBe(6);
-  await page.click("#redo");
+  await page.click("#edRedo");
   expect((await info(page)).faces).toBe(12);
 });
 
@@ -60,7 +61,7 @@ test("a dot adds a cut; dragging its line moves it, snapping; dragging it off re
   expect((await rulers(page))[2].values).toEqual([]);
   expect((await info(page)).pieces).toBe(1);
   // (each was one step to undo)
-  await page.click("#undo");
+  await page.click("#edUndo");
   expect((await rulers(page))[2].values.length).toBe(1);
 });
 
@@ -131,8 +132,8 @@ test("customizing a preset starts with nothing to undo: undo can't turn it into 
   await open(page);
   await page.evaluate(() => window.cutwist.load("megaminx"));
   await page.click(".nx-custombtn");
-  await expect(page.locator("#undo")).toBeDisabled();
-  await page.locator("#undo").click({ force: true }); // (even a stray click does nothing)
+  await expect(page.locator("#edUndo")).toBeDisabled();
+  await page.locator("#edUndo").click({ force: true }); // (even a stray click does nothing)
   expect((await info(page)).faces).toBe(12);
 });
 
@@ -144,22 +145,21 @@ test("undo covers every kind of edit, not just cuts, and counts its steps", asyn
   const faces1 = (await info(page)).faces;
   expect(faces1).toBeGreaterThan(faces0);
   await editShape(page, "dodeca");
-  await expect(page.locator("#undo")).toHaveAttribute("title", /2 edits/);
-  await page.click("#undo");
+  await expect(page.locator("#edUndo")).toHaveAttribute("title", /2 edits/);
+  await page.click("#edUndo");
   expect((await info(page)).faces).toBe(faces1);
-  await page.click("#undo");
+  await page.click("#edUndo");
   expect((await info(page)).faces).toBe(faces0); // the truncation, undone
-  await expect(page.locator("#undo")).toBeDisabled();
-  await expect(page.locator("#redo")).toHaveAttribute("title", /2 edits/);
+  await expect(page.locator("#edUndo")).toBeDisabled();
+  await expect(page.locator("#edRedo")).toHaveAttribute("title", /2 edits/);
 });
 
-test("closing the editor turns off blacking out, and the undo button is the turns' again", async ({ page }) => {
+test("closing the editor turns off blacking out", async ({ page }) => {
   await open(page);
   await page.click(".nx-custombtn");
   await editTool(page, "paint");
   await expect(page.locator('.ed-tool[data-tool="paint"]')).toHaveAttribute("aria-pressed", "true");
   await page.click("#customizeDone");
-  await expect(page.locator("#undo")).toBeEnabled();
   await page.click(".nx-custombtn");
   await expect(page.locator('.ed-tool[data-tool="paint"]')).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator('.ed-tool[data-tool="cut"]')).toHaveAttribute("aria-pressed", "true");
@@ -176,7 +176,8 @@ test("on a phone the tools sit along the bottom and the puzzle fits above them",
   const sites = await editSites(page);
   expect(sites.length).toBeGreaterThan(5);
   expect(sites.every((s) => s.y < rail.y)).toBe(true);
-  await expect(page.locator("#bShare2")).toBeVisible();
+  await expect(page.locator("#bShare")).toBeVisible();
+  await expect(page.locator("#customizeDone")).toBeVisible();
 });
 
 test("by touch, a long press on a cut removes it; a mouse held still doesn't", async ({ page }) => {
@@ -192,4 +193,23 @@ test("by touch, a long press on a cut removes it; a mouse held still doesn't", a
   expect((await rulers(page))[2].values.length).toBe(1);
   await press(await cutPoint(page, 2, 0, null), "touch", 800);
   expect((await rulers(page))[2].values).toEqual([]);
+});
+
+test("the puzzle turns while customizing, and any edit sets it back to solved", async ({ page }) => {
+  await open(page);
+  await page.click(".nx-custombtn");
+  await page.evaluate(() => { window.cutwist.turn(0, 0, 1); window.cutwist.finish(); });
+  expect((await info(page)).solved).toBe(false);
+  await editDot(page, "corners");
+  expect((await info(page)).solved).toBe(true);
+});
+
+// (a solid's sides and tiles at a corner would make it a ball: only an arbitrary design has them)
+test("the name's menu: a solid design has no tiling steppers, an arbitrary one does", async ({ page }) => {
+  await open(page);
+  await page.click(".nx-custombtn");
+  await page.click(".nx-pick");
+  await expect(page.locator("#bNM .control")).toHaveCount(0);
+  await editShape(page, "arbitrary");
+  await expect(page.locator("#bNM .control")).toHaveCount(2);
 });

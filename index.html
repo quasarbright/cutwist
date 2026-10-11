@@ -228,18 +228,18 @@
     .nx-card.is-cur { border-color: var(--accent); }
     .nx-card img { width: 80px; height: 80px; }
     /* customize: a button by the name; it turns on the tools (see body.nx-custom below) */
-    .nx-custombtn {
+    .nx-custombtn, .nx-sharebtn {
       font: .8rem var(--font-mono); color: var(--muted); background: none; cursor: pointer;
       border: 1px dashed var(--border); border-radius: 8px; padding: 5px 10px;
     }
-    .nx-custombtn:hover { color: var(--text); border-color: var(--faint); }
-    .nx-custombtn[hidden], body.nx-custom .nx-custombtn { display: none; }
+    .nx-custombtn:hover, .nx-sharebtn:hover { color: var(--text); border-color: var(--faint); }
+    .nx-custombtn[hidden], body.nx-custom #customize { display: none; }
     /* customizing: the tools down the left, the shape in the name's menu, the numbers in the hint
        line where the tape is, copy link and done top right. No turning, so no tape, algorithms,
        scramble or reset. */
     .ed-only, body:not(.nx-custom) .ed-only { display: none; }
     body.nx-custom .ed-only { display: inline-block; }
-    body.nx-custom #axes, body.nx-custom #nx-algs, body.nx-custom #scramble, body.nx-custom #reset { display: none; }
+    body.nx-custom #reference { display: none; }
     body.nx-custom .nx-moves, body.nx-custom .nx-side { display: none; }
     .ed-hint { display: none; }
     body.nx-custom .ed-hint {
@@ -249,7 +249,6 @@
     .ed-stats { color: var(--text); white-space: nowrap; }
     .ed-stats .warn { color: var(--danger); }
     .ed-hint .tw-link { font-size: .78rem; }
-    #bShare2 { display: none; }
     #edit { position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
     #edit[hidden] { display: none; }
     .ed-rail {
@@ -266,6 +265,8 @@
     .ed-tool:hover { color: var(--text); background: var(--panel-2); }
     .ed-tool[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); }
     .ed-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ed-tool:disabled { opacity: .35; cursor: default; background: none; color: var(--muted); }
+    .ed-sep { height: 1px; margin: 3px 6px; background: var(--border); }
     .ed-menu { width: 300px; gap: 8px; }
     .ed-menu .tw-label { margin: 0; }
     .ed-menu .nx-sizes:empty, .ed-menu .nx-sizes:empty + * { display: none; }
@@ -488,10 +489,8 @@
       .tw-title h1 { line-height: 30px; }
       /* (the tools: a row along the bottom, over the hint line) */
       .ed-rail { flex-direction: row; top: auto; left: 12px; transform: none; bottom: calc(70px + var(--nx-tape-h, 44px)); }
-      .ed-tool { width: 60px; }
-      /* (the top row has room for done, view and about: copy link moves to the hint line) */
-      body.nx-custom #bShare { display: none; }
-      body.nx-custom #bShare2 { display: inline; }
+      .ed-tool { width: 54px; }
+      .ed-sep { width: 1px; height: auto; margin: 6px 2px; }
       .ed-menu { width: calc(100vw - 24px); }
     }
   </style>
@@ -521,6 +520,8 @@
     <div class="nx-pickrow">
       <button class="nx-pick" id="pick" title="choose a puzzle"><span class="nx-pickname" id="pickName"></span><span class="nx-caret">▾</span></button>
       <button class="nx-custombtn" id="customize" title="change this puzzle's shape and cuts, on the puzzle itself">customize</button>
+      <button class="nx-done ed-only" id="customizeDone" title="stop customizing; the puzzle stays as you made it">done</button>
+      <button class="nx-sharebtn ed-only" id="bShare" title="copy a link that opens this puzzle">copy link</button>
     </div>
     <div class="nx-sizes">
       <div id="paramControls"></div>
@@ -578,6 +579,9 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.31 15.44L15.44 20.31L8.56 20.31L3.69 15.44L3.69 8.56L8.56 3.69L15.44 3.69L20.31 8.56Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>truncate</button>
     <button class="ed-tool" data-tool="paint" aria-pressed="false" title="black out: click a piece to black out every piece like it, click a black one to bring them back">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L21 19.5H3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12.00 3.50L14.70 8.30Q12.00 10.22 9.30 8.30ZM21.00 19.50L15.60 19.50Q15.33 16.14 18.30 14.70ZM3.00 19.50L5.70 14.70Q8.67 16.14 8.40 19.50Z" fill="currentColor"/></svg>black out</button>
+    <span class="ed-sep" aria-hidden="true"></span>
+    <button class="ed-tool ed-hist" id="edUndo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7L4 12l5 5M4.5 12H14a6 6 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -3)"/></svg>undo</button>
+    <button class="ed-tool ed-hist" id="edRedo" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7l5 5-5 5M19.5 12H10a6 6 0 0 0 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -3)"/></svg>redo</button>
   </div>
   <div class="nx-pop ed-menu" id="edMenu" hidden>
     <div class="tw-label" id="bSolidLabel">solid</div>
@@ -591,7 +595,7 @@
   <div id="nx-algs"></div>
   <div class="nx-preview" id="algPreview" hidden></div>
   <div id="nx-tape">
-    <div class="ed-hint" id="edHint"><span id="edTip"></span><span class="ed-stats" id="bStats"></span><button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button><button class="tw-link" id="bShare2" title="copy a link that opens this puzzle">copy link</button></div>
+    <div class="ed-hint" id="edHint"><span id="edTip"></span><span class="ed-stats" id="bStats"></span><button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button></div>
     <div class="nx-moves" id="tapeMoves"></div>
     <div class="nx-side">
       <span class="nx-status" id="tapeStatus"></span>
@@ -613,8 +617,6 @@
 
   <!-- top right: view (only shown when it has something in it), the toggles, about -->
   <div id="nx-toggles">
-    <button class="btn ed-only" id="bShare" title="copy a link that opens this puzzle">copy link</button>
-    <button class="nx-done ed-only" id="customizeDone" title="stop customizing; the puzzle stays as you made it">done</button>
     <button class="btn nx-viewbtn" id="view" title="flat and 3D views, the surface's shape, and how cells look">view ▾</button>
     <button class="btn is-active" id="axes" title="show the turn axes: click a segment to turn that layer clockwise, right-click for counterclockwise" aria-pressed="true">axes</button>
     <button class="btn is-active" id="textures" title="patterns on the stickers, to tell similar colors apart (on by default past 12 faces)" aria-pressed="true">textures</button>
@@ -1655,14 +1657,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let undoStack = [], redoStack = [];
     const snapshot = () => JSON.stringify(design());
     const steps = (n) => (n === 1 ? "1 edit" : `${n} edits`);
-    // (customizing, the undo and redo along the bottom are the design's: see renderTape)
+    // (the design's undo and redo are in the customize tools; the ones along the bottom are the turns')
     function showHistory() {
-      if (!editing()) return;
       const u = undoStack.length, r = redoStack.length;
-      $("undo").disabled = !u;
-      $("redo").disabled = !r;
-      $("undo").title = u ? `undo the last change to this design (${steps(u)} to go back through)` : "nothing to undo yet: changes to this design show up here";
-      $("redo").title = r ? `redo a change you undid (${steps(r)})` : "nothing to redo";
+      $("edUndo").disabled = !u;
+      $("edRedo").disabled = !r;
+      $("edUndo").title = u ? `undo the last change to this design (${steps(u)} to go back through; ⌘Z)` : "nothing to undo yet: changes to this design show up here";
+      $("edRedo").title = r ? `redo a change you undid (${steps(r)}; ⇧⌘Z)` : "nothing to redo";
     }
     function resetEdits() {
       undoStack = []; redoStack = [];
@@ -1864,19 +1865,23 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       changed();
       computeSnaps();
     }
-    // A new cut: a solid's in the widest gap between the center and the surface; a circle's in the
-    // widest gap out to a bit past the tiles' corners. A truncation starts near the tip, where it
+    // A new cut starts shallow, taking little off: a solid's near the surface, past its other cuts
+    // there; a circle small, inside its set's others. A truncation starts near the tip, where it
     // takes off a little. Returns its index.
     function addValue(r) {
       pushUndo();
-      const R = RULERS[r];
+      const R = RULERS[r], values = R.values();
       let v = 0.15;
       if (R.max !== 1) {
-        // (a tiling's: out to the next tile's middle, or the cap; a hyperbolic one's, a tile's corners or the cap)
-        const [lo, hi] = isTileDesign() ? [R.range[0], Math.min(1, R.range[1])] : isHyperDesign() ? [R.range[0], Math.min(isHyper() ? hyperRulerMax(R.on, true) : isSphere() ? R.range[1] : 2, 1.2 * (isHyper() || isSphere() ? P.G.Rv : 1))] : [0, 0.95];
-        const pts = [lo, ...R.values().filter((d) => d > lo && d < hi), hi].sort((a, b) => a - b);
-        let gap = -1;
-        for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1] - pts[k] > gap) { gap = pts[k + 1] - pts[k]; v = (pts[k] + pts[k + 1]) / 2; }
+        if (isCircleDesign()) {
+          // (a fifth of the way from a tile's middle to its corner, or half the smallest circle)
+          const [lo, hi] = R.range, nm = designNM(), first = 0.2 * cornerRadius(nm.N, nm.M);
+          v = Math.max(lo, Math.min(hi, values.length ? Math.min(first, Math.min(...values) / 2) : first));
+        } else {
+          // (a solid's: four fifths of the way out, or half way from its shallowest cut to the surface)
+          const out = values.filter((d) => d > 0);
+          v = out.length ? Math.min(0.95, (Math.max(...out) + 1) / 2) : 0.8;
+        }
       }
       R.add(v);
       const i = R.values().length - 1;
@@ -1927,7 +1932,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         });
       // the tiling's steppers here too: a solid's are its own {N,M} (the cube's {4,3}), and stepping
       // them makes it a tiling design (see stepTiling); the rhombic solids have none
-      const nm = designNM();
+      const nm = isCircleDesign() ? designNM() : null;
       $("bNM").replaceChildren(...(nm ? ["N", "M"].map((key, i) => stepperRow(HYPER_PARAMS[i], () => designNM()[key], (v) => stepTiling(key, v))) : []));
       $("bNMLabel").hidden = !nm;
     }
@@ -2193,7 +2198,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     $("bRestore").onclick = restoreAll;
-    for (const id of ["bShare", "bShare2"]) $(id).onclick = async () => {
+    for (const id of ["bShare"]) $(id).onclick = async () => {
       try { await navigator.clipboard.writeText(shareLink()); $(id).textContent = "copied"; }
       catch { prompt("copy this link", shareLink()); }
       setTimeout(() => { $(id).textContent = "copy link"; }, 1500);
@@ -2238,8 +2243,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     $("size").onchange = () => setSize(+$("size").value, 1);
     $("sizeDown").onclick = () => setSize(size - 1, -1);
     $("sizeUp").onclick = () => setSize(size + 1, 1);
-    $("undo").onclick = () => { if (editing()) { undoEdit(); return; } flush(); undo(); };
-    $("redo").onclick = () => { if (editing()) { redoEdit(); return; } flush(); redo(); };
+    $("undo").onclick = () => { flush(); undo(); };
+    $("redo").onclick = () => { flush(); redo(); };
+    $("edUndo").onclick = () => undoEdit();
+    $("edRedo").onclick = () => redoEdit();
     // Scramble from wherever the puzzle is by playing the turns quickly, about 3.5 s in all. They go
     // straight into the animation queue, not the history, so undo can't unscramble.
     $("axes").onclick = () => {
@@ -2548,8 +2555,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (pointers.size > 2) return;
       aimAt(e.clientX, e.clientY); // (this press, and the drag it starts, go through this view's camera)
-      // (customizing: the tool takes the press; anywhere else turns the view, never the puzzle)
-      if (editing() && !(painting && isCustom())) { if (isFlat() || !edDown(e)) drag = { mode: "orbit", x: e.clientX, y: e.clientY }; return; }
+      // (customizing: a press on a cut or a dot is the tool's; anywhere else, as ever)
+      if (editing() && !painting && !isFlat() && edDown(e)) return;
       if (isHyper()) { drag = { mode: "orbit", x: e.clientX, y: e.clientY }; return; } // (the hyperbolic surface in 3D: turns are made on the disk)
       if (isTiles()) {
         // the 3D torus: press a circle to drag it round, click a tile's middle to turn it;
@@ -2618,7 +2625,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (edDrag) { edMove(e); return; }
       if (!pointers.has(e.pointerId)) {
         if (!pointers.size) aimAt(e.clientX, e.clientY); // (hovering; never mid-drag)
-        if (editing() && !painting && !isFlat()) { edHoverAt(e.clientX, e.clientY); return; }
+        if (editing() && !painting && !isFlat()) { edHoverAt(e.clientX, e.clientY); if (edHover) { setHoverSeg(null); if (isSphere()) showRing(null); return; } }
         if (isPlanar()) { hoverSurface(e.clientX, e.clientY); return; }
         if (isTiles()) { hoverTiles3D(e.clientX, e.clientY); return; }
         if (isHyper()) return;
@@ -2760,12 +2767,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const coarse = matchMedia("(pointer: coarse)");
     function setTool(t) {
       if (t) edTool = t;
-      for (const b of document.querySelectorAll(".ed-tool")) b.setAttribute("aria-pressed", String(b.dataset.tool === edTool));
+      for (const b of document.querySelectorAll(".ed-tool[data-tool]")) b.setAttribute("aria-pressed", String(b.dataset.tool === edTool));
       setPainting(t === "paint");
       edHover = null;
       renderEditHint();
     }
-    for (const b of document.querySelectorAll(".ed-tool")) b.onclick = () => setTool(b.dataset.tool);
+    for (const b of document.querySelectorAll(".ed-tool[data-tool]")) b.onclick = () => setTool(b.dataset.tool);
     function renderEditHint() {
       const remove = coarse.matches ? "long-press" : "right-click";
       $("edTip").textContent = edTool === "cut" ? `tap a dot to add a cut · drag a cut · drag it off or ${remove} to remove`
@@ -3003,11 +3010,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       for (const R of edRulers()) {
         const r = rulerOf(R), values = R.values();
         const sites = edSites(g, R, view);
-        if (pr && values.length) for (const st of sites) {
+        // (a cut's line: round every place of its set, showing or not, as a cut round a face out of
+        // sight runs across the faces showing; where lines cross, the one whose place is nearer)
+        if (pr && values.length) for (const st of g.sites(R)) {
           const rate = edRate(g, R, st.at, pr);
           if (!rate) continue;
-          // (where lines cross, the one whose place is nearer the pointer)
-          const near = Math.hypot(st.x - x, st.y - y);
+          const sc = st.s || (g.flat ? null : projectWith(view.cam, st.p)), near = sc ? Math.hypot(sc[0] - x, sc[1] - y) : Infinity;
           values.forEach((d, i) => {
             const px = Math.abs(rate.v - d) / rate.perPx;
             if (px < 10 && (!best || px < best.px - 2 || (px < best.px + 2 && near < best.near))) best = { r, i, at: st.at, px, near };
@@ -3082,7 +3090,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       edDrag = null;
       rulerDragging = false;
       if (d.out) { RULERS[d.r].remove(d.i); changed(); computeSnaps(); }
-      else { loadNow(); renderBuilder(); computeSnaps([d.r, d.i]); }
+      // (moved: every cut's snaps again, its own too: a new cut's were still being worked out)
+      else if (d.moved) { loadNow(); renderBuilder(); computeSnaps(); }
       edHoverAt(e.clientX, e.clientY);
     }
 
@@ -3095,7 +3104,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       try { drawEditing(now); } catch (err) { console.error(err); } // (never the frame loop's end)
     }
     function drawEditing(now) {
-      if (axisGroup) axisGroup.visible = false; // (no turning while customizing)
       const dpr = pixelRatio();
       if (edCanvas.width !== Math.round(W * dpr) || edCanvas.height !== Math.round(H * dpr)) { edCanvas.width = Math.round(W * dpr); edCanvas.height = Math.round(H * dpr); }
       const ctx = edCtx;
@@ -3799,7 +3807,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const card = $("refPlane"), dpr = pixelRatio();
       card.hidden = false;
       if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
-      refTileView.drawSolvedCard(P, look);
+      if (!editing()) refTileView.drawSolvedCard(P, look); // (customizing: no solved card)
     }
     // the 3D torus's texture (redrawn when the state, the lit circle or the lit pieces change),
     // and the shader's turn
@@ -3870,11 +3878,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const card = $("refPlane"), dpr = pixelRatio();
       card.hidden = false;
       if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
-      refHyperView.drawSolvedCard(P);
+      if (!editing()) refHyperView.drawSolvedCard(P);
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isHyper() || tdrag || hpan) return;
-      if (editing() && !painting && edDown(e)) { try { plane.setPointerCapture(e.pointerId); } catch {} return; }
+      if (editing() && !painting && edDown(e)) { try { plane.setPointerCapture(e.pointerId); } catch {} return; } // (a cut or a dot: the tool's)
       if (painting && isCustom()) { // (blacking out: a click blacks out, or brings back, a piece's kind)
         const piece = hyperView.pieceAt(e.clientX, e.clientY, state);
         if (piece !== null && e.button === 0) toggleType(piece);
@@ -3884,7 +3892,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (a press by a circle's line drags it, one on a tile's, corner's or edge's middle turns that
       // one: where both are near, as round a corner, whichever is nearer)
       const mid = hyperView.middleHit(e.clientX, e.clientY);
-      let c = e.button === 0 && !editing() ? hyperView.circleAt(e.clientX, e.clientY) : null;
+      let c = e.button === 0 ? hyperView.circleAt(e.clientX, e.clientY) : null;
       if (c && mid && mid.px < c.px) c = null;
       try { plane.setPointerCapture(e.pointerId); } catch {}
       if (c) {
@@ -3895,7 +3903,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         tilePointer = { at: z, real: true, cursor: "grabbing" };
         return;
       }
-      if (mid && !editing() && (e.button === 0 || e.button === 2)) { turnTile({ axis: mid.axis, layer: 0, q: e.button === 0 ? -1 : 1 }); return; }
+      if (mid && (e.button === 0 || e.button === 2)) { turnTile({ axis: mid.axis, layer: 0, q: e.button === 0 ? -1 : 1 }); return; }
       if (e.button === 0 && hyperView.shows(e.clientX, e.clientY)) { hpan = { id: e.pointerId, last: z }; plane.style.cursor = "move"; }
     });
     plane.addEventListener("pointermove", (e) => {
@@ -3916,7 +3924,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         plane.style.cursor = piece === null ? "" : "pointer";
         return;
       }
-      if (editing()) { edHoverAt(e.clientX, e.clientY); if (!edHover && hyperView.shows(e.clientX, e.clientY)) plane.style.cursor = "move"; return; }
+      if (editing()) { edHoverAt(e.clientX, e.clientY); if (edHover) { tileHover = null; return; } }
       // (as a press would take it: the nearer of a circle's line and a turning point's middle)
       const mid = hyperView.middleHit(e.clientX, e.clientY);
       let c = hyperView.circleAt(e.clientX, e.clientY);
@@ -3967,7 +3975,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (piece !== null && e.button === 0) toggleType(piece);
           return;
         }
-        if (editing()) { if (edDown(e)) { try { plane.setPointerCapture(e.pointerId); } catch {} } return; }
+        if (editing() && edDown(e)) { try { plane.setPointerCapture(e.pointerId); } catch {} return; } // (a cut or a dot: the tool's)
         const hit = tileView.pressAt(e.clientX, e.clientY), c = e.button === 0 ? hit.circle || null : null;
         if (c) {
           try { plane.setPointerCapture(e.pointerId); } catch {}
@@ -3993,7 +4001,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointermove", (e) => {
       if (isTiles()) {
         if (edDrag) { edMove(e); return; }
-        if (editing() && !painting) { edHoverAt(e.clientX, e.clientY); return; }
+        if (editing() && !painting) { edHoverAt(e.clientX, e.clientY); if (edHover) { tileHover = null; return; } }
         const at = tileView.toPlane(e.clientX, e.clientY);
         if (tdrag) {
           tilePointer = { at, real: true, cursor: "grabbing" };
@@ -5227,12 +5235,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       else if (on) load(false); // (back to solved)
       if (on && isFlat() && has3D() && !viewFlat) { viewFlat = true; $("viewFlat").checked = true; showViews(false); planeBox = ""; } // (the cuts are set on the flat picture)
       setTool(on ? (edTool === "paint" ? "cut" : edTool) : null); // (opening it again: not still blacking out)
-      if (on) showHistory();
-      else {
-        if (axisGroup) axisGroup.visible = showAxes;
-        for (const k of ["undo", "redo"]) $(k).disabled = false;
-        $("undo").title = "undo the last turn (⌘Z)"; $("redo").title = "redo a turn you undid (⇧⌘Z)";
-      }
+      showHistory();
       renderTape();
       resize();
     }
@@ -5332,7 +5335,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const st = edSites(g, R, view).reduce((b, st) => (!b || Math.hypot(st.x - c.x, st.y - c.y) < Math.hypot(b.x - c.x, b.y - c.y) ? st : b), null);
         return st ? { site: { x: st.x, y: st.y }, lines: g.curve(R, st.at, v ?? R.values()[i], view.cam) } : { site: null, lines: [] };
       },
-      editHit(x, y) { aimAt(x, y); const h = edHitTest(x, y); return h && { r: h.r, i: h.i, px: h.px, dot: !!h.dot }; },
+      editHit(x, y) { aimAt(x, y); const h = edHitTest(x, y); return h && { r: h.r, i: h.i, px: h.px, dot: !!h.dot, at: JSON.stringify(h.at) }; },
       editSnaps(r, i) { return ((snaps[r] || [])[i] || []).slice(); },
       editRulers() { return RULERS.map((R, r) => ({ r, label: R.label, values: R.values().slice(), exists: R.exists, trim: R.trim || null })); },
       design() { return JSON.parse(JSON.stringify(design())); },

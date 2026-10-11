@@ -2,7 +2,7 @@
 // Run: node --test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSphere, sphereGeometry, sphereGroup, isSpherical, sphereStats, regionArea } from "./sphere.mjs";
+import { buildSphere, sphereGeometry, sphereGroup, isSpherical, sphereStats, regionArea, sphereCountBreaks, sphereSnapCandidates, SPHERE_RADIUS_RANGE } from "./sphere.mjs";
 import { solvedState, applyMove, inverseMove, isSolved, scrambleMoves, piecesInLayer, applyMat, mulMat, dot } from "./puzzle.mjs";
 
 const TILINGS = [[3, 3], [4, 3], [3, 4], [5, 3], [3, 5], [2, 3], [2, 6], [3, 2], [6, 2]];
@@ -135,6 +135,15 @@ test("circles that just touch make the same pieces as a hair smaller: what's bet
     assert.deepEqual(at(G.Ri), { 1: 20, 20: 1 });
     assert.deepEqual(at(G.Ri - 0.01), at(G.Ri));
   }
+});
+
+// (the search for where the count changes builds the ball at radii a hair from where circles meet:
+// a fragment's turned anchor read on the far side of a circle found no fragment, and it threw)
+test("a circle's count changes can be searched for right up to where circles meet", () => {
+  const P = build(4, 3, [{ on: "face", depths: [1.0986141108431853] }, { on: "vertex", depths: [0.2 * sphereGeometry(4, 3).Rv] }]);
+  let n = 0;
+  for (const x of sphereCountBreaks(P, "vertex", 0, ...SPHERE_RADIUS_RANGE, sphereSnapCandidates(P, "vertex", 0))) if (x.at !== undefined) n++;
+  assert.ok(n > 10);
 });
 
 test("blacking out a kind takes its stickers off", () => {

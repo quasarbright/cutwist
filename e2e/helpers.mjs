@@ -27,7 +27,7 @@ async function serveFromCache(route) {
 
 export async function open(page, query = "") {
   const errors = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(e.message + (process.env.STACKS ? "\n" + e.stack : "")));
   page.on("console", (m) => { if (m.type() === "error" && !/net::ERR_FAILED/.test(m.text())) errors.push(m.text()); });
   await page.route((url) => url.hostname !== "localhost", serveFromCache);
   await page.goto(`/index.html${query}`, { waitUntil: "domcontentloaded" });

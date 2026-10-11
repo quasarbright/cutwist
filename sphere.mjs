@@ -341,7 +341,9 @@ function findPieces(P) {
   // edge, looking for the neighbor's fragment there, can be outside all of them.)
   const distTo = (poly, z) => { let m = Infinity; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[j], b = poly[i], dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((z[0] - a[0]) * dx + (z[1] - a[1]) * dy) / (dx * dx + dy * dy || 1))); m = Math.min(m, Math.hypot(z[0] - a[0] - t * dx, z[1] - a[1] - t * dy)); } return m; };
   const locate = (z) => {
-    let c = bySig.get(sig(z)) || [];
+    // (none inside just those circles: a point a hair from a circle, read on its other side; then
+    // whichever fragment it's in or nearest)
+    let c = bySig.get(sig(z)) || R.map((_, i) => i);
     if (c.length > 1 && trimKinds.length) { const p = partOf(ch.back(z)), same = c.filter((i) => R[i].part.kind === p.kind && R[i].part.i === p.i); if (same.length) c = same; }
     if (c.length <= 1) return c.length ? c[0] : -1;
     return c.find((i) => faceHas(R[i].face, z)) ?? c.reduce((b, i) => (distTo(R[i].face.poly(), z) < distTo(R[b].face.poly(), z) ? i : b));
