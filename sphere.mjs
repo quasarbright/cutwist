@@ -152,9 +152,18 @@ const SPREAD = spread(3000);
 // ---- presets and parameters
 // The round puzzles are the same family as the hyperbolic ones (hyper.mjs's presets): sides and
 // tiles at a corner, set by the same steppers, whose circle is worked out for the tiling picked
-// (autoCut, see roundCuts). The beach ball: six wedges from pole to pole.
+// (autoCut, see roundCuts). The beach ball: six wedges from pole to pole. A flower: a circle round
+// every tile out to its corners, so the circles meet there, as the flat tilings' flowers (its
+// circles worked out for whatever tiling: cutsFor, in the tiling's own distances).
+const roundPreset = (id, name, N, M, more) => ({ id, name, rule: "hyper", size: 2, fixed: true, N, M, surface: 0, cuts: [], truncate: {}, blackout: [], params: HYPER_PARAMS, title: () => name, ...more });
+const flower = (id, name, N, M) => roundPreset(id, name, N, M, { cutsFor: (rv) => [{ on: "face", depths: [rv] }] });
 export const ROUND_PRESETS = [
-  { id: "ball-beach", name: "Beach Ball", rule: "hyper", size: 2, fixed: true, N: 2, M: 6, surface: 0, cuts: [], autoCut: true, truncate: {}, blackout: [], params: HYPER_PARAMS, title: () => "Beach Ball" },
+  roundPreset("ball-beach", "Beach Ball", 2, 6, { autoCut: true }),
+  flower("ball-tetrahedron-flower", "Tetrahedron Flower", 3, 3),
+  flower("ball-cube-flower", "Cube Flower", 4, 3),
+  flower("ball-octahedron-flower", "Octahedron Flower", 3, 4),
+  flower("ball-dodecahedron-flower", "Dodecahedron Flower", 5, 3),
+  flower("ball-icosahedron-flower", "Icosahedron Flower", 3, 5),
 ];
 // A preset's circles on a round tiling: round each tile, a bit past its corners, as on the
 // hyperbolic ones. But a beach ball's corners are its poles, a quarter turn from every wedge's

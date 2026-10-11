@@ -2196,7 +2196,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       renderParams();
     }
-    const roundSpec = (spec) => ({ N: spec.N, M: spec.M, truncate: spec.truncate || {}, cuts: spec.autoCut ? roundCuts(spec.N, spec.M) : spec.cuts, blackout: spec.blackout || [] });
+    // (a preset whose circles are worked out from the tiling's corner radius, as the flowers: cutsFor)
+    const withCuts = (spec) => (spec.cutsFor ? { ...spec, cuts: spec.cutsFor(cornerRadius(spec.N, spec.M)) } : spec);
+    const roundSpec = (spec) => ({ N: spec.N, M: spec.M, truncate: spec.truncate || {}, cuts: spec.autoCut ? roundCuts(spec.N, spec.M) : withCuts(spec).cuts, blackout: spec.blackout || [] });
     // a hyperbolic puzzle's steppers: sides and tiles at a corner, then its surfaces by size (a ball
     // has just the one)
     function hyperParams(spec) {
@@ -2299,7 +2301,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         return;
       }
       let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : isRound(spec) ? buildSphere(roundSpec(spec))
-        : spec.rule === "hyper" ? buildHyper(spec, hyperFileFor(spec)) : buildPuzzle(spec, size);
+        : spec.rule === "hyper" ? buildHyper(withCuts(spec), hyperFileFor(spec)) : buildPuzzle(spec, size);
       if (spec.rule === "hyper" && isCustom() && next.shrunk) {
         // (a design's circles too big for this surface, or too many to work out, came in till they
         // fit: the design takes them as built, and its rulers show them, unless one's being dragged)
@@ -5051,7 +5053,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       async settled() {
         for (const t0 = performance.now(); performance.now() - t0 < 10000;) {
           const s = currentSpec();
-          if (s.rule !== "hyper" || (isRound(s) && isSphere() && P.N === s.N && P.M === s.M) || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
+          if (s.rule !== "hyper" || (isRound(s) && isSphere() && P.N === s.N && P.M === s.M) || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || s.cutsFor || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
           await new Promise((r) => setTimeout(r, 25));
         }
         const s = currentSpec();
