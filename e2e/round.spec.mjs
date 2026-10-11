@@ -78,6 +78,40 @@ test("customizing: a solid design turns into an {N,M} one and back, and the link
   expect((await info(page)).faces).toBe(8);
 });
 
+test("the editor has the tiling's steppers too: a cube design's are {4,3}, and stepping one makes it a tiling", async ({ page }) => {
+  await open(page, "?puzzle=cube&rear=off");
+  await page.click("#customize");
+  const panel = (label) => page.locator("#bNM .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
+  await expect(panel("sides").locator("input")).toHaveValue("4");
+  await expect(panel("at a corner").locator("input")).toHaveValue("3");
+  await panel("at a corner").getByRole("button", { name: "+" }).click(); // {4,4}: the square torus
+  await expect.poll(async () => (await info(page)).tiling).toBe("square");
+  await panel("sides").getByRole("button", { name: "−" }).click(); // {3,4}: the octahedron's ball
+  expect(await settled(page)).toMatchObject({ sphere: true, N: 3, M: 4, tiles: 8 });
+});
+
+test("truncating a ball's corners: a face round each, the same pieces; and a hyperbolic one's", async ({ page }) => {
+  await open(page, "?puzzle=hyper-klein&N=4&M=3&rear=off");
+  await settled(page);
+  await page.click("#customize");
+  const before = await info(page);
+  await page.locator("#bTrim .tw-rblock", { hasText: "corners" }).getByRole("button", { name: "+ truncate" }).click();
+  await expect.poll(async () => (await info(page)).faces).toBe(before.faces + 8);
+  expect((await info(page)).pieces).toBe(before.pieces);
+  const link = await page.evaluate(() => window.cutwist.shareLink());
+  expect(JSON.parse(Buffer.from(new URL(link).searchParams.get("design"), "base64url").toString()).truncate.vertex).toBeGreaterThan(0);
+  await page.locator("#bNM .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,4}: a torus, still truncated
+  await page.locator("#bNM .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,5}: hyperbolic
+  expect(await settled(page)).toMatchObject({ hyper: true, N: 4, M: 5 });
+  const d = JSON.parse(Buffer.from(new URL(await page.evaluate(() => window.cutwist.shareLink())).searchParams.get("design"), "base64url").toString());
+  expect(d.truncate.vertex).toBeGreaterThan(0);
+  const moves = await page.evaluate(() => window.cutwist.scramble());
+  await finish(page);
+  expect((await info(page)).solved).toBe(false);
+  await turn(page, ...(await page.evaluate((m) => window.cutwist.invert(m), moves)).map((m) => [m.axis, m.layer, m.q]));
+  expect((await info(page)).solved).toBe(true);
+});
+
 test("on a phone, the ball fits and turns", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await open(page, "?puzzle=ball-beach");

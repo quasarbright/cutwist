@@ -175,19 +175,34 @@ const tileColors = (N, M, n) => {
   return Array.from({ length: n }, (_, k) => WEDGE_COLORS[k] || `hsl(${Math.round((k * 137.508) % 360)}, 55%, ${k % 2 ? 42 : 60}%)`);
 };
 
-// ---- building a puzzle: spec { N, M, cuts: [{ on, depths: [radius] }], blackout }
+// Truncation, as on the flat tilings: a tile's corners (or edges) cut off by a line square to the
+// way from its middle to the corner (the edge's middle), a fraction f of the way there (here, of the
+// angle), making a face round each corner (edge) with its own color. On the ball, those lines are
+// great circles, so it's the flat-faced solid's truncation seen on the ball. f: spec.truncate.vertex,
+// .edge, in (0, 1): what the editor's truncation ruler sets.
+const truncationOf = (spec) => Object.fromEntries(["vertex", "edge"].flatMap((k) => { const f = spec.truncate && spec.truncate[k]; return Number.isFinite(f) && f > 0 && f < 1 ? [[k, f]] : []; }));
+// the corners' and edges' faces' colors, round the hue circle (as the solids' and the flat tilings')
+const trimColor = (kind, k, n) => `hsl(${Math.round((k * 360) / n + (kind === "vertex" ? 15 : 195))}, ${kind === "vertex" ? 45 : 40}%, ${kind === "vertex" ? 72 : 48}%)`;
+
+// ---- building a puzzle: spec { N, M, cuts: [{ on, depths: [radius] }], truncate, blackout }
 export function buildSphere(spec) {
   const { N, M } = spec, G = sphereGeometry(N, M), H = sphereGroup(N, M);
   const radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k)]));
-  const colors = tileColors(N, M, H.normals.length);
+  // the faces: the tiles, then the truncated corners' and edges' (P.faceBase: where each kind's start)
+  const truncate = truncationOf(spec), T = H.normals.length;
+  const trims = ["vertex", "edge"].filter((k) => truncate[k] !== undefined);
+  const normals = [...H.normals, ...trims.flatMap((k) => H.points[k])], faceBase = { face: 0 };
+  trims.reduce((at, k) => { faceBase[k] = at; return at + H.points[k].length; }, T);
+  const colors = [...tileColors(N, M, T).slice(0, T), ...trims.flatMap((k) => H.points[k].map((_, i, all) => trimColor(k, i, all.length)))];
+  const which = (p) => normals.findIndex((v) => len(sub(v, p)) < 1e-6);
   const P = {
-    kind: "sphere", spec, N, M, G, H, radii, R: 1, size: 2,
-    normals: H.normals, colors, textures: faceTextures(colors), texturesByDefault: colors.length >= TEXTURE_MIN_FACES,
+    kind: "sphere", spec, N, M, G, H, radii, truncate, faceBase, R: 1, size: 2,
+    normals, colors, textures: faceTextures(colors), texturesByDefault: colors.length >= TEXTURE_MIN_FACES,
     // (for the axis stubs, which start just past the surface: the solid's farthest points along
     // them. Every axis goes through a tile's middle, a corner or an edge's middle, all on the ball.)
     solid: { polys: H.normals.map((v, color) => ({ verts: [v, ...H.points.vertex, ...H.points.edge], normal: v, color })) },
-    group: { mats: H.mats, mul: H.mul, find: H.find, facePerm: H.facePerm },
-    tiles: H.normals.length,
+    group: { mats: H.mats, mul: H.mul, find: H.find, facePerm: H.mats.map((m) => normals.map((v) => which(applyMat(m, v)))) },
+    tiles: T,
   };
   // every circle: a cap { p, r, c: cos r } around every point of a kind, for each of its radii
   const capsOf = () => KINDS.flatMap((kind) => radii[kind].flatMap((r, ring) => H.points[kind].map((p, at) => ({ kind, at, ring, p, r, c: Math.cos(r) }))));
@@ -222,7 +237,8 @@ function findAxes(P) {
     ax.order = H.mats.filter((m) => len(sub(applyMat(m, ax.dir), ax.dir)) < 1e-6).length;
     ax.rot = Array.from({ length: ax.order }, (_, q) => H.find(rotMat(ax.dir, (q * TAU) / ax.order)));
     // the tiles nearest each end (what you'd grab to turn from there)
-    const ends = (e) => { const best = Math.max(...P.normals.map((n) => dot(n, e))); return P.normals.map((_, i) => i).filter((i) => dot(P.normals[i], e) > best - 1e-3); };
+    const tiles = P.normals.slice(0, P.tiles);
+    const ends = (e) => { const best = Math.max(...tiles.map((n) => dot(n, e))); return tiles.map((_, i) => i).filter((i) => dot(tiles[i], e) > best - 1e-3); };
     ax.posFaces = ends(ax.dir);
     ax.negFaces = ends(scale(ax.dir, -1));
     ax.empty = Array.from({ length: ax.layers }, () => true);
@@ -246,9 +262,31 @@ function findPieces(P) {
   // the circles crossing tile 0 (a cap that holds all of it, or none, doesn't cut it): a circle
   // crosses tile 0 if its radius is within Rv of its middle's distance from tile 0's
   const crossing = caps.filter((k) => { const d = Math.acos(Math.max(-1, Math.min(1, dot(k.p, G.c0)))); return Math.abs(d - k.r) < G.Rv + 1e-6; });
+  // The truncation (see truncationOf): its lines are great circles, planes through the middle (n·x =
+  // 0): each corner's (edge's) cut, and where two neighboring corners' (edges') faces meet. A point
+  // of tile 0 is in corner i's face if it's past the cut of the corner it's furthest toward (corners
+  // first, then edges, then it's the tile's).
+  const toward = (p) => normalize(sub(p, scale(G.c0, dot(p, G.c0))));
+  const trimKinds = ["vertex", "edge"].filter((k) => P.truncate[k] !== undefined).map((kind) => {
+    const dirs = (kind === "vertex" ? G.corners : G.mids).map(toward), t = P.truncate[kind] * (kind === "vertex" ? G.Rv : G.Ri);
+    return { kind, dirs, cut: dirs.map((u) => sub(scale(u, Math.cos(t)), scale(G.c0, Math.sin(t)))) };
+  });
+  const partOf = (P.partOf = (x) => {
+    for (const { kind, dirs, cut } of trimKinds) {
+      let i = 0;
+      dirs.forEach((u, j) => { if (dot(x, u) > dot(x, dirs[i])) i = j; });
+      if (dot(x, cut[i]) > 0) return { kind, i };
+    }
+    return { kind: "face", i: 0 };
+  });
+  const trimPlanes = [];
+  for (const { dirs, cut } of trimKinds) for (const n of [...cut, ...dirs.map((u, j) => sub(u, dirs[(j + 1) % dirs.length]))]) {
+    const u = normalize(n);
+    if (!trimPlanes.some((v) => Math.abs(Math.abs(dot(u, v)) - 1) < 1e-9)) trimPlanes.push(u);
+  }
   // the picture's pole: off tile 0 (near its opposite point, where the picture of tile 0 is
-  // roundest) and as far as can be from every circle crossing it and every edge's great circle
-  const clear = (q) => Math.min(...crossing.map((k) => Math.abs(Math.acos(Math.max(-1, Math.min(1, dot(k.p, q)))) - k.r)), ...G.edgeNormals.map((n) => Math.abs(Math.asin(Math.max(-1, Math.min(1, dot(n, q)))))));
+  // roundest) and as far as can be from every circle crossing it and every great circle there
+  const clear = (q) => Math.min(...crossing.map((k) => Math.abs(Math.acos(Math.max(-1, Math.min(1, dot(k.p, q)))) - k.r)), ...[...G.edgeNormals, ...trimPlanes].map((n) => Math.abs(Math.asin(Math.max(-1, Math.min(1, dot(n, q)))))));
   const far = scale(G.c0, -1);
   let q = far, best = -1;
   for (const cone of [0.6, 1.2, Math.PI]) {
@@ -265,7 +303,8 @@ function findPieces(P) {
     if (!circles.some((o) => Math.hypot(o.c[0] - c.c[0], o.c[1] - c.c[1]) < 1e-9 && Math.abs(o.r - c.r) < 1e-9)) circles.push(c);
   }
   const edges = G.edgeNormals.map((n) => ({ ...ch.circle(n, 0), n }));
-  const all = [...circles, ...edges];
+  const trimLines = trimPlanes.map((n) => ({ ...ch.circle(n, 0), n }));
+  const all = [...circles, ...edges, ...trimLines];
   const sig = (z) => sigOf(caps, ch.back(z));
   // the fragments: the regions of the picture inside tile 0
   P.regions = [];
@@ -280,7 +319,7 @@ function findPieces(P) {
       const z = [x0 + ((x1 - x0) * i) / 12, y0 + ((y1 - y0) * j) / 12];
       if (faceHas(f, z) && depth(z) > deepest) { deepest = depth(z); anchor = z; }
     }
-    P.regions.push({ face: f, outline: [f.outer, ...f.holes], anchor, at: ch.back(anchor), sig: sig(anchor) });
+    P.regions.push({ face: f, outline: [f.outer, ...f.holes], anchor, at: ch.back(anchor), sig: sig(anchor), part: partOf(ch.back(anchor)) });
   }
   const R = P.regions, nR = R.length, T = H.reps.length;
   const bySig = new Map();
@@ -311,8 +350,28 @@ function findPieces(P) {
       }
     }
   });
+  // Across the truncation's lines, inside tile 0: they split stickers, not pieces. (A hair over from
+  // the middle of each stretch, the fragment there, unless a circle runs along the line.) And the
+  // lines drawn between stickers (P.regions[f].lines): its stretches along circles and tile edges,
+  // and along the truncation's lines where the face changes (a cut runs on past where its face
+  // ends, through the next corner's face).
+  const trimOf = new Set(trimLines.map((e) => e.c)), inside = [];
+  R.forEach((r, f) => {
+    r.lines = [];
+    for (const loop of r.outline) for (const arc of loop) {
+      if (!trimOf.has(arc.c)) { r.lines.push(arc); continue; }
+      const t = (arc.a0 + arc.a1) / 2, z = [arc.c[0] + arc.r * Math.cos(t), arc.c[1] + arc.r * Math.sin(t)], e = 1e-4;
+      const [g1, g2] = [1, -1].map((s) => locate([z[0] + s * e * Math.cos(t), z[1] + s * e * Math.sin(t)]));
+      const g = g1 === f ? g2 : g1;
+      if (g < 0 || g === f) continue;
+      const pg = R[g].part, pf = r.part;
+      if (pg.kind !== pf.kind || pg.i !== pf.i) r.lines.push(arc);
+      if (R[g].sig === r.sig) inside.push([f, g]);
+    }
+  });
   const up = new Int32Array(T * nR).map((_, i) => i), root = (i) => (up[i] === i ? i : (up[i] = root(up[i])));
   for (const h of H.reps) for (const [f, d, g] of steps) if (g >= 0) { const a = root(canon(h, f)), b = root(canon(H.mul[h][d], g)); if (a !== b) up[Math.max(a, b)] = Math.min(a, b); }
+  for (const h of H.reps) for (const [f, g] of inside) { const a = root(canon(h, f)), b = root(canon(h, g)); if (a !== b) up[Math.max(a, b)] = Math.min(a, b); }
   const groupsOf = new Map();
   for (let t = 0; t < T; t++) for (let f = 0; f < nR; f++) {
     const top = root(t * nR + f);
@@ -351,9 +410,13 @@ function findPieces(P) {
   P.types = P.pieces.map((_, i) => { const t = troot(i); if (!typeIds.has(t)) typeIds.set(t, typeIds.size); return typeIds.get(t); });
   // each fragment drawn as a sticker of its tile's color (none if blacked out): polys as
   // puzzle.mjs's, each a fragment (x, f) instead of a flat polygon
+  // (a fragment's face: its tile's, or, truncated, the corner's or edge's it's in: that point of
+  // tile 0, carried to its tile, among the faces' points)
+  const faceOf = ({ kind, i }, x) => (kind === "face" ? H.tileOf[x]
+    : P.faceBase[kind] + H.points[kind].findIndex((p) => len(sub(p, applyMat(H.mats[x], (kind === "vertex" ? G.corners : G.mids)[i]))) < 1e-6));
   P.pieces.forEach((pc, i) => {
     const black = blackout.has(P.types[i]);
-    pc.polys = pc.frags.map(({ x, f }) => ({ x, f, color: black ? -1 : H.tileOf[x], normal: applyMat(H.mats[x], R[f].at) }));
+    pc.polys = pc.frags.map(({ x, f }) => ({ x, f, color: black ? -1 : faceOf(R[f].part, x), normal: applyMat(H.mats[x], R[f].at) }));
     pc.stickers = pc.polys.filter((s) => s.color >= 0);
     pc.kind = new Set(pc.frags.map(({ x }) => H.tileOf[x])).size;
   });
@@ -361,9 +424,18 @@ function findPieces(P) {
 }
 
 // A fragment's shape, for drawing it: its outline (and holes) in tile 0's flat picture, each a fine
-// polygon, and the way from the picture back onto the sphere (in tile 0's frame; a fragment (x, f)
-// is fragment f turned by x)
-export const regionShape = (P, f) => ({ outer: P.regions[f].face.poly(), holes: P.regions[f].face.holePolys(), back: P.chart.back });
+// polygon, its lines (the stretches of outline drawn between stickers, each as points about every
+// `step` on the sphere, ends included), and the way from the picture back onto the sphere (in tile
+// 0's frame; a fragment (x, f) is fragment f turned by x)
+export function regionShape(P, f, step = 0.04) {
+  const r = P.regions[f], back = P.chart.back;
+  const lines = r.lines.map(({ c, r: rr, a0, a1 }) => {
+    const at = (a) => [c[0] + rr * Math.cos(a), c[1] + rr * Math.sin(a)];
+    const k = Math.max(1, Math.ceil(len(sub(back(at(a0)), back(at((a0 + a1) / 2)))) * 2 / step));
+    return Array.from({ length: k + 1 }, (_, i) => at(a0 + ((a1 - a0) * i) / k));
+  });
+  return { outer: r.face.poly(), holes: r.face.holePolys(), lines, back };
+}
 
 // ---- snap marks: the radii where the drawing changes, as on the flat and hyperbolic tilings: a
 // kind's circle number i passing through another tile's middle, corner or edge's middle; touching

@@ -95,6 +95,25 @@ test("a turn moves the pieces in its cap, and they land on pieces' places", () =
   P.pieces.forEach((pc, i) => { const c = applyMat(P.group.mats[s[i]], pc.centroid); assert.ok(mids.some((m) => Math.hypot(m[0] - c[0], m[1] - c[1], m[2] - c[2]) < 1e-9)); });
 });
 
+test("truncation: corners' and edges' faces with their own colors, the stickers still covering the ball once, and no new pieces", () => {
+  for (const [N, M] of TILINGS) for (const truncate of [{ vertex: 0.6 }, { edge: 0.5 }, { vertex: 0.4, edge: 0.8 }]) {
+    const G = sphereGeometry(N, M), cuts = [{ on: "face", depths: [1.1 * G.Rv] }];
+    const plain = buildSphere({ N, M, cuts, blackout: [] }), P = buildSphere({ N, M, cuts, truncate, blackout: [] });
+    const name = `{${N},${M}} ${JSON.stringify(truncate)}`;
+    assert.equal(P.n, plain.n, name);
+    assert.equal(P.colors.length, P.normals.length, name);
+    assert.equal(P.normals.length, P.tiles + (truncate.vertex ? P.H.points.vertex.length : 0) + (truncate.edge ? P.H.points.edge.length : 0), name);
+    let area = 0;
+    for (const pc of P.pieces) for (const s of pc.stickers) area += regionArea(P, s.f);
+    assert.ok(Math.abs(area - 4 * Math.PI) < 1e-4, `${name}: ${area}`);
+    // (a corner's face is where its corner is)
+    if (truncate.vertex) assert.ok(P.regions.some((r) => r.part.kind === "vertex"), name);
+  }
+  // a turn of a tile, truncated: its corners' faces go round with it, so it's not solved till it's back
+  const P = build(4, 3, [{ on: "face", depths: [1.1] }]), Q = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [1.1] }], truncate: { vertex: 0.6 }, blackout: [] });
+  for (const X of [P, Q]) { const s = play(X, [{ axis: 0, layer: 2, q: 1 }]); assert.equal(isSolved(X, s), false); play(X, [{ axis: 0, layer: 2, q: 3 }], s); assert.ok(isSolved(X, s)); }
+});
+
 test("blacking out a kind takes its stickers off", () => {
   const P = build(4, 3, [{ on: "face", depths: [1.1] }]), corner = P.types[P.pieces.findIndex((pc) => pc.kind === 3)];
   const Q = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [1.1] }], blackout: [corner] });

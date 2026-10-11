@@ -65,6 +65,17 @@ function hyperColors(P) {
   return out;
 }
 
+// A face's color: a tile's (hyperColor), or a truncated corner's or edge's, round the hue circle as
+// the solids' and the flat tilings' are. kind: "face", "vertex" or "edge"; c: which (its coset).
+const trimSets = new WeakMap();
+export function hyperFaceColor(P, kind, c) {
+  if (kind === "face") return hyperColor(P, c);
+  if (!trimSets.has(P)) trimSets.set(P, {});
+  const sets = trimSets.get(P), n = P.H.coset[kind].reps.length;
+  sets[kind] ||= Array.from({ length: n }, (_, k) => `hsl(${Math.round((k * 360) / n + (kind === "vertex" ? 15 : 195))}, ${kind === "vertex" ? 45 : 40}%, ${kind === "vertex" ? 72 : 48}%)`);
+  return sets[kind][c];
+}
+
 // Each fragment of tile 0 (hyper.mjs's P.regions: a piece is some of them, on its tiles) as
 // polygons, once per puzzle, at a few levels of detail (a small copy needs fewer points):
 // shapes[f][lod] = { loops (its outline, to fill even-odd), cuts: [{ pts, p }] (its stretches along
@@ -194,6 +205,21 @@ export class HyperView {
       if (!circle || !meets(circle)) continue;
       const key = [circle.c[0], circle.c[1], circle.r].map((x) => Math.round(x * 1e6)).join();
       if (!seen.has(key)) { seen.add(key); edges.push({ ...circle, a, b }); }
+    }
+    // (truncated: the lines round the corners' and edges' faces too, each side of each a stretch of a
+    // straight line of the plane, as the tiles' edges are; the ones along a tile's edge are that edge)
+    for (const d of this.listVisible().tiles) for (const fc of P.tileFaces || []) {
+      if (fc.kind === "face") continue;
+      const per = fc.disk.length / fc.klein.length;
+      for (let j = 0; j < fc.klein.length; j++) {
+        const [a, m, b] = [fc.disk[j * per], fc.disk[j * per + per / 2], fc.disk[((j + 1) % fc.klein.length) * per]].map((p) => Mb.apply(d.m, p));
+        // (one through the disk's middle is straight there, which the 3D view's lines, circles, can't
+        // be: where two corners' faces meet, cut deep enough, on the tile in the middle. Left out.)
+        const circle = circleThrough(a, m, b);
+        if (!circle || !meets(circle)) continue;
+        const key = [circle.c[0], circle.c[1], circle.r, a[0], a[1]].map((x) => Math.round(x * 1e6)).join();
+        if (!seen.has(key)) { seen.add(key); edges.push({ ...circle, a, b }); }
+      }
     }
     const first = (list) => [...list.filter(near), ...list.filter((q) => !near(q))];
     return { cuts: first(cuts), edges: first(edges), nearCuts: cuts.filter(near).length, nearEdges: edges.filter(near).length, copies };
@@ -441,7 +467,7 @@ export class HyperView {
   // a tile's size on screen (for skipping the ones too small to see)
   pxSize(m) { const c = Mb.apply(m, [0, 0]), k = Mb.apply(m, this.P.G.corners[0]); return abs([c[0] - k[0], c[1] - k[1]]) * this.R; }
   lineFor(m) { return Math.max(0.35, Math.min(2, 0.035 * this.pxSize(m))); }
-  // the solved picture: every visible tile in its color
+  // the solved picture: every visible tile in its color (and its truncated corners' and edges')
   paintTiles(ctx) {
     const { P } = this;
     for (const d of this.listVisible().tiles) {
@@ -450,7 +476,24 @@ export class HyperView {
       // (small ones: their corners will do, the edges' bend is under a pixel)
       if (px < 12) this.trace(ctx, P.G.corners, d.m); else this.trace(ctx, P.G.poly, d.m, this.stepFor(px));
       ctx.fillStyle = hyperColor(P, P.H.coset.face.of[d.e]); ctx.fill();
+      if (px >= PIECE_PX) this.paintTrims(ctx, P.tileFaces.map((_, k) => k), d.e, d.m, px);
     }
+  }
+  // A tile's truncated corners' and edges' faces (faces: indices into P.tileFaces), drawn over it
+  // where they are in the tile seen from dart m, whose element at home is x: each in its color, and
+  // (not for the 3D view's texture) the lines between them
+  paintTrims(ctx, faces, x, m, px) {
+    const { P } = this, trims = faces.map((k) => P.tileFaces[k]).filter((fc) => fc.kind !== "face");
+    if (!trims.length) return;
+    const step = this.stepFor(px);
+    for (const fc of trims) {
+      ctx.beginPath(); this.trace(ctx, fc.disk, m, step);
+      ctx.fillStyle = hyperFaceColor(P, fc.kind, P.H.coset[fc.kind].of[P.faceElement(x, fc)]); ctx.fill();
+      if (this.bare) { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.stroke(); }
+    }
+    if (this.bare) return;
+    ctx.strokeStyle = BODY; ctx.lineWidth = this.edgeWidth(m); ctx.lineJoin = "round";
+    for (const fc of trims) { ctx.beginPath(); this.trace(ctx, fc.disk, m, step); ctx.stroke(); }
   }
   // the tiles' edges, each once (see firstSide), over the colors
   tileEdges(ctx) {
@@ -522,6 +565,16 @@ export class HyperView {
           ctx.fillStyle = pc.black ? BLACK : hyperColor(P, pc.faces[k]); ctx.fill("evenodd");
           // (no lines over the joins, as for the 3D view's texture: each a little wider, so no hairline gap shows between)
           if (this.bare) { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.stroke(); ctx.strokeStyle = BODY; }
+          // (truncated: the corners' and edges' faces it overlaps, in the fragment only)
+          if (!pc.black && P.regions[f].faces.length > 1) {
+            ctx.save();
+            ctx.beginPath();
+            for (const poly of shape.loops) this.trace(ctx, poly, m);
+            ctx.clip("evenodd");
+            this.paintTrims(ctx, P.regions[f].faces, x, m, px);
+            ctx.restore();
+            ctx.strokeStyle = BODY;
+          }
         }
       });
     }

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount, hyperCountBreaks, hyperPieceCountAt, hyperRadiusLimit, hyperSnapCandidates } from "./hyper.mjs";
+import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount, hyperCountBreaks, hyperPieceCountAt, hyperRadiusLimit, hyperSnapCandidates, tileFaces } from "./hyper.mjs";
 import { faceHas, inPolygon } from "./tiles.mjs";
 import { fragmentShapes } from "./hyper-view.mjs";
 
@@ -184,4 +184,34 @@ test("the fragments counted ahead (the budget's) are never many fewer than found
     const est = fragmentCount(P, P.radii), n = P.regions.length;
     assert.ok(est >= 0.9 * n && est <= 1.6 * n, `{${P.N},${P.M}}: counted ${est}, found ${n}`);
   }
+});
+
+test("truncation: the tile's own face and its corners' and edges' cover it exactly, the corners' each round one corner", () => {
+  const G = geometry(7, 3), area = (p) => Math.abs(p.reduce((s, a, i) => { const b = p[(i + 1) % p.length]; return s + a[0] * b[1] - a[1] * b[0]; }, 0)) / 2;
+  const whole = area(tileFaces(G, {}).find((fc) => fc.kind === "face").klein);
+  for (const truncate of [{ vertex: 0.6 }, { edge: 0.5 }, { vertex: 0.3, edge: 0.8 }, { vertex: 0.9, edge: 0.4 }]) {
+    const faces = tileFaces(G, truncate);
+    assert.ok(Math.abs(faces.reduce((s, fc) => s + area(fc.klein), 0) - whole) < 1e-9, JSON.stringify(truncate));
+    // (a corner's face holds that corner and no other)
+    for (const fc of faces.filter((f) => f.kind === "vertex")) {
+      const k = G.corners[fc.i], s = 2 / (1 + k[0] ** 2 + k[1] ** 2), c = [k[0] * s * 0.999, k[1] * s * 0.999];
+      assert.ok(inPolygon(fc.klein, c), JSON.stringify(truncate));
+    }
+  }
+  assert.equal(tileFaces(G, { vertex: 0.6 }).length, 8); // (the heptagon's own, and its 7 corners')
+});
+
+test("truncation makes a tile's corners count: a turn that brings them back round to other corners isn't solved", () => {
+  const P = preset("hyper-klein", { cuts: [{ on: "face", depths: [1.15 * geometry(7, 3).Rv] }], truncate: { vertex: 0.6 } });
+  assert.equal(P.tileFaces.length, 8);
+  assert.ok(P.regions.some((r) => r.faces.length > 1));
+  const s = play(P, [{ axis: 0, layer: 0, q: 1 }]);
+  assert.equal(isHyperSolved(P, s), false);
+  play(P, Array(6).fill({ axis: 0, layer: 0, q: 1 }), s);
+  assert.ok(isHyperSolved(P, s));
+  // (and scrambles still undo)
+  const moves = hyperScrambleMoves(P, 60, seeded(4)), t = play(P, moves);
+  assert.equal(isHyperSolved(P, t), false);
+  play(P, moves.slice().reverse().map((m) => inverseHyperMove(P, m)), t);
+  assert.ok(isHyperSolved(P, t));
 });

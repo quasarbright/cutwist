@@ -565,6 +565,7 @@
       <section>
         <div class="tw-label" id="bSolidLabel" title="the shape before it's cut">solid</div>
         <div class="tw-chips" id="bSolid" role="radiogroup" aria-label="solid"></div>
+        <div id="bNM" class="nx-sizes"></div>
       </section>
 
       <!-- trim: reshape the solid by cutting its corners or edges flat, before any twisting cuts -->
@@ -1139,7 +1140,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function roundRegion(Q, f) {
       Q.roundRegions ??= [];
       if (Q.roundRegions[f]) return Q.roundRegions[f];
-      const { outer, holes, back } = regionShape(Q, f);
+      const { outer, holes, lines: drawn, back } = regionShape(Q, f, ROUND.outline);
       // (the outlines are drawn very finely in the picture: a point every ROUND.outline on the sphere
       // will do, under lines as wide as the chords stray from the arcs. But never its corners, where
       // arcs meet: skipped, the fragment's tip was cut off and the core showed where lines cross.)
@@ -1151,7 +1152,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           const a = loop[(i - 1 + n) % n], b = loop[(i + 1) % n];
           const turn = Math.abs(Math.atan2((z[0] - a[0]) * (b[1] - z[1]) - (z[1] - a[1]) * (b[0] - z[0]), (z[0] - a[0]) * (b[0] - z[0]) + (z[1] - a[1]) * (b[1] - z[1])));
           const x = back(z), corner = turn > 0.15;
-          if (corner) corners.push(x);
           if (corner || !last || len(sub(x, last)) > ROUND.outline) { out.push(z); last = x; }
         });
         return out.length >= 3 ? out : loop;
@@ -1196,18 +1196,20 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const [a, b, c] = [flat[i], flat[j], flat[k]], ccw = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]) > 0;
         if (ccw !== mirrored) split(a, b, c, 0); else split(a, c, b, 0);
       }
-      // the lines: a ribbon along each loop, as wide as ROUND.lineWidth
+      // the lines: a ribbon as wide as ROUND.lineWidth along each stretch of outline drawn (the
+      // circles, the tiles' edges and the truncation's, not a truncation line running on through a
+      // face), and a round dot at each end, so lines meet in a round join, not square ends crossing
       const lines = [];
-      for (const loop of loops) {
-        const pts = loop.map(back), n = pts.length;
-        for (let i = 0; i < n; i++) {
-          const p = pts[i], q = pts[(i + 1) % n], t = normalize(sub(q, p)), w = scale(normalize(cross(p, t)), ROUND.lineWidth / 2);
+      for (const stretch of drawn) {
+        const pts = stretch.map(back);
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const p = pts[i], q = pts[i + 1], t = normalize(sub(q, p)), w = scale(normalize(cross(p, t)), ROUND.lineWidth / 2);
           const w2 = scale(normalize(cross(q, t)), ROUND.lineWidth / 2);
           const a = add(p, w), b = sub(p, w), c = add(q, w2), d = sub(q, w2);
           lines.push(a, b, c, b, d, c);
         }
+        corners.push(pts[0], pts[pts.length - 1]);
       }
-      // (and a round dot at each corner, so lines meet in a round join, not square ends crossing)
       for (const p of corners) {
         const [u, v] = [normalize(cross(p, Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]))].map((u) => [u, cross(p, u)])[0], r = ROUND.lineWidth / 2;
         const at = (k) => add(p, add(scale(u, r * Math.cos((k * TAU) / 12)), scale(v, r * Math.sin((k * TAU) / 12))));
@@ -1511,7 +1513,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const y = normalize(sub([0, 1, 0], scale(z, z[1]))), x = cross(y, z);
         return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().set(...x, 0, ...y, 0, ...z, 0, 0, 0, 0, 1));
       }
-      const ns = Q.normals, n0 = ns[0];
+      const ns = Q.kind === "sphere" ? Q.normals.slice(0, Q.tiles) : Q.normals, n0 = ns[0]; // (a ball's tiles, not its truncation's faces)
       const byAngle = (ref, list) => [...list].sort((a, b) => dot(b, ref) - dot(a, ref));
       let [a, ...rest] = byAngle(n0, ns.slice(1));
       let b = byAngle(add(n0, a), rest)[0];
@@ -1553,7 +1555,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const isCircleDesign = () => isTileDesign() || isHyperDesign(); // (its cuts are circles, with radii)
     const design = () => (isTileDesign()
       ? { rule: "tiles", tiling: custom.tiling, a: custom.a, b: custom.b, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout }
-      : isHyperDesign() ? { rule: "hyper", N: custom.N, M: custom.M, surface: custom.surface, cuts: custom.cuts, blackout: custom.blackout }
+      : isHyperDesign() ? { rule: "hyper", N: custom.N, M: custom.M, surface: custom.surface, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout }
       : { solid: custom.solid, truncate: custom.truncate, cuts: custom.cuts, blackout: custom.blackout });
     const hyperCustom = (d) => ({ name: "Custom", size: 2, fixed: true, params: HYPER_PARAMS, truncate: {}, ...d, cuts: threeSets(d.cuts) });
     // a tile-turning design as a puzzle spec: the design, with the steppers for its torus
@@ -1606,8 +1608,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (!isHyperbolic(N, M) && !isSpherical(N, M)) return null;
       const cuts = (Array.isArray(c.cuts) ? c.cuts : []).filter((s) => ON_NAMES[s.on])
         .map((s) => ({ on: s.on, depths: (Array.isArray(s.depths) ? s.depths : []).map(Number).filter((d) => Number.isFinite(d) && d > 0.05 && d < 5) }));
+      const truncate = {};
+      for (const k of ["vertex", "edge"]) {
+        const f = c.truncate && Number(c.truncate[k]);
+        if (Number.isFinite(f)) truncate[k] = Math.max(TRIM_MIN, Math.min(TRIM_MAX, f));
+      }
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
-      return hyperCustom({ rule: "hyper", N, M, surface: int(c.surface, 0, 999, 0), cuts, blackout });
+      return hyperCustom({ rule: "hyper", N, M, surface: int(c.surface, 0, 999, 0), truncate, cuts, blackout });
     }
     // a custom design as URL-safe base64 JSON
     const designCode = () => btoa(JSON.stringify(design())).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -1817,7 +1824,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // tip, nothing off. The design keeps the depth.)
     const trimRuler = (kind) => ({
       group: "bTrim", label: kind === "vertex" ? "corners" : "edges", range: [1 - TRIM_RANGE[1], 1 - TRIM_RANGE[0]], max: 1, noun: "truncation", center: false,
-      get title() { return `cut the ${isTileDesign() ? "tiles'" : "solid's"} ${kind === "vertex" ? "corners" : "edges"} off flat; 0 takes nothing off, higher cuts more off`; },
+      get title() { return `cut the ${isCircleDesign() ? "tiles'" : "solid's"} ${kind === "vertex" ? "corners" : "edges"} off ${isCircleDesign() ? "straight" : "flat"}; 0 takes nothing off, higher cuts more off`; },
       depth: (v) => 1 - v, // (ruler → design, and back)
       values: () => (custom.truncate[kind] === undefined ? [] : [1 - custom.truncate[kind]]),
       set: (_, v) => { custom.truncate[kind] = 1 - v; },
@@ -2054,9 +2061,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function renderBuilder() {
       // a solid, or a tile-turning design's tiling
       const tiles = isTileDesign();
-      // (a hyperbolic or round design's tiling is set by its steppers; and there's no truncating it yet)
-      // (by style: the builder's sections are flex boxes, which the hidden attribute doesn't beat)
-      $("bTrim").closest("section").style.display = isHyperDesign() ? "none" : "";
+      // (a hyperbolic or round design's tiling is set by its steppers)
       $("bSolidLabel").textContent = tiles ? "tiling" : "solid";
       $("bSolidLabel").title = tiles ? "the tiles on the torus before it's cut" : "the shape before it's cut";
       if (tiles) radio($("bSolid"), Object.keys(TILINGS).map((k) => [k, TILINGS[k].name + "s", `${TILINGS[k].name}s on a torus`]), custom.tiling,
@@ -2070,7 +2075,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         (k) => {
           pushUndo();
           if (k === "nm") {
-            const [N, M] = { tetrahedron: [3, 3], octahedron: [3, 4], dodecahedron: [5, 3], icosahedron: [3, 5] }[custom.solid] || [4, 3];
+            const { N, M } = designNM() || { N: 4, M: 3 };
             custom = hyperCustom({ rule: "hyper", N, M, surface: 0, cuts: roundCuts(N, M), blackout: [] });
           } else if (isHyperDesign()) custom = { name: "Custom", rule: "custom", size: 2, fixed: true, solid: k, truncate: {}, cuts: threeSets([{ on: "face", depths: [0.33] }]), blackout: [] };
           else custom.solid = k;
@@ -2078,6 +2083,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           changed();
           computeSnaps();
         });
+      // the tiling's steppers here too: a solid's are its own {N,M} (the cube's {4,3}), and stepping
+      // them makes it a tiling design (see stepTiling); the rhombic solids have none
+      const nm = designNM();
+      $("bNM").replaceChildren(...(nm ? ["N", "M"].map((key, i) => stepperRow(HYPER_PARAMS[i], () => designNM()[key], (v) => stepTiling(key, v))) : []));
       renderRulers();
     }
     // The solid or cuts changed. rerender: rebuild the builder's controls too (not while a
@@ -2141,6 +2150,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // ball, a torus or a hyperbolic surface (see stepTiling).
     const FLAT = { "6,3": "hex", "4,4": "square", "3,6": "triangle" };
     const tilingNM = (spec) => (spec.rule === "tiles" ? { hex: { N: 6, M: 3 }, square: { N: 4, M: 4 }, triangle: { N: 3, M: 6 } }[spec.tiling] : { N: spec.N, M: spec.M });
+    // (the design's tiling: a tiling design's own, or a Platonic solid's)
+    const SOLID_NM = { tetrahedron: { N: 3, M: 3 }, cube: { N: 4, M: 3 }, octahedron: { N: 3, M: 4 }, dodecahedron: { N: 5, M: 3 }, icosahedron: { N: 3, M: 5 } };
+    const designNM = () => (custom.rule === "tiles" || custom.rule === "hyper" ? tilingNM(custom) : SOLID_NM[custom.solid] || null);
     const specValue = (spec, key) => (key === "N" || key === "M" ? tilingNM(spec)[key] : spec[key]);
     // (a tile's middle to its corner, in its own geometry's distance: a flat one's in tile spacings)
     const cornerRadius = (N, M) => (FLAT[`${N},${M}`] ? { hex: 1 / Math.sqrt(3), square: Math.SQRT1_2, triangle: 1 / Math.sqrt(3) }[FLAT[`${N},${M}`]]
@@ -2151,16 +2163,23 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // which work out their circle for any tiling); a design keeps its circles, the same size to the
     // tiles (a radius in corner radii), and a torus design its truncation.
     function stepTiling(key, v) {
-      const s = currentSpec(), cur = tilingNM(s), next = { ...cur, [key]: v }, other = key === "N" ? "M" : "N";
+      const s = currentSpec(), solid = isCustom() && !isTileDesign() && !isHyperDesign(), cur = solid ? designNM() : tilingNM(s);
+      const next = { ...cur, [key]: v }, other = key === "N" ? "M" : "N";
       const ok = (t) => isSpherical(t.N, t.M) || !!FLAT[`${t.N},${t.M}`] || hyperHas(t.N, t.M);
       while (!ok(next) && next[other] < 12) next[other]++;
       if (!ok(next)) return;
       const flat = FLAT[`${next.N},${next.M}`];
       if (isCustom()) {
         pushUndo();
-        const k = cornerRadius(next.N, next.M) / cornerRadius(cur.N, cur.M), cuts = custom.cuts.map((c) => ({ ...c, depths: c.depths.map((d) => d * k) }));
-        custom = flat ? tileCustom({ rule: "tiles", tiling: flat, ...(custom.rule === "tiles" ? { a: custom.a, b: custom.b } : TILE_SIZES[flat]), truncate: custom.rule === "tiles" ? custom.truncate : {}, cuts, blackout: [] })
-          : hyperCustom({ rule: "hyper", N: next.N, M: next.M, surface: 0, cuts, blackout: [] });
+        // (a solid design's depths aren't radii: its circles start as a preset's for the tiling)
+        const k = solid ? 0 : cornerRadius(next.N, next.M) / cornerRadius(cur.N, cur.M);
+        const cuts = solid ? (flat ? [{ on: "face", depths: [TILINGS[flat].r] }] : isSpherical(next.N, next.M) ? roundCuts(next.N, next.M) : [{ on: "face", depths: [1.15 * hyperGeometry(next.N, next.M).Rv] }])
+          : custom.cuts.map((c) => ({ ...c, depths: c.depths.map((d) => d * k) }));
+        // (a tiling's truncation is the same on any tiling: a fraction of the way to the corners, or
+        // edges. A solid's isn't: it's left behind)
+        const truncate = solid ? {} : { ...custom.truncate };
+        custom = flat ? tileCustom({ rule: "tiles", tiling: flat, ...(custom.rule === "tiles" ? { a: custom.a, b: custom.b } : TILE_SIZES[flat]), truncate, cuts, blackout: [] })
+          : hyperCustom({ rule: "hyper", N: next.N, M: next.M, surface: 0, truncate, cuts, blackout: [] });
         changed();
         computeSnaps();
       } else {
@@ -2174,7 +2193,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       renderParams();
     }
-    const roundSpec = (spec) => ({ N: spec.N, M: spec.M, cuts: spec.autoCut ? roundCuts(spec.N, spec.M) : spec.cuts, blackout: spec.blackout || [] });
+    const roundSpec = (spec) => ({ N: spec.N, M: spec.M, truncate: spec.truncate || {}, cuts: spec.autoCut ? roundCuts(spec.N, spec.M) : spec.cuts, blackout: spec.blackout || [] });
     // a hyperbolic puzzle's steppers: sides and tiles at a corner, then its surfaces by size (a ball
     // has just the one)
     function hyperParams(spec) {
@@ -2208,30 +2227,37 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           host.append(row);
           continue;
         }
-        row.innerHTML = `<div class="control-head"><span class="name"></span></div>
-          <div class="tw-size"><button class="btn">−</button><input type="number" step="1" inputmode="numeric" /><button class="btn">+</button></div>`;
-        row.querySelector(".name").textContent = q.label;
-        if (q.title) row.querySelector(".name").title = q.title;
-        const [down, up] = row.querySelectorAll("button"), input = row.querySelector("input");
-        const max = q.max ?? Infinity;
-        input.min = q.min; if (q.max !== undefined) input.max = q.max; input.value = specValue(spec, q.key);
-        input.setAttribute("aria-label", q.label);
-        const set = (v) => {
-          v = Number.isFinite(v) ? Math.max(q.min, Math.min(max, Math.round(v))) : specValue(currentSpec(), q.key);
-          if (v !== specValue(currentSpec(), q.key)) {
-            if (q.key === "N" || q.key === "M") { stepTiling(q.key, v); return; } // (the tiling: maybe another kind of puzzle)
-            if (isCustom()) { pushUndo(); custom[q.key] = v; changed(); } // (a design's: an edit, undoable)
-            else { paramVals[q.key] = v; load(); } // new shape: new starting view
-          }
+        host.append(stepperRow(q, () => specValue(currentSpec(), q.key), (v) => {
+          if (q.key === "N" || q.key === "M") { stepTiling(q.key, v); return; } // (the tiling: maybe another kind of puzzle)
+          if (isCustom()) { pushUndo(); custom[q.key] = v; changed(); } // (a design's: an edit, undoable)
+          else { paramVals[q.key] = v; load(); } // new shape: new starting view
           renderParams();
-        };
-        down.disabled = specValue(spec, q.key) <= q.min; up.disabled = specValue(spec, q.key) >= max;
-        down.title = `one fewer (${q.label})`; up.title = `one more (${q.label})`;
-        down.onclick = () => set(specValue(currentSpec(), q.key) - 1);
-        up.onclick = () => set(specValue(currentSpec(), q.key) + 1);
-        input.onchange = () => set(+input.value);
-        host.append(row);
+        }));
       }
+    }
+    // A −/+ row for a number: its value now (value()), and what to do with a new one, in range and
+    // different (set)
+    function stepperRow(q, value, set) {
+      const row = document.createElement("div");
+      row.className = "control";
+      row.innerHTML = `<div class="control-head"><span class="name"></span></div>
+        <div class="tw-size"><button class="btn">−</button><input type="number" step="1" inputmode="numeric" /><button class="btn">+</button></div>`;
+      row.querySelector(".name").textContent = q.label;
+      if (q.title) row.querySelector(".name").title = q.title;
+      const [down, up] = row.querySelectorAll("button"), input = row.querySelector("input");
+      const max = q.max ?? Infinity;
+      input.min = q.min; if (q.max !== undefined) input.max = q.max; input.value = value();
+      input.setAttribute("aria-label", q.label);
+      const step = (v) => {
+        v = Number.isFinite(v) ? Math.max(q.min, Math.min(max, Math.round(v))) : value();
+        if (v !== value()) set(v); else input.value = value();
+      };
+      down.disabled = value() <= q.min; up.disabled = value() >= max;
+      down.title = `one fewer (${q.label})`; up.title = `one more (${q.label})`;
+      down.onclick = () => step(value() - 1);
+      up.onclick = () => step(value() + 1);
+      input.onchange = () => step(+input.value);
+      return row;
     }
 
     // resetView: point the camera at the new solid's corner (on switching puzzles, not sizes)

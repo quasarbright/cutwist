@@ -240,7 +240,81 @@ export function buildHyper(spec, file) {
   }) : []);
   P.axisIndex = new Map(P.axes.map((a, i) => [`${a.kind}:${a.coset}`, i]));
   findPieces(P);
+  findStickers(P);
   return P;
+}
+
+// ---- truncation, as on the flat tilings (and the balls, sphere.mjs): a tile's corners (or edges)
+// cut off by a straight line square to the way from its middle to the corner (the edge's middle), a
+// fraction f of the way there, making a face round each corner (edge) with its own color.
+// spec.truncate.vertex, .edge: f, in (0, 1). In the Klein model of the hyperbolic plane its straight
+// lines are straight, so tile 0 is a regular polygon, and a line square to a line through the middle
+// is square to it there too: each kind's faces are the polygon cut by half-planes, as tiles.mjs's
+// tileParts (a point at distance d from the middle is tanh d from it in the Klein disk). The cuts
+// don't make pieces: they're where the stickers' colors change, so a fragment (a piece's part on a
+// tile) is drawn in its tile's color with the corners' and edges' faces over it (hyper-view.mjs).
+const toKlein = ([x, y]) => { const s = 2 / (1 + x * x + y * y); return [x * s, y * s]; };
+const fromKlein = ([x, y]) => { const s = 1 / (1 + Math.sqrt(Math.max(0, 1 - x * x - y * y))); return [x * s, y * s]; };
+// a convex polygon cut to n·x ≤ k
+function clipBelow(poly, n, k) {
+  const out = [], val = (p) => n[0] * p[0] + n[1] * p[1] - k;
+  poly.forEach((a, i) => {
+    const b = poly[(i + 1) % poly.length], va = val(a), vb = val(b);
+    if (va <= 0) out.push(a);
+    if ((va < 0 && vb > 0) || (va > 0 && vb < 0)) { const t = va / (va - vb); out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); }
+  });
+  return out;
+}
+const polyArea = (poly) => Math.abs(poly.reduce((s, a, i) => { const b = poly[(i + 1) % poly.length]; return s + a[0] * b[1] - a[1] * b[0]; }, 0)) / 2;
+export const truncationOf = (spec) => Object.fromEntries(["vertex", "edge"].flatMap((k) => { const f = spec.truncate && spec.truncate[k]; return Number.isFinite(f) && f > 0 && f < 1 ? [[k, f]] : []; }));
+// Tile 0's faces: [{ kind ("face" for the tile's own, "vertex", "edge"), i (which corner, or edge's
+// middle, of G.corners or G.mids), klein (the convex polygon), disk (the same in the Poincaré disk,
+// finely: its sides are arcs there) }], the tile's own first
+export function tileFaces(G, truncate) {
+  const unit = (p) => { const l = Math.hypot(p[0], p[1]); return [p[0] / l, p[1] / l]; };
+  const tile = G.corners.map(toKlein), cs = G.corners.map(unit), ms = G.mids.map(unit);
+  const tv = truncate.vertex !== undefined ? Math.tanh(truncate.vertex * G.Rv) : null, te = truncate.edge !== undefined ? Math.tanh(truncate.edge * G.Ri) : null;
+  const neg = ([x, y]) => [-x, -y], minus = (a, b) => [a[0] - b[0], a[1] - b[1]];
+  const out = [];
+  // (each kind's face round point i: past its cut, and further toward it than toward any other)
+  const round = (kind, dirs, t, also) => dirs.forEach((u, i) => {
+    let poly = clipBelow(tile, neg(u), -t);
+    dirs.forEach((w, j) => { if (j !== i) poly = clipBelow(poly, minus(w, u), 0); });
+    for (const [n, k] of also) poly = clipBelow(poly, n, k);
+    if (poly.length >= 3 && polyArea(poly) > 1e-12) out.push({ kind, i, klein: poly });
+  });
+  let core = tile;
+  if (tv !== null) { round("vertex", cs, tv, []); cs.forEach((u) => { core = clipBelow(core, u, tv); }); }
+  if (te !== null) { round("edge", ms, te, tv !== null ? cs.map((u) => [u, tv]) : []); ms.forEach((u) => { core = clipBelow(core, u, te); }); }
+  if (core.length >= 3) out.unshift({ kind: "face", i: 0, klein: core });
+  for (const fc of out) fc.disk = fc.klein.flatMap((a, j) => { const b = fc.klein[(j + 1) % fc.klein.length]; return Array.from({ length: 24 }, (_, s) => fromKlein([a[0] + ((b[0] - a[0]) * s) / 24, a[1] + ((b[1] - a[1]) * s) / 24])); });
+  return out;
+}
+// Each fragment's faces (the tile's own and the corners' and edges' it overlaps: P.regions[f].faces,
+// indices into P.tileFaces), and each piece's checks for being solved: for each face of each of its
+// fragments, the element whose tile (corner, edge) that face is, at home, and which tile (corner,
+// edge) that is ({ e, kind, home }: solved when the piece's position g has g·e's the same).
+function findStickers(P) {
+  const { G, H } = P, N = G.N;
+  P.truncate = truncationOf(P.spec);
+  P.tileFaces = tileFaces(G, P.truncate);
+  const overlap = (poly, convex) => { let p = poly.map(toKlein); for (let j = 0; j < convex.length; j++) { const a = convex[j], b = convex[(j + 1) % convex.length]; p = clipBelow(p, [b[1] - a[1], a[0] - b[0]], (b[1] - a[1]) * a[0] + (a[0] - b[0]) * a[1]); if (p.length < 3) return 0; } return polyArea(p); };
+  // (the Klein polygons run counterclockwise: inside is to the left of each side, n·x ≤ k with n the
+  // side's outward normal)
+  const ccw = (poly) => poly.reduce((s, a, i) => { const b = poly[(i + 1) % poly.length]; return s + a[0] * b[1] - a[1] * b[0]; }, 0) > 0;
+  for (const fc of P.tileFaces) if (!ccw(fc.klein)) fc.klein.reverse();
+  for (const r of P.regions) {
+    if (P.tileFaces.length === 1) { r.faces = [0]; continue; }
+    const area = (fc) => overlap(r.poly[0], fc.klein) - r.poly.slice(1).reduce((s, h) => s + overlap(h, fc.klein), 0);
+    r.faces = P.tileFaces.map((fc, k) => (area(fc) > 1e-10 ? k : -1)).filter((k) => k >= 0);
+  }
+  // (the element whose corner, or edge, is tile 0's corner i, or edge's middle i, seen from x)
+  const turned = (x, j) => { let e = x; for (let s = 0; s < ((j % N) + N) % N; s++) e = H.right[0][e]; return e; };
+  P.faceElement = (x, fc) => (fc.kind === "face" ? x : turned(x, fc.kind === "vertex" ? fc.i : fc.i - G.edge));
+  for (const pc of P.pieces) pc.checks = pc.frags.flatMap(({ x, f }) => P.regions[f].faces.map((k) => {
+    const fc = P.tileFaces[k], e = P.faceElement(x, fc);
+    return { e, kind: fc.kind, home: H.coset[fc.kind].of[e] };
+  }));
 }
 
 // ---- snap marks: the radii where the drawing changes (as on the flat torus): a circle passing
@@ -669,8 +743,8 @@ export function applyHyperMove(P, s, { axis, layer, q }) {
   if (!k) return;
   for (const i of hyperPiecesInLayer(P, s, axis, layer).keys()) s[i] = P.H.mul(ax.pow[k], s[i]);
 }
-// solved: every sticker on its own tile
-export const isHyperSolved = (P, s) => P.pieces.every((pc, i) => pc.black || pc.stickers.every((x, j) => P.H.coset.face.of[P.H.mul(s[i], x)] === pc.faces[j]));
+// solved: every sticker on its own tile (and, truncated, its corners' and edges' faces on theirs)
+export const isHyperSolved = (P, s) => P.pieces.every((pc, i) => pc.black || pc.checks.every(({ e, kind, home }) => P.H.coset[kind].of[P.H.mul(s[i], e)] === home));
 export function hyperScrambleMoves(P, count = 12 + 3 * P.tiles, rand = Math.random) {
   const out = [];
   if (!P.axes.length) return out;
