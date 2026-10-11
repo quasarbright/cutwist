@@ -771,7 +771,7 @@
   <script type="module">
     import * as THREE from "three";
     import {
-      PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, regularTrims, toCustom, CUT_RANGE, TRIM_RANGE, cutDirectionsOf, trimDirectionsOf,
+      PRESETS, buildPuzzle, puzzleTitle, snapSize, solvedState, applyMove, inverseMove, isSolved, scrambleMoves, puzzleStats, alignedDepthCandidates, isGoodSnap, regularTrims, toCustom, CUT_RANGE, TRIM_RANGE, cutDirectionsOf, trimDirectionsOf, customSolid,
       piecesInLayer, layerOf, closestOrientation, TEXTURE_MIN_FACES, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
@@ -1018,13 +1018,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       return vs.map((v) => add(c, scale(sub(v, c), 0.7)));
     }
 
+    // The size the puzzle's shown at: its farthest point at the edge of the view. While a cut or
+    // truncation is dragged, the size it was when grabbed (a truncation brings the farthest corners
+    // in, and the solid grew under the pointer as it was dragged); let go, it fits again.
+    let heldRadius = null;
+    const viewRadius = () => heldRadius ?? P.R;
     function buildMeshes() {
       if (puzzleGroup) {
         root.remove(puzzleGroup);
         puzzleGroup.traverse((o) => o.geometry && o.geometry.dispose());
       }
       puzzleGroup = new THREE.Group();
-      puzzleGroup.scale.setScalar(1 / P.R);
+      puzzleGroup.scale.setScalar(1 / viewRadius());
       root.add(puzzleGroup);
       pieceObjs = []; bodyMeshes = [];
       if (isSphere()) puzzleGroup.add(new THREE.Mesh(coreGeo, bodyMat)); // (a round puzzle's core)
@@ -1706,6 +1711,16 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const SNAP_NEAREST = 16;
     // keep: [r, i] of a handle whose snaps are still right (the one just dragged: its snaps
     // depend only on the others)
+    // the worker that checks a solid's snap candidates (none where workers can't load modules: then
+    // they're checked here, between frames)
+    let snapWorker = null, snapAsks = 0;
+    const snapReplies = new Map();
+    try {
+      snapWorker = new Worker(new URL("./snap-worker.mjs", import.meta.url), { type: "module" });
+      snapWorker.onmessage = (e) => { const done = snapReplies.get(e.data.id); snapReplies.delete(e.data.id); if (done) done(e.data.ok); };
+      snapWorker.onerror = () => { snapWorker = null; for (const done of snapReplies.values()) done(false); snapReplies.clear(); };
+    } catch { snapWorker = null; }
+    const snapAsk = (msg) => new Promise((done) => { const id = ++snapAsks; snapReplies.set(id, done); snapWorker.postMessage({ id, ...msg }); });
     function computeSnaps(keep = null) {
       loadNow(); // (a handle's last move, built: the snaps are worked out on it)
       const job = ++snapJob;
@@ -1755,6 +1770,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       work.push(...later.sort(selFirst));
       const step = () => {
         if (job !== snapJob || !work.length) return;
+        if (rulerDragging) { setTimeout(step, 120); return; } // (a cut held: its drag first, the search after)
         if (work[0][2] && typeof work[0][2].next === "function") {
           // (a hyperbolic handle's count changes: counts for a few ms a tick, a mark for each new one)
           const [r, i, gen] = work[0], until = performance.now() + 12;
@@ -1774,6 +1790,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           const fs = isTileDesign() ? tileRegularTrims(spec, t.trim, TRIM_RANGE) : regularTrims(spec, t.trim);
           snaps[r][i].push(...fs.map(R.depth));
           showSnaps();
+        } else if (snapWorker) {
+          // (checked off the page's thread, one at a time: a check can take a second)
+          snapAsk({ spec, target: t, f, maxPieces: MAX_PIECES }).then((ok) => {
+            if (job !== snapJob) return;
+            if (ok) { snaps[r][i].push(R.depth(f)); showSnaps(); }
+            setTimeout(step, 0);
+          });
+          return;
         } else if (isGoodSnap(spec, t, f, MAX_PIECES)) { snaps[r][i].push(R.depth(f)); showSnaps(); }
         setTimeout(step, 0);
       };
@@ -2812,19 +2836,30 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (a truncated solid's own corners and edges mostly sit off its turning axes: cuts round them
     // split pieces but never turn, and their dots are hollow)
     const turnsAbout = (n) => P.group.mats.filter((m) => len(sub(applyMat(m, n), n)) < 1e-5).length > 1;
+    // (the solid without truncation `kind`, the other one kept: its faces, for P)
+    let untrimmedOf = null;
+    function untrimmed(kind) {
+      if (!untrimmedOf || untrimmedOf.P !== P) untrimmedOf = { P };
+      if (!untrimmedOf[kind]) { const t = { ...custom.truncate }; delete t[kind]; untrimmedOf[kind] = customSolid({ ...custom, truncate: t }).solid.polys; }
+      return untrimmedOf[kind];
+    }
+    // where the way out from the middle along n meets the solid's surface
+    const surfaceAlongRay = (n) => scale(n, Math.min(...P.solid.polys.map((q) => { const c = dot(q.normal, n); return c > 1e-9 ? dot(q.normal, q.verts[0]) / c : Infinity; })));
     const solidGeo = {
       solid: true,
-      sites: (R) => (R.trim ? trimDirectionsOf(P, R.trim).map((at) => ({ at, p: scale(at.n, at.h * (custom.truncate[R.trim] ?? 1)), n: at.n, turns: true }))
+      // (a truncation's dot: on its face, or where its corner or edge was, wherever the surface is
+      // along that way now: a deep truncation of the other kind can have cut that point off)
+      sites: (R) => (R.trim ? trimDirectionsOf(P, R.trim).map((at) => ({ at, p: surfaceAlongRay(at.n), n: at.n, turns: true }))
         : cutDirectionsOf(P, { on: R.on, of: R.of }).map((at) => ({ at, p: scale(at.n, at.h), n: at.n, turns: turnsAbout(at.n) }))),
       // (where the pointer's ray meets the solid, exactly: the pieces' meshes have gaps between
       // them, right where cuts run)
-      probe(x, y) {
+      probe(x, y, R = null) {
         ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
         raycaster.setFromCamera(ndc, inputCam);
         const o = puzzleGroup.worldToLocal(raycaster.ray.origin.clone()), e = puzzleGroup.worldToLocal(raycaster.ray.origin.clone().add(raycaster.ray.direction));
         const O = [o.x, o.y, o.z], d = [e.x - o.x, e.y - o.y, e.z - o.z];
         let t0 = 0, t1 = Infinity;
-        for (const q of P.solid.polys) {
+        for (const q of R && R.trim ? untrimmed(R.trim) : P.solid.polys) {
           const k = dot(q.normal, q.verts[0]), nd = dot(q.normal, d), no = dot(q.normal, O);
           if (Math.abs(nd) < 1e-12) { if (no > k) return null; continue; }
           const t = (k - no) / nd;
@@ -2836,8 +2871,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (a plane's line across the faces showing; a truncation's just inside its face, so it runs
       // round the face's rim)
       curve(R, at, v, cam) {
+        // (a truncation's across the solid without it: at a depth shallower than its face is now, too)
         const d = R.trim ? (1 - v) * at.h - 1e-4 * P.R : v * at.h, out = [];
-        for (const q of P.solid.polys) {
+        for (const q of R.trim ? untrimmed(R.trim) : P.solid.polys) {
           if (!facing(cam, q.normal, q.verts[0])) continue;
           const pts = [];
           q.verts.forEach((a, k) => {
@@ -2990,10 +3026,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // 13 px: { r, i (the cut; for a dot, none yet), at (which of its places), px }.
     // A cut's line is where the depth the pointer's spot would give matches its depth: the
     // distance in px is the difference over how fast that depth changes per px there.
-    function edProbe(g, x, y) {
-      const w0 = g.probe(x, y);
+    // (R: what's being set; a solid's truncation is read off the solid without it, so it can be
+    // dragged back out past where its face is now)
+    function edProbe(g, x, y, R = null) {
+      const w0 = g.probe(x, y, R);
       if (!w0) return null;
-      const w1 = g.probe(x + 1.5, y) || w0, w2 = g.probe(x, y + 1.5) || w0;
+      const w1 = g.probe(x + 1.5, y, R) || w0, w2 = g.probe(x, y + 1.5, R) || w0;
       return { w0, w1, w2 };
     }
     function edRate(g, R, at, pr) {
@@ -3005,10 +3043,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const g = edGeo();
       if (!g || edTool === "paint") return null;
       const view = g.flat ? { cam: null } : { cam: inputCam };
-      const pr = edProbe(g, x, y);
       let best = null;
       for (const R of edRulers()) {
-        const r = rulerOf(R), values = R.values();
+        const r = rulerOf(R), values = R.values(), pr = edProbe(g, x, y, R);
         const sites = edSites(g, R, view);
         // (a cut's line: round every place of its set, showing or not, as a cut round a face out of
         // sight runs across the faces showing; where lines cross, the one whose place is nearer)
@@ -3051,13 +3088,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       else pushUndo();
       select(hit.r, i);
       edDrag = { r: hit.r, i, at: hit.at, id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, out: false, snapped: false };
+      if (puzzleGroup && !isFlat()) heldRadius = 1 / puzzleGroup.scale.x;
       rulerDragging = true;
       (isFlat() ? plane : canvas).style.cursor = "grabbing";
       // (by touch, a long press without moving removes it: there's no right button)
       if (e.pointerType !== "mouse") edDrag.hold = setTimeout(() => {
         if (!edDrag || edDrag.moved) return;
         const { r } = edDrag;
-        edDrag = null; rulerDragging = false;
+        edDrag = null; rulerDragging = false; heldRadius = null;
         RULERS[r].remove(i);
         changed(); computeSnaps();
       }, 550);
@@ -3070,7 +3108,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return;
       d.moved = true;
       clearTimeout(d.hold);
-      const R = RULERS[d.r], [lo, hi] = R.range, pr = edProbe(g, e.clientX, e.clientY), rate = pr && edRate(g, R, d.at, pr);
+      const R = RULERS[d.r], [lo, hi] = R.range, pr = edProbe(g, e.clientX, e.clientY, R), rate = pr && edRate(g, R, d.at, pr);
       // off the puzzle, or past where cuts go (a solid's past its surface, a circle shrunk to
       // nothing, a truncation back to its tip): letting go here removes it
       d.out = !rate || (R.trim ? rate.v < lo * 0.5 : isCircleDesign() ? rate.v < lo * 0.6 : rate.v > hi + 0.004);
@@ -3089,6 +3127,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       clearTimeout(d.hold);
       edDrag = null;
       rulerDragging = false;
+      heldRadius = null;
+      if (puzzleGroup && !isFlat()) puzzleGroup.scale.setScalar(1 / viewRadius());
       if (d.out) { RULERS[d.r].remove(d.i); changed(); computeSnaps(); }
       // (moved: every cut's snaps again, its own too: a new cut's were still being worked out)
       else if (d.moved) { loadNow(); renderBuilder(); computeSnaps(); }
@@ -5336,6 +5376,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         return st ? { site: { x: st.x, y: st.y }, lines: g.curve(R, st.at, v ?? R.values()[i], view.cam) } : { site: null, lines: [] };
       },
       editHit(x, y) { aimAt(x, y); const h = edHitTest(x, y); return h && { r: h.r, i: h.i, px: h.px, dot: !!h.dot, at: JSON.stringify(h.at) }; },
+      // how far each dot showing is off the puzzle's surface, as a share of its size (a solid's: past
+      // its furthest face plane, outside or in; a ball's: off the unit sphere; flat: 0)
+      editDotsOff() {
+        const g = edGeo();
+        if (!g || g.flat) return [];
+        const view = { cam: edViews(g)[0].cam };
+        const off = (p) => (g.solid ? Math.abs(Math.max(...P.solid.polys.map((q) => dot(q.normal, p) - dot(q.normal, q.verts[0])))) / P.R : Math.abs(len(p) - 1));
+        return edRulers().flatMap((R) => edSites(g, R, view).map((st) => ({ label: R.label, trim: !!R.trim, off: off(st.p) })));
+      },
+      editProbe(x, y, r) { const g = edGeo(); aimAt(x, y); return g.probe(x, y, r === undefined ? null : RULERS[r]); },
+      // the cut being dragged, at depth v: its lines on screen (round the place it was grabbed by)
+      editHeldCurve(v) { const g = edGeo(); return edDrag && g ? g.curve(RULERS[edDrag.r], edDrag.at, v, edViews(g)[0].cam) : []; },
       editSnaps(r, i) { return ((snaps[r] || [])[i] || []).slice(); },
       editRulers() { return RULERS.map((R, r) => ({ r, label: R.label, values: R.values().slice(), exists: R.exists, trim: R.trim || null })); },
       design() { return JSON.parse(JSON.stringify(design())); },

@@ -108,15 +108,27 @@ export async function cutPoint(page, r, i, v, near = null) {
   // (the middles of the lines' pieces: a line's ends are on the solid's edges, maybe its outline)
   const pts = lines.flatMap((l) => l.slice(1).map((q, k) => [(q[0] + l[k][0]) / 2, (q[1] + l[k][1]) / 2])), at = near || site;
   if (!pts.length) throw new Error(`cut ${r}:${i} isn't showing`);
-  const [x, y] = pts.reduce((b, q) => (Math.hypot(q[0] - at.x, q[1] - at.y) < Math.hypot(b[0] - at.x, b[1] - at.y) ? q : b));
-  return { x, y };
+  pts.sort((a, b) => Math.hypot(a[0] - at.x, a[1] - at.y) - Math.hypot(b[0] - at.x, b[1] - at.y));
+  if (near) return { x: pts[0][0], y: pts[0][1] };
+  // (one a press there takes, at whole pixels too, as some browsers round the pointer: not a hair
+  // from the puzzle's outline)
+  for (const [x, y] of pts.slice(0, 40)) {
+    const hits = await page.evaluate((ps) => ps.map(([x, y]) => window.cutwist.editHit(x, y)), [[x, y], [Math.round(x), Math.round(y)], [Math.floor(x), Math.floor(y)]]);
+    if (hits.every((h) => h && h.r === r && !h.dot)) return { x, y };
+  }
+  return { x: pts[0][0], y: pts[0][1] };
 }
-// drag cut i of ruler r by hand from its line to where depth v would put it
+// drag cut i of ruler r by hand from its line to where depth v would put it (where lines cross,
+// whichever the press took: the target is worked out for the one held)
 export async function dragCut(page, r, i, v, steps = 12) {
-  const from = await cutPoint(page, r, i, null), to = await cutPoint(page, r, i, v, from);
+  const from = await cutPoint(page, r, i, null);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  await page.mouse.move(to.x, to.y, { steps });
+  const lines = await page.evaluate((v) => window.cutwist.editHeldCurve(v), v);
+  const pts = lines.flatMap((l) => l.slice(1).map((q, k) => [(q[0] + l[k][0]) / 2, (q[1] + l[k][1]) / 2]));
+  if (!pts.length) { await page.mouse.up(); throw new Error(`cut ${r}:${i} at ${v} isn't showing`); }
+  const [x, y] = pts.reduce((b, q) => (Math.hypot(q[0] - from.x, q[1] - from.y) < Math.hypot(b[0] - from.x, b[1] - from.y) ? q : b));
+  await page.mouse.move(x, y, { steps });
   await page.mouse.up();
 }
 export const rulers = (page) => page.evaluate(() => window.cutwist.editRulers());
