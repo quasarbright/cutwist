@@ -3135,6 +3135,28 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       edHoverAt(e.clientX, e.clientY);
     }
 
+    // polylines joined where one's end is another's start or end (within half a px): the fewest
+    // pieces, each run end to end
+    function chains(lines) {
+      const left = lines.filter((l) => l.length > 1).map((l) => l.slice()), out = [], near = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.5;
+      while (left.length) {
+        let cur = left.pop(), grew = true;
+        while (grew) {
+          grew = false;
+          for (let k = 0; k < left.length; k++) {
+            const l = left[k];
+            if (near(cur.at(-1), l[0])) cur = [...cur, ...l.slice(1)];
+            else if (near(cur.at(-1), l.at(-1))) cur = [...cur, ...l.slice(0, -1).reverse()];
+            else if (near(cur[0], l.at(-1))) cur = [...l, ...cur.slice(1)];
+            else if (near(cur[0], l[0])) cur = [...l.slice().reverse(), ...cur.slice(1)];
+            else continue;
+            left.splice(k, 1); grew = true; break;
+          }
+        }
+        out.push(cur);
+      }
+      return out;
+    }
     // Drawing, every frame while customizing: the dots of the tool's rulers, pulsing; the cut under
     // the pointer (or being dragged) outlined as the turning circles are, yellow on black; and by
     // the pointer, what it is and its depth.
@@ -3159,15 +3181,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         else { const c = view.clip; ctx.beginPath(); ctx.rect(c.left, c.top, c.right - c.left, c.bottom - c.top); ctx.clip(); }
         // the cut lit: every place it goes round, the one held brightest
         if (lit && RULERS[lit.r].values()[lit.i] !== undefined) {
-          const R = RULERS[lit.r], v = R.values()[lit.i], out = edDrag && edDrag.out;
-          for (const pts of g.curve(R, lit.at, v, view.cam)) {
-            ctx.beginPath();
-            pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-            ctx.lineJoin = "round"; ctx.lineCap = "round";
-            ctx.setLineDash(out ? [6, 6] : []);
-            ctx.strokeStyle = "#0a0b0e"; ctx.lineWidth = 5; ctx.stroke();
-            ctx.strokeStyle = out ? "#ff8a7a" : "#f5c518"; ctx.lineWidth = 2.6; ctx.stroke();
+          // (its pieces, a face's side at a time or a tile's chord at a time, joined end to end into
+          // loops and drawn as one: the black all under the yellow, no seams where they meet)
+          const R = RULERS[lit.r], v = R.values()[lit.i], out = edDrag && edDrag.out, path = new Path2D();
+          for (const pts of chains(g.curve(R, lit.at, v, view.cam))) {
+            pts.forEach(([x, y], k) => (k ? path.lineTo(x, y) : path.moveTo(x, y)));
+            if (pts.length > 2 && Math.hypot(pts[0][0] - pts.at(-1)[0], pts[0][1] - pts.at(-1)[1]) < 0.5) path.closePath();
           }
+          ctx.lineJoin = "round"; ctx.lineCap = "round";
+          ctx.setLineDash(out ? [6, 6] : []);
+          ctx.strokeStyle = "#0a0b0e"; ctx.lineWidth = 5; ctx.stroke(path);
+          ctx.strokeStyle = out ? "#ff8a7a" : "#f5c518"; ctx.lineWidth = 2.6; ctx.stroke(path);
           ctx.setLineDash([]);
         }
         // the dots

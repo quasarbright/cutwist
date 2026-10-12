@@ -8,7 +8,7 @@
 // faces in their colors), which shows wherever no circle reaches. A piece is clipped to its
 // outline (arcs of the circles that cut it out), then each of its stickers filled: the parts
 // of its face.
-import { piecePose, nearestCopy, partsNear } from "./tiles.mjs";
+import { piecePose, nearestCopy, partsNear, tileFaceAt } from "./tiles.mjs";
 import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
 import { faceTextures, colorDistance, PUZZLE_PALETTES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
 
@@ -236,7 +236,7 @@ export class TileView {
       ctx.fillStyle = faceColor(P, f);
       ctx.fill();
       if (textures && textures[f]) this.texture(ctx, poly, textures[f], faceColor(P, f));
-      ctx.stroke();
+      ctx.stroke(faceSides(P, poly));
     }
     ctx.restore();
   }
@@ -310,7 +310,7 @@ export class TileView {
         ctx.fill();
         if (textures && textures[st.face]) this.texture(ctx, poly, textures[st.face], color);
         if (lit) { ctx.fillStyle = "rgba(255, 255, 255, 0.34)"; ctx.fill(); }
-        ctx.stroke(); // (the face's edges)
+        ctx.stroke(faceSides(this.P, poly)); // (the face's edges)
       }
     }
   }
@@ -497,6 +497,28 @@ function inkPattern(ctx, t, color, dpr) {
     cache.set(key, ctx.createPattern(c, "repeat"));
   }
   return cache.get(key);
+}
+
+// A face part's lines: the sides of the polygon (a face's part in one tile) where the face changes,
+// not where it runs on into the next tile (a truncated corner's or edge's face spans the tiles
+// round it, and their edges inside it aren't lines, as on the solids and the other tilings). As a
+// path, made once per polygon: each side whose two sides, a hair either way, are different faces.
+const sidePaths = new WeakMap();
+function faceSides(P, poly) {
+  let path = sidePaths.get(poly);
+  if (path) return path;
+  path = new Path2D();
+  const faceAt = (q) => P.faceAt(tileFaceAt(P, q)), e = 1e-4;
+  poly.forEach((a, j) => {
+    const b = poly[(j + 1) % poly.length], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy);
+    if (l < 1e-9) return;
+    const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n = [-dy / l, dx / l];
+    if (faceAt([m[0] + n[0] * e, m[1] + n[1] * e]) === faceAt([m[0] - n[0] * e, m[1] - n[1] * e])) return;
+    path.moveTo(a[0], a[1]);
+    path.lineTo(b[0], b[1]);
+  });
+  sidePaths.set(poly, path);
+  return path;
 }
 
 // a piece outline (tiles.mjs's outline: loops of arcs) as a path, made once per outline; fill

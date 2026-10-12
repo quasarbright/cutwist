@@ -223,3 +223,32 @@ test("algorithms light the pieces they'd move", async ({ page }) => {
   expect(lit.length).toBeGreaterThan(0);
   expect(lit.length).toBeLessThan(20); // (a commutator: just the pieces it cycles, of 54)
 });
+
+// (a corner's face spans the three tiles round it: their edges inside it were drawn, a black Y in
+// every triangle, meeting in its middle)
+test("a truncated corner's face has no tile edges drawn across it", async ({ page }) => {
+  const design = { rule: "tiles", tiling: "hex", a: 3, b: 0, truncate: { vertex: 0.75 }, cuts: [{ on: "face", depths: [0.3] }], blackout: [] };
+  await open(page, `?puzzle=custom&textures=off&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  await page.click(".nx-custombtn");
+  await editTool(page, "trim");
+  await page.mouse.move(5, 5);
+  const vp = page.viewportSize(), tape = await page.locator("#nx-tape").boundingBox();
+  const corners = (await page.evaluate(() => window.cutwist.editSites())).filter((s) => s.label === "corners" && s.y < tape.y - 20 && s.y > 120 && s.x > 120 && s.x < vp.width - 20).slice(0, 6);
+  expect(corners.length).toBe(6);
+  await editTool(page, "paint"); // (no dots drawn over them)
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  for (const c of corners) {
+    // (the face's one flat color all round its middle, no line's black through it)
+    const shot = await page.screenshot({ clip: { x: Math.round(c.x) - 2, y: Math.round(c.y) - 2, width: 5, height: 5 } });
+    const spread = await page.evaluate(async (b64) => {
+      const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+      const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height; const g = cv.getContext("2d"); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, img.width, img.height).data, lums = [];
+      for (let i = 0; i < d.length; i += 4) lums.push(d[i] + d[i + 1] + d[i + 2]);
+      return Math.max(...lums) - Math.min(...lums);
+    }, shot.toString("base64"));
+    // (a black line's would be the face's brightness, hundreds; the light gray outline of the torus's
+    // patch can pass by a corner, a little)
+    expect(spread, `the corner at ${Math.round(c.x)}, ${Math.round(c.y)}`).toBeLessThan(150);
+  }
+});
