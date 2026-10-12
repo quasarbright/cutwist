@@ -92,10 +92,10 @@ test("the steppers go wherever {N,M} is: a torus, a ball, a hyperbolic surface",
   await expect(page.locator('button[title="one fewer (sides)"]')).toBeDisabled();
 });
 
-test("customizing: a solid design turns into an arbitrary tiling's and back, and the link keeps it", async ({ page }) => {
+test("customizing: a solid design turns into a tiling's and back, and the link keeps it", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
-  await editShape(page, "arbitrary");
+  await editShape(page, "tiling");
   expect(await settled(page)).toMatchObject({ id: "custom", sphere: true, N: 4, M: 3, pieces: 26 });
   await page.keyboard.press("Escape");
   await editDot(page, "corners");
@@ -109,10 +109,10 @@ test("customizing: a solid design turns into an arbitrary tiling's and back, and
   expect((await info(page)).faces).toBe(8);
 });
 
-test("the name's menu has the tiling's steppers for an arbitrary design: the cube's {4,3}, and stepping one makes it a torus", async ({ page }) => {
+test("the name's menu has the tiling's steppers for a tiling design: the cube's {4,3}, and stepping one makes it a torus", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
-  await editShape(page, "arbitrary");
+  await editShape(page, "tiling");
   const panel = (label) => page.locator("#bNM .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
   await expect(panel("sides").locator("input")).toHaveValue("4");
   await expect(panel("at a corner").locator("input")).toHaveValue("3");

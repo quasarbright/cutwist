@@ -1930,25 +1930,21 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     function renderBuilder() {
-      // a solid, or a tile-turning design's tiling
-      const tiles = isTileDesign();
-      // (a hyperbolic or round design's tiling is set by its steppers)
-      $("bSolidLabel").textContent = tiles ? "tiling" : "solid";
-      $("bSolidLabel").title = tiles ? "the tiles on the torus before it's cut" : "the shape before it's cut";
-      if (tiles) radio($("bSolid"), Object.keys(TILINGS).map((k) => [k, TILINGS[k].name + "s", `${TILINGS[k].name}s on a torus`]), custom.tiling,
-        (k) => { pushUndo(); custom.tiling = k; changed(); computeSnaps(); });
-      // A solid, or {N,M}: a tiling cut by circles, M N-gons at each corner (a solid's own {N,M} to
-      // start: the cube's is {4,3}), round, flat or hyperbolic by its steppers. Its circles start as
-      // a preset's, as a solid's depths aren't radii; and back to a solid, the cuts start over too.
-      else radio($("bSolid"), [...Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]),
-        ["nm", "arbitrary", "any tiling: N-gons, M at each corner (the sides and at-a-corner steppers), cut by circles: on a ball (where the tiles are a solid's faces, and more: a beach ball's wedges), on a torus, or on a hyperbolic surface"]],
-        isHyperDesign() ? "nm" : custom.solid,
+      // A solid, or "tiling": M N-gons at each corner (a solid's own {N,M} to start: the cube's is
+      // {4,3}), cut by circles, and wherever its steppers put it: on a ball, a torus (the flat
+      // tilings: hexagons, squares, triangles) or a hyperbolic surface. Its circles start as a
+      // preset's, as a solid's depths aren't radii; and back to a solid, the cuts start over too.
+      $("bSolidLabel").textContent = "shape";
+      $("bSolidLabel").title = "the shape before it's cut";
+      radio($("bSolid"), [...Object.keys(SOLID_SHORT).map((k) => [k, SOLID_SHORT[k], SOLID_NAMES[k]]),
+        ["nm", "tiling", "any tiling: N-gons, M at each corner (the sides and at-a-corner steppers), cut by circles: on a ball (where the tiles are a solid's faces, and more: a beach ball's wedges), on a torus, or on a hyperbolic surface"]],
+        isCircleDesign() ? "nm" : custom.solid,
         (k) => {
           pushUndo();
           if (k === "nm") {
             const { N, M } = designNM() || { N: 4, M: 3 };
             custom = hyperCustom({ rule: "hyper", N, M, surface: 0, cuts: roundCuts(N, M), blackout: [] });
-          } else if (isHyperDesign()) custom = solidCustom(k);
+          } else if (isCircleDesign()) custom = solidCustom(k);
           else custom.solid = k;
           renderParams();
           changed();
@@ -2012,7 +2008,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const hyperFileFor = (spec) => hyperFiles.get(`${spec.N}-${spec.M}`);
     // whether there are surfaces for M N-gons at a corner (before the index is in: whether it's hyperbolic)
     const hyperHas = (N, M) => (hyperIndex ? !!hyperIndex[`${N},${M}`] : isHyperbolic(N, M));
-    // The same steppers reach the round tilings ({N,M} with 1/N + 1/M > 1/2): those build a ball
+    // The same steppers reach the sphere tilings ({N,M} with 1/N + 1/M > 1/2): those build a ball
     // (sphere.mjs), its circles' radii angles. A preset's circle is worked out for the tiling, as on
     // the hyperbolic ones: round each tile, a bit past its corners.
     const isRound = (spec) => spec.rule === "hyper" && isSpherical(spec.N, spec.M);
@@ -5170,7 +5166,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
       if (spec.rule === "tiles") return { hex: "hexagon tilings", square: "square tilings", triangle: "triangle tilings" }[spec.tiling];
-      if (spec.rule === "hyper") return isRound(spec) ? "round tilings" : "hyperbolic tilings";
+      if (spec.rule === "hyper") return isRound(spec) ? "sphere tilings" : "hyperbolic tilings";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
       if (spec.truncate) return "other solids"; // (a truncated solid isn't its base's shape: the soccer ball)
       return { cube: "cubes", tetrahedron: "tetrahedra", octahedron: "octahedra", dodecahedron: "dodecahedra", icosahedron: "icosahedra" }[spec.solid] || "other solids";

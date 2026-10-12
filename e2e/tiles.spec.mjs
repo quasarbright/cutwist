@@ -147,19 +147,19 @@ test("textures: off up to 12 tiles, on from 13; the button toggles them and goes
 });
 
 // ---- customizing: the solids' editor, on a tiling ----
-test("customize opens the editor on the tiling: tilings for solids in the name's menu, the torus's and the tiling's steppers", async ({ page }) => {
+test("customize opens the editor on the tiling: \"tiling\" picked in the name's menu, the torus's and the tiling's steppers", async ({ page }) => {
   await load(page, "hex", { a: 3, b: 0 });
   await page.click(".nx-custombtn");
   const s = await info(page);
   expect(s).toMatchObject({ id: "custom", tiling: "hex", pieces: 54 });
   await page.click(".nx-pick");
-  await expect(page.locator("#bSolidLabel")).toHaveText("tiling");
-  await expect(page.locator("#bSolid").getByRole("radio", { name: "hexagons" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#bSolid").getByRole("radio", { name: "tiling" })).toHaveAttribute("aria-checked", "true"); // (one menu for every design: the solids, or a tiling)
+  await expect(page.locator("#bNM .control")).toHaveCount(2);
   await expect(page.locator("#bStats")).toContainText("54 pieces");
   await expect(page.locator("#paramControls .control")).toHaveCount(4); // (sides, at a corner, size and skew)
   // another tiling, then undo
-  await editShape(page, "squares");
-  expect((await info(page)).tiling).toBe("square");
+  await editShape(page, "cube");
+  expect((await info(page)).tiling).toBeFalsy();
   await page.click("#edUndo");
   expect((await info(page)).tiling).toBe("hex");
 });

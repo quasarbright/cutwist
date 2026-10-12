@@ -204,12 +204,12 @@ test("the puzzle turns while customizing, and any edit sets it back to solved", 
   expect((await info(page)).solved).toBe(true);
 });
 
-// (a solid's sides and tiles at a corner would make it a ball: only an arbitrary design has them)
-test("the name's menu: a solid design has no tiling steppers, an arbitrary one does", async ({ page }) => {
+// (a solid's sides and tiles at a corner would make it a ball: only a tiling design has them)
+test("the name's menu: a solid design has no tiling steppers, a tiling one does", async ({ page }) => {
   await open(page);
   await page.click(".nx-custombtn");
   await page.click(".nx-pick");
   await expect(page.locator("#bNM .control")).toHaveCount(0);
-  await editShape(page, "arbitrary");
+  await editShape(page, "tiling");
   await expect(page.locator("#bNM .control")).toHaveCount(2);
 });

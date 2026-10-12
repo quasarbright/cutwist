@@ -158,7 +158,7 @@ test("dragging away from the circles slides the plane, and turns nothing", async
   expect(s).toMatchObject({ panned: true, moves: 0, solved: true });
 });
 
-test("customize: \"arbitrary\" picked over the solids, truncation dots too, a corner circle, a share link back, blacking out", async ({ page }) => {
+test("customize: \"tiling\" picked over the solids, truncation dots too, a corner circle, a share link back, blacking out", async ({ page }) => {
   // (on the 6 octagons: a corner circle on the Klein quartic makes 668 pieces, slow to build and
   // reload under a loaded run)
   await pick(page, "hyper-octagons");
@@ -167,7 +167,7 @@ test("customize: \"arbitrary\" picked over the solids, truncation dots too, a co
   let s = await settled(page);
   expect(s).toMatchObject({ id: "custom", hyper: true, pieces: 46 });
   await page.click(".nx-pick");
-  await expect(page.locator("#bSolid button", { hasText: "arbitrary" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#bSolid button", { hasText: "tiling" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   await editTool(page, "trim");
   expect((await editSites(page)).some((d) => d.label === "corners")).toBe(true);
