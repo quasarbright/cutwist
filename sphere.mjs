@@ -16,7 +16,7 @@
 // tile, turned how) and a fragment f of tile 0.
 // No drawing here: index.html draws each fragment from regionShape (its outline in the flat
 // picture, and the way back onto the sphere).
-import { dot, add, sub, scale, cross, len, normalize, applyMat, mulMat, rotMat, SOLIDS, buildSolid, faceTextures, TEXTURE_MIN_FACES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
+import { dot, add, sub, scale, cross, len, normalize, applyMat, mulMat, rotMat, SOLIDS, buildSolid, faceTextures, TEXTURE_MIN_FACES, trimFaceColors, nearByTiles, prismSideColor } from "./puzzle.mjs";
 import { arrangement, faceInner, faceHas } from "./tiles.mjs";
 import { HYPER_PARAMS } from "./hyper.mjs";
 import { regularDepths } from "./regular.mjs";
@@ -176,14 +176,21 @@ export const roundCuts = (N, M) => (N === 2 ? [{ on: "face", depths: [1.25 * sph
 // how big a circle can be: up to all but a sliver of the sphere (π would be the whole of it)
 export const SPHERE_RADIUS_RANGE = [0.05, Math.PI - 0.05];
 const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on === kind).flatMap((c) => c.depths).filter((r) => r >= SPHERE_RADIUS_RANGE[0] && r <= SPHERE_RADIUS_RANGE[1]))].sort((a, b) => a - b);
-// prism-like colors for the beach balls' wedges (round from red, then by the golden angle)
-const WEDGE_COLORS = ["#c8102e", "#0051ba", "#ffe600", "#009e60", "#ff6a13", "#7b3fb3", "#ff7eb6", "#007a89", "#7d3b11", "#8ed142", "#5c6068", "#5ab4ff"];
-const tileColors = (N, M, n) => {
-  const solid = sphereSolid(N, M);
-  if (solid) return SOLIDS[solid].colors;
-  if (M === 2) return ["#f4f4ee", "#ffe600"];
-  return Array.from({ length: n }, (_, k) => WEDGE_COLORS[k] || `hsl(${Math.round((k * 137.508) % 360)}, 55%, ${k % 2 ? 42 : 60}%)`);
-};
+// The faces' colors, as the flat-faced solids': a Platonic tiling's are its solid's. The beach balls
+// and the hemispheres are a prism on the ball (its sides the wedges, or the bands a truncation of
+// the hemispheres' edges makes; its caps the hemispheres, or the faces a truncation of the poles
+// makes): the prisms' colors, the sides' round the ball in turn, the top white and the bottom yellow.
+// The rest of a truncation's faces are colored as every puzzle's are (trimFaceColors).
+function prismColors(N, M, H, faces) {
+  const axis = N === 2 ? H.points.vertex[0] : H.normals[0], up = dot(axis, [0, 1, 0]) < -1e-9 || (Math.abs(dot(axis, [0, 1, 0])) < 1e-9 && dot(axis, [0, 0, 1]) < 0) ? scale(axis, -1) : axis;
+  const [u, v] = basisOf(up), around = (p) => Math.atan2(dot(p, v), dot(p, u));
+  // (the sides: the wedges, or a hemispheres' edges' faces; the caps: the poles' faces, or the hemispheres)
+  const sides = faces.filter((f) => f.side), order = sides.slice().sort((a, b) => around(a.p) - around(b.p));
+  const out = faces.map(() => null);
+  order.forEach((f, k) => { out[f.i] = prismSideColor(k); });
+  for (const f of faces) if (f.cap) out[f.i] = dot(f.p, up) > 0 ? "#f4f4ee" : "#ffe600";
+  return out;
+}
 
 // Truncation, as on the flat tilings: a tile's corners (or edges) cut off by a line square to the
 // way from its middle to the corner (the edge's middle), a fraction f of the way there (here, of the
@@ -205,7 +212,9 @@ export function buildSphere(spec) {
   // (a corner's face is on the tiles a corner radius away, an edge's on those an edge's away)
   const kindOf = ["face", ...trims].flatMap((k) => (k === "face" ? H.normals : H.points[k]).map(() => k));
   const tilesOf = normals.map((p, i) => (i < T ? [i] : H.normals.flatMap((c, t) => (dot(c, p) > Math.cos((kindOf[i] === "vertex" ? G.Rv : G.Ri) + 1e-6) ? [t] : []))));
-  const colors = trimFaceColors([...tileColors(N, M, T).slice(0, T), ...trims.flatMap((k) => H.points[k].map(() => null))], nearByTiles(tilesOf));
+  const solid = sphereSolid(N, M), given = solid ? [...SOLIDS[solid].colors.slice(0, T), ...normals.slice(T).map(() => null)]
+    : prismColors(N, M, H, normals.map((p, i) => ({ i, p, side: N === 2 ? i < T : kindOf[i] === "edge", cap: N === 2 ? kindOf[i] === "vertex" : i < T })));
+  const colors = trimFaceColors(given, nearByTiles(tilesOf));
   const which = (p) => normals.findIndex((v) => len(sub(v, p)) < 1e-6);
   const P = {
     kind: "sphere", spec, N, M, G, H, radii, truncate, faceBase, R: 1, size: 2,

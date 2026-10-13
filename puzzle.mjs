@@ -189,7 +189,7 @@ export const SOLIDS = {
 // them apart).
 const PRISM_SIDE_COLORS = ["#c8102e", "#0051ba", "#ff6a13", "#009e60", "#7b3fb3", "#ff7eb6",
   "#007a89", "#7d3b11", "#8ed142", "#5c6068", "#5ab4ff", "#d4a017"];
-const prismSideColor = (k) => PRISM_SIDE_COLORS[k] || `hsl(${Math.round((k * 137.508) % 360)}, 55%, ${k % 2 ? 42 : 60}%)`;
+export const prismSideColor = (k) => PRISM_SIDE_COLORS[k] || `hsl(${Math.round((k * 137.508) % 360)}, 55%, ${k % 2 ? 42 : 60}%)`;
 export const cuboidDims = (spec) => [spec.a, spec.b, spec.c];
 // columns on each side face: `cuts` cuts per side reach its neighbors' middles from both edges
 const prismColumns = (spec) => Math.max(1, 2 * spec.cuts);
