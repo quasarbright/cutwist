@@ -12,7 +12,8 @@
 import { mobius as Mb, darts, hdist, diskCircle, tileEdges } from "./hyper.mjs";
 import { faceHas } from "./tiles.mjs";
 import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
-import { colorDistance, PUZZLE_PALETTES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
+import { colorDistance, PUZZLE_PALETTES, trimFaceColors, nearByTiles, faceTextures, TEXTURE_MIN_FACES } from "./puzzle.mjs";
+import { inkPattern } from "./tile-view.mjs";
 
 const BODY = "#0a0b0e";
 const BLACK = "#1c1f27";
@@ -82,6 +83,22 @@ export function hyperFaceColor(P, kind, c) {
   const { base, colors } = trimSets.get(P);
   return colors[base[kind] + c];
 }
+
+// Each face's texture (patterns on the stickers, so look-alike colors tell apart), as every puzzle
+// gives them (puzzle.mjs's faceTextures, over the tiles' colors and the truncation's faces'):
+// hyperTexture(P, kind, c) an index into TEXTURES. On by default from 13 faces, as everywhere.
+const textureSets = new WeakMap();
+function hyperTextureSet(P) {
+  if (!textureSets.has(P)) {
+    const { H } = P, kinds = ["face", ...["vertex", "edge"].filter((k) => P.truncate && P.truncate[k] !== undefined)];
+    const faces = kinds.flatMap((kind) => (kind === "face" ? Array.from({ length: P.tiles }, (_, c) => [kind, c]) : H.coset[kind].reps.map((_, c) => [kind, c])));
+    const t = faceTextures(faces.map(([kind, c]) => hyperFaceColor(P, kind, c))), at = new Map(faces.map(([kind, c], i) => [`${kind}:${c}`, t[i]]));
+    textureSets.set(P, { at, count: faces.length });
+  }
+  return textureSets.get(P);
+}
+export const hyperTexture = (P, kind, c) => hyperTextureSet(P).at.get(`${kind}:${c}`) || 0;
+export const hyperTexturesByDefault = (P) => hyperTextureSet(P).count >= TEXTURE_MIN_FACES;
 
 // Each fragment of tile 0 (hyper.mjs's P.regions: a piece is some of them, on its tiles) as
 // polygons, once per puzzle, at a few levels of detail (a small copy needs fewer points):
@@ -353,7 +370,8 @@ export class HyperView {
     // an algorithm's, is drawn each frame)
     const steady = look.lit && look.litSteady ? look.lit : null;
     const place = [this.viewKey(), this.cx, this.cy, this.origin.x, this.origin.y, canvas.width, canvas.height].join("|");
-    const key = [place, state.join(), moving ? [...moving.keys()].join(".") : "", steady ? [...steady].join(".") : ""].join("|");
+    this.textures = !!look.textures && !this.bare;
+    const key = [place, state.join(), moving ? [...moving.keys()].join(".") : "", steady ? [...steady].join(".") : "", this.textures].join("|");
     if (!this.cache || this.cache.key !== key) {
       const cx = this.layer("cache");
       const still = (i) => !moving || !moving.has(i);
@@ -488,8 +506,23 @@ export class HyperView {
       // (small ones: their corners will do, the edges' bend is under a pixel)
       if (px < 12) this.trace(ctx, P.G.corners, d.m); else this.trace(ctx, P.G.poly, d.m, this.stepFor(px));
       ctx.fillStyle = hyperColor(P, P.H.coset.face.of[d.e]); ctx.fill();
+      this.ink(ctx, "face", P.H.coset.face.of[d.e], ctx.fillStyle);
       if (px >= PIECE_PX) this.paintTrims(ctx, P.tileFaces.map((_, k) => k), d.e, d.m, px);
     }
+  }
+  // A face's texture over the path just filled (when textures are on): its pattern, fixed to the
+  // screen as on the other puzzles (the stickers windows onto it)
+  ink(ctx, kind, c, color, rule = "nonzero") {
+    if (!this.textures) return;
+    const t = hyperTexture(this.P, kind, c);
+    if (!t) return;
+    const { canvas } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
+    ctx.save();
+    ctx.clip(rule);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = inkPattern(ctx, t, color, dpr);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
   }
   // A tile's truncated corners' and edges' faces (faces: indices into P.tileFaces), drawn over it
   // where they are in the tile seen from dart m, whose element at home is x: each in its color, and
@@ -500,7 +533,9 @@ export class HyperView {
     const step = this.stepFor(px);
     for (const fc of trims) {
       ctx.beginPath(); this.trace(ctx, fc.disk, m, step);
-      ctx.fillStyle = hyperFaceColor(P, fc.kind, P.H.coset[fc.kind].of[P.faceElement(x, fc)]); ctx.fill();
+      const c = P.H.coset[fc.kind].of[P.faceElement(x, fc)];
+      ctx.fillStyle = hyperFaceColor(P, fc.kind, c); ctx.fill();
+      this.ink(ctx, fc.kind, c, ctx.fillStyle);
       if (this.bare) { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.stroke(); }
     }
     if (this.bare) return;
@@ -582,6 +617,7 @@ export class HyperView {
           for (const poly of shape.loops) this.trace(ctx, poly, m);
           if (mode === "light") { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = "#fff"; ctx.fill("evenodd"); ctx.restore(); continue; }
           ctx.fillStyle = pc.black ? BLACK : hyperColor(P, pc.faces[k]); ctx.fill("evenodd");
+          if (!pc.black) this.ink(ctx, "face", pc.faces[k], ctx.fillStyle, "evenodd");
           // (no lines over the joins, as for the 3D view's texture: each a little wider, so no hairline gap shows between)
           if (this.bare) { ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.stroke(); ctx.strokeStyle = BODY; }
           // (truncated: the corners' and edges' faces it overlaps, in the fragment only)

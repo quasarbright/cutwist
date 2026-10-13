@@ -786,7 +786,7 @@
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims,
     } from "./hyper.mjs";
-    import { HyperView, hyperColor } from "./hyper-view.mjs";
+    import { HyperView, hyperColor, hyperTexturesByDefault } from "./hyper-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
     import { buildSphere, isSpherical, sphereGeometry, regionShape, sphereStats, sphereSnapCandidates, sphereCountBreaks, SPHERE_RADIUS_RANGE, ROUND_PRESETS, roundCuts, sphereRegularTrims } from "./sphere.mjs";
 
@@ -2198,7 +2198,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       planeBox = "";
       placeCamera();
       $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
-      $("textures").hidden = isPlanar() || isHyper(); // (planar cells' textures: the view menu's look options; none yet on the disk)
+      $("textures").hidden = isPlanar(); // (planar cells' textures: the view menu's look options)
       if (!isFlat()) {
         buildMeshes();
         if (resetView) root.quaternion.copy(startView());
@@ -2373,9 +2373,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       renderAlgorithms();
     }
 
+    // (on from 13 faces, every kind of puzzle)
+    const texturesDefault = () => (isTiles() ? P.faces.length >= TEXTURE_MIN_FACES : isHyper() ? hyperTexturesByDefault(P) : !!P.texturesByDefault);
     function renderTexturesButton() {
       // (tile-turning puzzles: on from 13 faces, like 3D puzzles)
-      showTextures = textureChoice ?? (isTiles() ? P.faces.length >= TEXTURE_MIN_FACES : !!P.texturesByDefault);
+      showTextures = textureChoice ?? texturesDefault();
       texturesOn.value = showTextures ? 1 : 0;
       $("textures").classList.toggle("is-active", showTextures);
       $("textures").setAttribute("aria-pressed", String(showTextures));
@@ -3934,7 +3936,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const turn = anim && anim.pieces ? { pieces: anim.pieces, theta: anim.theta, axis: anim.axis, layer: anim.layer } : null;
       // (lit: blacking out, the kind of piece under the pointer; otherwise an algorithm's pieces)
       const lit = hoverType !== null ? new Set(P.pieces.flatMap((pc, i) => (pc.type === hoverType ? [i] : []))) : algLit;
-      const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit, litAlpha: hoverType !== null ? 0.34 : litPulse(), litSteady: hoverType !== null, pointer: tilePointer };
+      const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit, litAlpha: hoverType !== null ? 0.34 : litPulse(), litSteady: hoverType !== null, pointer: tilePointer, textures: showTextures };
       plane.hidden = !reg.flat;
       canvas.hidden = !reg.surface;
       if (reg.flat) {
@@ -4291,7 +4293,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       } else if (isHyper()) {
         if (!viewFlat) q.set("flat", "off");
         if (view3D) q.set("3d", "on");
-      } else if (textureChoice !== null && textureChoice !== !!P.texturesByDefault) q.set("textures", textureChoice ? "on" : "off");
+      } else if (textureChoice !== null && textureChoice !== texturesDefault()) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
       if (url !== location.pathname + location.search) window.history.replaceState(null, "", url);

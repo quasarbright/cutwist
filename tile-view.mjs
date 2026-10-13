@@ -479,7 +479,7 @@ function luminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 const inkPatterns = new WeakMap(); // a context → its patterns, by texture, ink and pixel ratio
-function inkPattern(ctx, t, color, dpr) {
+export function inkPattern(ctx, t, color, dpr) {
   if (!inkPatterns.has(ctx)) inkPatterns.set(ctx, new Map());
   const dark = luminance(color) > 0.12, key = `${t}:${dark}:${dpr}`, cache = inkPatterns.get(ctx);
   if (!cache.has(key)) {
