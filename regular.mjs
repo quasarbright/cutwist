@@ -1,12 +1,13 @@
 // Where a truncation makes a face regular: the depths at which some face's sides all come
 // out the same length (the soccer ball's hexagons, a truncated square's octagons). Shared by
-// the solids (puzzle.mjs) and the tilings (tiles.mjs).
+// the solids (puzzle.mjs) and the tilings (tiles.mjs, sphere.mjs, hyper.mjs). On a ball or the
+// hyperbolic plane, side lengths are that geometry's distances (dist), straight along its lines.
 
-const dist = (a, b) => Math.sqrt(a.reduce((s, x, k) => s + (x - b[k]) ** 2, 0));
+const euclid = (a, b) => Math.sqrt(a.reduce((s, x, k) => s + (x - b[k]) ** 2, 0));
 
 // How far a polygon is from having equal sides: (longest − shortest) / longest, over its sides
 // with straight runs joined (a corner of 180° isn't one). verts: points of any dimension.
-export function unevenness(verts) {
+export function unevenness(verts, dist = euclid) {
   const n = verts.length, keep = [];
   for (let i = 0; i < n; i++) {
     const a = verts[(i - 1 + n) % n], b = verts[i], c = verts[(i + 1) % n];
@@ -56,12 +57,12 @@ export function unionOutline(polys) {
 // from a name that stays the same across depths to the face's vertices. Scans, then narrows
 // down each dip in a face's unevenness to where it reaches 0. A face that's regular all along
 // (a cube's squares under a corner cut) isn't a dip.
-export function regularDepths(build, lo, hi, steps = 120) {
+export function regularDepths(build, lo, hi, steps = 120, dist = euclid) {
   // (faces alike go down the same search, so each depth is built once)
   const memo = new Map(), facesAt = (f) => { if (!memo.has(f)) memo.set(f, build(f)); return memo.get(f); };
   const fs = Array.from({ length: steps + 1 }, (_, i) => lo + ((hi - lo) * i) / steps);
-  const scan = fs.map((f) => { const m = new Map(); for (const [name, verts] of facesAt(f)) m.set(name, unevenness(verts)); return m; });
-  const at = (f, name) => { const v = facesAt(f).get(name); return v ? unevenness(v) : Infinity; };
+  const scan = fs.map((f) => { const m = new Map(); for (const [name, verts] of facesAt(f)) m.set(name, unevenness(verts, dist)); return m; });
+  const at = (f, name) => { const v = facesAt(f).get(name); return v ? unevenness(v, dist) : Infinity; };
   const out = [];
   for (let i = 1; i < steps; i++)
     for (const [name, u] of scan[i]) {

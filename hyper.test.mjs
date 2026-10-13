@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount, hyperCountBreaks, hyperPieceCountAt, hyperRadiusLimit, hyperSnapCandidates, tileFaces } from "./hyper.mjs";
+import { HYPER_PRESETS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, mobius, hdist, geometry, hyperCircleCount, hyperSurfaces, surfaceCaps, fragmentCount, hyperCountBreaks, hyperPieceCountAt, hyperRadiusLimit, hyperSnapCandidates, tileFaces, hyperRegularTrims } from "./hyper.mjs";
 import { faceHas, inPolygon } from "./tiles.mjs";
 import { fragmentShapes } from "./hyper-view.mjs";
 
@@ -214,4 +214,23 @@ test("truncation makes a tile's corners count: a turn that brings them back roun
   assert.equal(isHyperSolved(P, t), false);
   play(P, moves.slice().reverse().map((m) => inverseHyperMove(P, m)), t);
   assert.ok(isHyperSolved(P, t));
+});
+
+test("truncations that make a face regular: the heptagons' corners off till they're regular 14-gons", () => {
+  const fs = hyperRegularTrims({ N: 7, M: 3 }, "vertex", [0.02, 0.99]);
+  assert.ok(fs.length > 0);
+  // (there: every side of the tile's own face the same length)
+  const G = geometry(7, 3), f = fs.at(-1), core = tileFaces(G, { vertex: f }).find((fc) => fc.kind === "face");
+  const disk = core.klein.map(([x, y]) => { const t = 1 / (1 + Math.sqrt(1 - x * x - y * y)); return [x * t, y * t]; });
+  const sides = disk.map((p, i) => hdist(p, disk[(i + 1) % disk.length]));
+  assert.equal(sides.length, 14);
+  assert.ok(Math.max(...sides) - Math.min(...sides) < 1e-6);
+});
+
+test("a deep truncation still builds: corners' and edges' faces past where they meet", () => {
+  const file = JSON.parse(readFileSync(new URL("./regular-maps/7-3.json", import.meta.url)));
+  for (const truncate of [{ vertex: 0.03 }, { edge: 0.03 }, { vertex: 0.2, edge: 0.1 }]) {
+    const P = buildHyper({ rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.7] }], truncate, blackout: [] }, file);
+    assert.ok(P.n > 0, JSON.stringify(truncate));
+  }
 });

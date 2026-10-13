@@ -2,7 +2,7 @@
 // Run: node --test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSphere, sphereGeometry, sphereGroup, isSpherical, sphereStats, regionArea, sphereCountBreaks, sphereSnapCandidates, SPHERE_RADIUS_RANGE } from "./sphere.mjs";
+import { buildSphere, sphereGeometry, sphereGroup, isSpherical, sphereStats, regionArea, sphereCountBreaks, sphereSnapCandidates, SPHERE_RADIUS_RANGE, sphereRegularTrims } from "./sphere.mjs";
 import { solvedState, applyMove, inverseMove, isSolved, scrambleMoves, piecesInLayer, applyMat, mulMat, dot } from "./puzzle.mjs";
 
 const TILINGS = [[3, 3], [4, 3], [3, 4], [5, 3], [3, 5], [2, 3], [2, 6], [3, 2], [6, 2]];
@@ -144,6 +144,26 @@ test("a circle's count changes can be searched for right up to where circles mee
   let n = 0;
   for (const x of sphereCountBreaks(P, "vertex", 0, ...SPHERE_RADIUS_RANGE, sphereSnapCandidates(P, "vertex", 0))) if (x.at !== undefined) n++;
   assert.ok(n > 10);
+});
+
+test("truncations that make a face regular: the four-wedge beach ball's squares (the cube's ball), the cube's octagons", () => {
+  const near = (fs, f) => fs.some((g) => Math.abs(g - f) < 1e-4);
+  assert.ok(near(sphereRegularTrims({ N: 2, M: 4 }, "vertex", [0.02, 0.99]), 0.5)); // (the wedges' sides a quarter turn each)
+  // (the cube's ball: corners off till the squares are regular octagons, past where the corners' faces
+  // meet till the octahedron's hexagons are; edges off with the corners off too: the squares again)
+  const cube = sphereRegularTrims({ N: 4, M: 3 }, "vertex", [0.02, 0.99]);
+  assert.equal(cube.length, 2);
+  assert.ok(cube.every((f) => f > 0.02 && f < 0.99));
+  assert.ok(sphereRegularTrims({ N: 4, M: 3, truncate: { vertex: 0.6 } }, "edge", [0.02, 0.99]).length > 0);
+});
+
+test("a truncation goes on in till the tile's own face is all but gone, the ball still covered once", () => {
+  for (const [N, M] of [[2, 4], [4, 3], [3, 5], [6, 2]]) for (const truncate of [{ vertex: 0.03 }, { edge: 0.03 }, { vertex: 0.2, edge: 0.1 }]) {
+    const P = buildSphere({ N, M, cuts: [{ on: "face", depths: [0.8 * sphereGeometry(N, M).Rv] }], truncate, blackout: [] });
+    let area = 0;
+    for (const pc of P.pieces) for (const st of pc.stickers) area += regionArea(P, st.f);
+    assert.ok(Math.abs(area - 4 * Math.PI) < 1e-3, `{${N},${M}} ${JSON.stringify(truncate)}: ${area}`);
+  }
 });
 
 test("blacking out a kind takes its stickers off", () => {

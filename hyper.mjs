@@ -14,6 +14,7 @@
 // home. A turn about an axis by q is the element ρ^q (ρ = h·X·h⁻¹ for the axis's coset hX⁻¹...),
 // applied on the left to every piece in the ring: positions stay exact.
 // No drawing here (hyper-view.mjs draws the disk).
+import { regularDepths } from "./regular.mjs";
 import { enumerate, parseRelator, wordPerm } from "./todd-coxeter.mjs";
 import { arrangement, faceInner, faceHas } from "./tiles.mjs";
 
@@ -266,6 +267,25 @@ function clipBelow(poly, n, k) {
   return out;
 }
 const polyArea = (poly) => Math.abs(poly.reduce((s, a, i) => { const b = poly[(i + 1) % poly.length]; return s + a[0] * b[1] - a[1] * b[0]; }, 0)) / 2;
+// The truncations that make some face regular (as on the solids and the other tilings): tile 0's
+// own face, and the faces round its corner 0 and edge 0's middle (tile 0's part, turned round the
+// point into each tile there), their sides measured hyperbolically.
+export function hyperRegularTrims(spec, kind, [lo, hi]) {
+  const G = geometry(spec.N, spec.M);
+  const round = (o, pts) => { const back = M.inv(M.to(o)); return pts.filter((p) => abs(sub(p, o)) > 1e-9).sort((p, q) => { const a = M.apply(back, p), b = M.apply(back, q); return Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]); }); };
+  const build = (f) => {
+    const truncate = truncationOf({ truncate: { ...(spec.truncate || {}), [kind]: f } }), out = new Map(), faces = tileFaces(G, truncate);
+    for (const fc of faces) {
+      if (fc.kind === "face") { out.set("face", fc.klein.map(fromKlein)); continue; }
+      if (fc.i !== 0) continue;
+      const o = fc.kind === "vertex" ? G.corners[0] : G.mids[0], turns = fc.kind === "vertex" ? G.M : 2, pts = [];
+      for (let j = 0; j < turns; j++) { const T = M.about(o, (2 * Math.PI * j) / turns); for (const p of fc.klein.map(fromKlein)) { const q = M.apply(T, p); if (!pts.some((r) => abs(sub(r, q)) < 1e-9)) pts.push(q); } }
+      if (pts.length >= 3) out.set(fc.kind, round(o, pts));
+    }
+    return out;
+  };
+  return regularDepths(build, lo, hi, 120, hdist);
+}
 export const truncationOf = (spec) => Object.fromEntries(["vertex", "edge"].flatMap((k) => { const f = spec.truncate && spec.truncate[k]; return Number.isFinite(f) && f > 0 && f < 1 ? [[k, f]] : []; }));
 // Tile 0's faces: [{ kind ("face" for the tile's own, "vertex", "edge"), i (which corner, or edge's
 // middle, of G.corners or G.mids), klein (the convex polygon), disk (the same in the Poincaré disk,

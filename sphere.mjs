@@ -19,6 +19,7 @@
 import { dot, add, sub, scale, cross, len, normalize, applyMat, mulMat, rotMat, SOLIDS, buildSolid, faceTextures, TEXTURE_MIN_FACES, trimFaceColors, nearByTiles } from "./puzzle.mjs";
 import { arrangement, faceInner, faceHas } from "./tiles.mjs";
 import { HYPER_PARAMS } from "./hyper.mjs";
+import { regularDepths } from "./regular.mjs";
 
 const TAU = 2 * Math.PI;
 const KINDS = ["face", "vertex", "edge"];
@@ -520,6 +521,61 @@ export function sphereSnapCandidates(P, kind, i) {
   for (const q of ring) { const m = normalize(sub(p0, q)); for (const k of others) for (const x of onTwo(m, 0, k.p, k.c)) add1(angle(p0, x)); }
   return out.sort((a, b) => a - b);
 }
+// ---- the truncations that make some face regular (as on the solids and the flat tilings: a beach
+// ball of four wedges, its poles truncated till the wedges are squares, is the cube's ball). The
+// faces worked out on tile 0 as each is (see findPieces' partOf): a tile's own face, and a corner's
+// (an edge's) face the parts of it in the tiles round it, tile 0's turned about that point. Each
+// part is where some great circles' half-spheres meet: its corners are where two of the circles
+// cross, inside all the rest. Side lengths are arcs.
+const arc = (a, b) => Math.acos(Math.max(-1, Math.min(1, dot(a, b))));
+function hullOn(halves) {
+  const pts = [];
+  for (let a = 0; a < halves.length; a++) for (let b = a + 1; b < halves.length; b++) {
+    const c = cross(halves[a], halves[b]), l = len(c);
+    if (l < 1e-12) continue;
+    for (const p of [scale(c, 1 / l), scale(c, -1 / l)])
+      if (halves.every((n) => dot(n, p) >= -1e-9) && !pts.some((q) => len(sub(q, p)) < 1e-9)) pts.push(p);
+  }
+  return pts;
+}
+// points round a middle o, in order (o itself, inside the face, left out)
+function roundAbout(o, pts) {
+  const [e1, e2] = basisOf(o);
+  return pts.filter((p) => len(sub(p, o)) > 1e-9).sort((p, q) => Math.atan2(dot(p, e2), dot(p, e1)) - Math.atan2(dot(q, e2), dot(q, e1)));
+}
+export function sphereRegularTrims(spec, kind, [lo, hi]) {
+  const G = sphereGeometry(spec.N, spec.M), { c0 } = G;
+  const toward = (p) => normalize(sub(p, scale(c0, dot(p, c0))));
+  const build = (f) => {
+    const truncate = { ...(spec.truncate || {}), [kind]: f }, out = new Map();
+    const kinds = ["vertex", "edge"].filter((k) => truncate[k] !== undefined).map((k) => {
+      const dirs = (k === "vertex" ? G.corners : G.mids).map(toward), t = truncate[k] * (k === "vertex" ? G.Rv : G.Ri);
+      return { k, dirs, cut: dirs.map((u) => sub(scale(u, Math.cos(t)), scale(c0, Math.sin(t)))) };
+    });
+    // (a part: tile 0, past its cut, further toward its point than toward the others, and not a
+    // corner's if it's an edge's; the tile's own face: short of every cut)
+    const part = (i, at) => {
+      const halves = [...G.edgeNormals];
+      for (const [j, { k, dirs, cut }] of kinds.entries()) {
+        if (j < at) halves.push(...cut.map((c) => scale(c, -1))); // (not an earlier kind's)
+        else if (j === at) { halves.push(cut[i]); dirs.forEach((u, m) => { if (m !== i) halves.push(sub(dirs[i], u)); }); }
+      }
+      return hullOn(halves);
+    };
+    const core = hullOn([...G.edgeNormals, ...kinds.flatMap(({ cut }) => cut.map((c) => scale(c, -1)))]);
+    if (core.length >= 3) out.set("face", roundAbout(normalize(core.reduce(add, [0, 0, 0])), core));
+    kinds.forEach(({ k }, at) => {
+      // (the face round point 0 of the kind: tile 0's part, turned round the point into each tile there)
+      const o = k === "vertex" ? G.corners[0] : G.mids[0], turns = k === "vertex" ? G.M : 2, pts = [];
+      const p0 = part(0, at);
+      for (let j = 0; j < turns; j++) { const T = rotMat(o, (TAU * j) / turns); for (const p of p0) { const q = applyMat(T, p); if (!pts.some((r) => len(sub(r, q)) < 1e-9)) pts.push(q); } }
+      if (pts.length >= 3) out.set(k, roundAbout(o, pts));
+    });
+    return out;
+  };
+  return regularDepths(build, lo, hi, 120, arc);
+}
+
 // How many pieces there'd be with circle i of a kind at radius r and the rest as they are
 export function spherePieceCountAt(P, kind, i, r) {
   const radii = Object.fromEntries(KINDS.map((k) => [k, [...P.radii[k]]]));

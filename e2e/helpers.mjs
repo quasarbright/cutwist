@@ -127,7 +127,11 @@ export async function dragCut(page, r, i, v, steps = 12) {
   const lines = await page.evaluate((v) => window.cutwist.editHeldCurve(v), v);
   const pts = lines.flatMap((l) => l.slice(1).map((q, k) => [(q[0] + l[k][0]) / 2, (q[1] + l[k][1]) / 2]));
   if (!pts.length) { await page.mouse.up(); throw new Error(`cut ${r}:${i} at ${v} isn't showing`); }
-  const [x, y] = pts.reduce((b, q) => (Math.hypot(q[0] - from.x, q[1] - from.y) < Math.hypot(b[0] - from.x, b[1] - from.y) ? q : b));
+  // (the nearest that's on the puzzle at whole pixels too, as some browsers round the pointer: not
+  // right on its outline)
+  pts.sort((a, b) => Math.hypot(a[0] - from.x, a[1] - from.y) - Math.hypot(b[0] - from.x, b[1] - from.y));
+  const on = await page.evaluate((ps) => ps.map(([x, y]) => !!window.cutwist.editProbe(Math.round(x), Math.round(y)) && !!window.cutwist.editProbe(Math.floor(x), Math.floor(y))), pts.slice(0, 60));
+  const [x, y] = pts[Math.max(0, on.indexOf(true))];
   await page.mouse.move(x, y, { steps });
   await page.mouse.up();
 }

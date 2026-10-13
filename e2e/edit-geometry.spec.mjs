@@ -128,3 +128,14 @@ test("a dot wins over a line through it: a cut placed at a corner face a circle 
   await editDot(page, "corner faces");
   expect((await rulers(page))[3].values.length).toBe(1);
 });
+
+// (a ball's truncation had no snaps where a face turns regular, as the solids' and the torus's do,
+// and it stopped at the solids' limit, a third of the way to the corner)
+test("the four-wedge beach ball's corner truncation snaps where the wedges are squares, and goes on past the solids' limit", async ({ page }) => {
+  await customize(page, { rule: "hyper", N: 2, M: 4, surface: 0, truncate: { vertex: 0.8 }, cuts: [{ on: "face", depths: [0.4] }], blackout: [] });
+  await expect.poll(() => page.evaluate(() => window.cutwist.editSnaps(0, 0).some((v) => Math.abs(v - 0.5) < 1e-6)), { timeout: 15000 }).toBe(true);
+  expect((await rulers(page))[0].values[0]).toBeCloseTo(0.2, 6);
+  await editTool(page, "trim");
+  await dragCut(page, 0, 0, 0.85, 8);
+  expect((await rulers(page))[0].values[0]).toBeGreaterThan(0.75);
+});

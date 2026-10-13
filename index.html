@@ -784,11 +784,11 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear, pressAt } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein,
+      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims,
     } from "./hyper.mjs";
     import { HyperView, hyperColor } from "./hyper-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
-    import { buildSphere, isSpherical, sphereGeometry, regionShape, sphereStats, sphereSnapCandidates, sphereCountBreaks, SPHERE_RADIUS_RANGE, ROUND_PRESETS, roundCuts } from "./sphere.mjs";
+    import { buildSphere, isSpherical, sphereGeometry, regionShape, sphereStats, sphereSnapCandidates, sphereCountBreaks, SPHERE_RADIUS_RANGE, ROUND_PRESETS, roundCuts, sphereRegularTrims } from "./sphere.mjs";
 
     const $ = (id) => document.getElementById(id);
     // the layout's own elements (issue #2: see "the layout" near the end)
@@ -1535,6 +1535,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // A design: the solid, optional trims of its corners/edges, cut sets ({ on, depths }), and
     // blacked-out piece kinds.
     const [TRIM_MIN, TRIM_MAX] = TRIM_RANGE;
+    // A tiling's truncation goes on in till its tile's own face is all but gone (the corners' faces
+    // meeting, then past that the tile shrinking to its middle). A solid's stops at the
+    // tetrahedron's corners meeting (a third of the way in): past that its faces are cut away.
+    const TILING_TRIM_RANGE = [0.02, TRIM_MAX], trimRange = () => (isCircleDesign() ? TILING_TRIM_RANGE : TRIM_RANGE);
     // always three cut sets, one per kind, in this order (a design from a link or a preset
     // may list them differently, or repeat a kind)
     const threeSets = (cuts) => ["face", "vertex", "edge"].map((on) => ({ on, depths: (cuts || []).filter((c) => c.on === on).flatMap((c) => c.depths) }));
@@ -1598,7 +1602,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const truncate = {};
       for (const k of ["vertex", "edge"]) {
         const f = c.truncate && Number(c.truncate[k]);
-        if (Number.isFinite(f)) truncate[k] = Math.max(TRIM_MIN, Math.min(TRIM_MAX, f));
+        if (Number.isFinite(f)) truncate[k] = Math.max(TILING_TRIM_RANGE[0], Math.min(TRIM_MAX, f));
       }
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
       return tileCustom({ rule: "tiles", tiling: c.tiling, a: int(c.a, 1, 8, 3), b: int(c.b, 0, 8, 0), truncate, cuts, blackout });
@@ -1614,7 +1618,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const truncate = {};
       for (const k of ["vertex", "edge"]) {
         const f = c.truncate && Number(c.truncate[k]);
-        if (Number.isFinite(f)) truncate[k] = Math.max(TRIM_MIN, Math.min(TRIM_MAX, f));
+        if (Number.isFinite(f)) truncate[k] = Math.max(TILING_TRIM_RANGE[0], Math.min(TRIM_MAX, f));
       }
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
       return hyperCustom({ rule: "hyper", N, M, surface: int(c.surface, 0, 999, 0), truncate, cuts, blackout });
@@ -1760,6 +1764,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
             snaps[r][i] = sphereSnapCandidates(P, kind, at);
             work.push([r, i, sphereCountBreaks(P, kind, at, ...SPHERE_RADIUS_RANGE, snaps[r][i].slice())]);
           }
+          // (a truncation's: where it makes a face regular, as on the solids and the flat tilings)
+          if (t.trim) work.push([r, i, null]);
           return;
         }
         if (t.trim) work.push([r, i, null]);
@@ -1790,7 +1796,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const [r, i, f] = work.shift(), R = RULERS[r], t = R.target(i);
         // (marks are where the ruler shows them: a truncation's by what it takes off)
         if (f === null) {
-          const fs = isTileDesign() ? tileRegularTrims(spec, t.trim, TRIM_RANGE) : regularTrims(spec, t.trim);
+          const fs = isTileDesign() ? tileRegularTrims(spec, t.trim, TILING_TRIM_RANGE)
+            : isHyperDesign() ? (isRound(spec) ? sphereRegularTrims(spec, t.trim, TILING_TRIM_RANGE) : hyperRegularTrims(spec, t.trim, TILING_TRIM_RANGE))
+            : regularTrims(spec, t.trim);
           snaps[r][i].push(...fs.map(R.depth));
           showSnaps();
         } else if (snapWorker) {
@@ -1856,7 +1864,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (a truncation's ruler reads how much it takes off, 1 − its depth: 0 is the tip, nothing off.
     // The design keeps the depth.)
     const trimRuler = (kind) => ({
-      trim: kind, label: kind === "vertex" ? "corners" : "edges", range: [1 - TRIM_RANGE[1], 1 - TRIM_RANGE[0]], max: 1, noun: "truncation",
+      trim: kind, label: kind === "vertex" ? "corners" : "edges", get range() { const [lo, hi] = trimRange(); return [1 - hi, 1 - lo]; }, max: 1, noun: "truncation",
       exists: true,
       depth: (v) => 1 - v, // (ruler → design, and back)
       values: () => (custom.truncate[kind] === undefined ? [] : [1 - custom.truncate[kind]]),
