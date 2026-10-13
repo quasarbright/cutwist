@@ -4226,6 +4226,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (snap) refQ.copy(refTarget);
     }
     function renderReference() {
+      // (no card while customizing: its box is empty, and a solved puzzle drawn into a square of
+      // negative size threw the whole canvas's viewport off, warping the views)
+      if (refSquares().some((q) => !(q.size > 0))) return;
       updatePieces(true);
       refQ.slerp(refTarget, 0.15);
       puzzleGroup.quaternion.copy(refQ);

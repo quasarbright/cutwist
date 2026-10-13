@@ -218,3 +218,26 @@ test("a solid design has no tiling steppers, a tiling one does; the name says th
   await expect(page.locator(".nx-pick")).toContainText("{4,3} Tiling");
   await expect(page.locator("#edMenu .control")).toHaveCount(0); // (not in the menu too)
 });
+
+// (the solved card is hidden while customizing, and the solved puzzle drawn into its empty box, a
+// square of negative size, threw the canvas's viewport off: the back view warped, zoomed in,
+// spilling across the right half)
+test("customizing with the rear view on: both views draw where they belong", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 760 });
+  const design = { rule: "hyper", N: 3, M: 4, surface: 0, truncate: { vertex: 0.6451532798287257 }, cuts: [{ on: "face", depths: [0.955316618124509] }], blackout: [] };
+  await open(page, `?puzzle=custom&rear=on&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
+  await page.evaluate(() => window.cutwist.settled());
+  await page.click(".nx-custombtn");
+  await page.mouse.move(5, 5);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  // (the page's background, well clear of both balls: above the back one, right of it, and under it)
+  for (const [x, y] of [[880, 110], [1080, 380], [1060, 600], [700, 600]]) {
+    const shot = await page.screenshot({ clip: { x, y, width: 1, height: 1 } });
+    const lum = await page.evaluate(async (b64) => {
+      const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+      const c = document.createElement("canvas"); c.width = c.height = 1; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, 1, 1).data; return d[0] + d[1] + d[2];
+    }, shot.toString("base64"));
+    expect(lum, `at ${x}, ${y}`).toBeLessThan(90);
+  }
+});
