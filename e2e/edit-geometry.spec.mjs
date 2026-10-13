@@ -42,6 +42,10 @@ test("every dot is on the ball", async ({ page }) => {
   for (const [N, M] of [[4, 3], [3, 5], [2, 6]]) for (const truncate of [{}, { vertex: 0.5 }, { edge: 0.5 }]) {
     await customize(page, { rule: "hyper", N, M, surface: 0, truncate, cuts: [{ on: "face", depths: [0.4] }], blackout: [] });
     for (const tool of ["cut", "trim"]) for (const d of await offs(page, tool)) expect(d.off, `{${N},${M}} ${JSON.stringify(truncate)} ${tool}: a ${d.label} dot`).toBeLessThan(0.01);
+    // (and no two dots in one spot: each place one set's)
+    await editTool(page, "cut");
+    const sites = await page.evaluate(() => window.cutwist.editSites());
+    for (const a of sites) expect(sites.filter((b) => Math.hypot(a.x - b.x, a.y - b.y) < 1).length, `{${N},${M}} ${JSON.stringify(truncate)}: a ${a.label} dot`).toBe(1);
   }
 });
 
@@ -109,4 +113,18 @@ test("a dot clicked on a truncated solid adds there, and the new cut's dots stay
   expect((await rulers(page))[5].values.length).toBe(1);
   for (const d of await offs(page, "cut")) expect(d.off).toBeLessThan(0.01);
   expect((await info(page)).pieces).toBeGreaterThan(1);
+});
+
+// (the octahedron's ball, its corners truncated, its tiles' circles through the corners: the
+// circles' lines ran through the corner faces' dots and took every press there)
+test("a dot wins over a line through it: a cut placed at a corner face a circle runs through", async ({ page }) => {
+  await customize(page, { rule: "hyper", N: 3, M: 4, surface: 0, truncate: { vertex: 0.6451532798287257 }, cuts: [{ on: "face", depths: [0.955316618124509] }, { on: "vertex", depths: [] }, { on: "edge", depths: [] }], blackout: [] });
+  // (the corner faces' dots clear of every other dot: near the outline, dots of different places can
+  // show on top of each other)
+  const all = await page.evaluate(() => window.cutwist.editSites());
+  const dots = all.filter((s) => s.label === "corner faces" && all.every((o) => o === s || Math.hypot(o.x - s.x, o.y - s.y) > 24));
+  expect(dots.length).toBeGreaterThan(0);
+  for (const d of dots) expect(await page.evaluate(({ x, y }) => window.cutwist.editHit(x, y), d)).toMatchObject({ r: 3, dot: true });
+  await editDot(page, "corner faces");
+  expect((await rulers(page))[3].values.length).toBe(1);
 });

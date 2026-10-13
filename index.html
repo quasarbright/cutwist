@@ -1811,7 +1811,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // corners' and edges' truncation made. A solid's depths run from the center (0) to the surface
     // (1), negative past the center; a tiling's are circles' radii.
     const CUT_KINDS = ["face", "vertex", "edge"];
-    const setOf = (on, of = null) => custom.cuts.find((c) => c.on === on && (on !== "face" || !isSolidDesign() || (c.of || "face") === (of || "face")));
+    // (a truncation's own faces' sets are a solid's: a tiling's circles round a corner are round its face)
+    const setOf = (on, of = null) => (of && of !== "face" && !isSolidDesign() ? undefined : custom.cuts.find((c) => c.on === on && (on !== "face" || !isSolidDesign() || (c.of || "face") === (of || "face"))));
     const isSolidDesign = () => !isCircleDesign();
     // A hyperbolic ruler ends at the biggest circle that still works out: under the surface's limit
     // and the circles budget. That's set by the biggest circle of the design (how far the others
@@ -3039,10 +3040,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const g = edGeo();
       if (!g || edTool === "paint") return null;
       const view = g.flat ? { cam: null } : { cam: inputCam };
-      let best = null;
+      // (a dot under the pointer wins over any line there: a new cut is placed at its dot, and lines
+      // often run right through dots, as a circle through the corners does)
+      let best = null, dot = null;
       for (const R of edRulers()) {
         const r = rulerOf(R), values = R.values(), pr = edProbe(g, x, y, R);
-        const sites = edSites(g, R, view);
         // (a cut's line: round every place of its set, showing or not, as a cut round a face out of
         // sight runs across the faces showing; where lines cross, the one whose place is nearer)
         if (pr && values.length) for (const st of g.sites(R)) {
@@ -3054,12 +3056,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
             if (px < 10 && (!best || px < best.px - 2 || (px < best.px + 2 && near < best.near))) best = { r, i, at: st.at, px, near };
           });
         }
-        for (const st of sites) {
+        for (const st of edSites(g, R, view)) {
           const px = Math.hypot(st.x - x, st.y - y);
-          if (px < 13 && (!best || px < best.px - 3)) best = { r, i: R.trim && values.length ? 0 : null, at: st.at, px, dot: true, still: st.turns === false };
+          if (px < 11 && (!dot || px < dot.px)) dot = { r, i: R.trim && values.length ? 0 : null, at: st.at, px, dot: true, still: st.turns === false };
         }
       }
-      return best;
+      return dot || best;
     }
 
     let edHover = null, edDrag = null, edLast = { x: 0, y: 0 };
