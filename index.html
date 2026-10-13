@@ -269,7 +269,6 @@
     .ed-sep { height: 1px; margin: 3px 6px; background: var(--border); }
     .ed-menu { width: 300px; gap: 8px; }
     .ed-menu .tw-label { margin: 0; }
-    .ed-menu .nx-sizes:empty, .ed-menu .nx-sizes:empty + * { display: none; }
     .nx-done {
       font: 500 .85rem var(--font-ui); color: var(--on-accent); background: var(--accent);
       border: 0; border-radius: 8px; padding: 6px 14px; cursor: pointer;
@@ -586,8 +585,6 @@
   <div class="nx-pop ed-menu" id="edMenu" hidden>
     <div class="tw-label" id="bSolidLabel">solid</div>
     <div class="tw-chips" id="bSolid" role="radiogroup" aria-label="solid"></div>
-    <div class="tw-label" id="bNMLabel">tiling</div>
-    <div id="bNM" class="nx-sizes"></div>
   </div>
 
   <!-- bottom: the algorithms down the left (turns recorded while "record" is on, played back
@@ -1622,6 +1619,12 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const blackout = Array.isArray(c.blackout) ? c.blackout.filter((t) => Number.isInteger(t) && t >= 0) : [];
       return hyperCustom({ rule: "hyper", N, M, surface: int(c.surface, 0, 999, 0), truncate, cuts, blackout });
     }
+    // A design's name, for the picker: its shape ("Truncated cube", "{3,4} Tiling")
+    function designName() {
+      if (isCircleDesign()) { const { N, M } = designNM(); return `{${N},${M}} Tiling`; }
+      const name = SOLID_NAMES[custom.solid], cut = custom.truncate && (custom.truncate.vertex !== undefined || custom.truncate.edge !== undefined);
+      return cut ? `Truncated ${name.toLowerCase()}` : name;
+    }
     // a custom design as URL-safe base64 JSON
     const designCode = () => btoa(JSON.stringify(design())).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     function shareLink() { return `${location.origin}${location.pathname}?puzzle=custom&design=${designCode()}`; }
@@ -1951,11 +1954,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           changed();
           computeSnaps();
         });
-      // the tiling's steppers here too: a solid's are its own {N,M} (the cube's {4,3}), and stepping
-      // them makes it a tiling design (see stepTiling); the rhombic solids have none
-      const nm = isCircleDesign() ? designNM() : null;
-      $("bNM").replaceChildren(...(nm ? ["N", "M"].map((key, i) => stepperRow(HYPER_PARAMS[i], () => designNM()[key], (v) => stepTiling(key, v))) : []));
-      $("bNMLabel").hidden = !nm;
+      // (a tiling's sides and tiles at a corner: its steppers under the name, as every tiling's)
     }
     // The solid or cuts changed. rerender: rebuild the builder's controls too (not while a
     // slider is being dragged).
@@ -2202,7 +2201,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // (the picker: just the puzzle, its numbers are in the steppers under it)
       // (an {N,M} preset stepped to another tiling isn't the one it's named for: named by its tiling)
       const own = MENU[presetIdx] || {};
-      nx.pickName.textContent = isCustom() ? "Custom" : spec.rule === "hyper" && (spec.N !== own.N || spec.M !== own.M) ? `{${spec.N},${spec.M}} Tiling` : spec.name;
+      nx.pickName.textContent = isCustom() ? designName() : spec.rule === "hyper" && (spec.N !== own.N || spec.M !== own.M) ? `{${spec.N},${spec.M}} Tiling` : spec.name;
       $("size").value = size;
       $("sizeDown").disabled = size <= 0;
       $("sizeControl").hidden = !!spec.fixed;

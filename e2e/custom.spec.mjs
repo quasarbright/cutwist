@@ -204,12 +204,17 @@ test("the puzzle turns while customizing, and any edit sets it back to solved", 
   expect((await info(page)).solved).toBe(true);
 });
 
-// (a solid's sides and tiles at a corner would make it a ball: only a tiling design has them)
-test("the name's menu: a solid design has no tiling steppers, a tiling one does", async ({ page }) => {
+// (a solid's sides and tiles at a corner would make it a ball: only a tiling design has them, under
+// its name as every tiling's are; the name is the design's shape)
+test("a solid design has no tiling steppers, a tiling one does; the name says the shape", async ({ page }) => {
   await open(page);
   await page.click(".nx-custombtn");
-  await page.click(".nx-pick");
-  await expect(page.locator("#bNM .control")).toHaveCount(0);
+  await expect(page.locator(".nx-pick")).toContainText("Cube");
+  await expect(page.locator("#paramControls .control")).toHaveCount(0);
+  await editDot(page, "corners", "trim");
+  await expect(page.locator(".nx-pick")).toContainText("Truncated cube");
   await editShape(page, "tiling");
-  await expect(page.locator("#bNM .control")).toHaveCount(2);
+  await expect(page.locator("#paramControls .control")).toHaveCount(2);
+  await expect(page.locator(".nx-pick")).toContainText("{4,3} Tiling");
+  await expect(page.locator("#edMenu .control")).toHaveCount(0); // (not in the menu too)
 });

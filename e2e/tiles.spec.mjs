@@ -154,7 +154,6 @@ test("customize opens the editor on the tiling: \"tiling\" picked in the name's 
   expect(s).toMatchObject({ id: "custom", tiling: "hex", pieces: 54 });
   await page.click(".nx-pick");
   await expect(page.locator("#bSolid").getByRole("radio", { name: "tiling" })).toHaveAttribute("aria-checked", "true"); // (one menu for every design: the solids, or a tiling)
-  await expect(page.locator("#bNM .control")).toHaveCount(2);
   await expect(page.locator("#bStats")).toContainText("54 pieces");
   await expect(page.locator("#paramControls .control")).toHaveCount(4); // (sides, at a corner, size and skew)
   // another tiling, then undo

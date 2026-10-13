@@ -109,11 +109,12 @@ test("customizing: a solid design turns into a tiling's and back, and the link k
   expect((await info(page)).faces).toBe(8);
 });
 
-test("the name's menu has the tiling's steppers for a tiling design: the cube's {4,3}, and stepping one makes it a torus", async ({ page }) => {
+test("a tiling design's steppers are under its name: the cube's {4,3}, and stepping one makes it a torus", async ({ page }) => {
   await open(page, "?puzzle=cube&rear=off");
   await page.click("#customize");
   await editShape(page, "tiling");
-  const panel = (label) => page.locator("#bNM .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
+  await page.keyboard.press("Escape");
+  const panel = (label) => page.locator("#paramControls .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
   await expect(panel("sides").locator("input")).toHaveValue("4");
   await expect(panel("at a corner").locator("input")).toHaveValue("3");
   await panel("at a corner").getByRole("button", { name: "+" }).click(); // {4,4}: the square torus
@@ -132,9 +133,8 @@ test("truncating a ball's corners: a face round each, the same pieces; and a hyp
   expect((await info(page)).pieces).toBe(before.pieces);
   const link = await page.evaluate(() => window.cutwist.shareLink());
   expect(JSON.parse(Buffer.from(new URL(link).searchParams.get("design"), "base64url").toString()).truncate.vertex).toBeGreaterThan(0);
-  await page.click(".nx-pick");
-  await page.locator("#bNM .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,4}: a torus, still truncated
-  await page.locator("#bNM .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,5}: hyperbolic
+  await page.locator("#paramControls .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,4}: a torus, still truncated
+  await page.locator("#paramControls .control", { hasText: "at a corner" }).getByRole("button", { name: "+" }).click(); // {4,5}: hyperbolic
   expect(await settled(page)).toMatchObject({ hyper: true, N: 4, M: 5 });
   const d = JSON.parse(Buffer.from(new URL(await page.evaluate(() => window.cutwist.shareLink())).searchParams.get("design"), "base64url").toString());
   expect(d.truncate.vertex).toBeGreaterThan(0);
