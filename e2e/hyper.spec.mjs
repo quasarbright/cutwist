@@ -21,7 +21,7 @@ test("the Klein quartic opens from the shelf: 24 heptagons, a piece per tile, ed
   expect(s.sizes.slice(0, 5)).toEqual([24, 72, 156, 156, 156]);
   await expect(page.locator("#plane")).toBeVisible();
   await expect(page.locator("#c")).toBeHidden();
-  await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a tile's middle · drag elsewhere to slide");
+  await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a middle · drag elsewhere to slide");
 });
 
 test("a surface of two octagons, each glued to itself at its corners, shows in 3D too", async ({ page }) => {
@@ -342,4 +342,19 @@ test("a turn stopped at whole steps looks like the puzzle after those steps: not
     return out;
   }, S);
   for (const c of cases) expect(c.differ, c.design).toBeLessThan(10);
+});
+
+// (the numbers line says the same on every kind: pieces that show, and the smallest sticker)
+test("customizing a hyperbolic surface: the numbers line has the smallest sticker too, and blacked-out pieces drop out of the count", async ({ page }) => {
+  await pick(page, "hyper-octagons");
+  await settled(page);
+  await page.click("#customize");
+  await settled(page);
+  await expect(page.locator("#bStats")).toContainText(/46 pieces · smallest \d/);
+  await editTool(page, "paint");
+  const mid = await page.evaluate(() => window.cutwist.hyperMiddle(0));
+  await page.mouse.click(mid.x, mid.y);
+  const black = (await info(page)).black;
+  expect(black).toBeGreaterThan(0);
+  await expect(page.locator("#bStats")).toContainText(`${46 - black} pieces`);
 });

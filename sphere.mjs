@@ -175,7 +175,8 @@ export const roundCuts = (N, M) => (N === 2 ? [{ on: "face", depths: [1.25 * sph
   : [{ on: "face", depths: [1.15 * sphereGeometry(N, M).Rv] }]);
 // how big a circle can be: up to all but a sliver of the sphere (π would be the whole of it)
 export const SPHERE_RADIUS_RANGE = [0.05, Math.PI - 0.05];
-const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on === kind).flatMap((c) => c.depths).filter((r) => r >= SPHERE_RADIUS_RANGE[0] && r <= SPHERE_RADIUS_RANGE[1]))].sort((a, b) => a - b);
+// (a radius out of range is brought into it, as the other puzzles' are)
+const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on === kind).flatMap((c) => c.depths).filter(Number.isFinite).map((r) => Math.max(SPHERE_RADIUS_RANGE[0], Math.min(SPHERE_RADIUS_RANGE[1], r))))].sort((a, b) => a - b);
 // The faces' colors, as the flat-faced solids': a Platonic tiling's are its solid's. The beach balls
 // and the hemispheres are a prism on the ball (its sides the wedges, or the bands a truncation of
 // the hemispheres' edges makes; its caps the hemispheres, or the faces a truncation of the poles

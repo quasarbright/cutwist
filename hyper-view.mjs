@@ -11,9 +11,8 @@
 // reaches.
 import { mobius as Mb, darts, hdist, diskCircle, tileEdges } from "./hyper.mjs";
 import { faceHas } from "./tiles.mjs";
-import { PUZZLE_COLORS, vividHex } from "./planar-view.mjs";
-import { colorDistance, PUZZLE_PALETTES, trimFaceColors, nearByTiles, faceTextures, TEXTURE_MIN_FACES } from "./puzzle.mjs";
-import { inkPattern } from "./tile-view.mjs";
+import { trimFaceColors, nearByTiles, faceTextures, TEXTURE_MIN_FACES } from "./puzzle.mjs";
+import { inkPattern, pickTileColors } from "./tile-view.mjs";
 
 const BODY = "#0a0b0e";
 const BLACK = "#1c1f27";
@@ -38,32 +37,11 @@ export function hyperColor(P, f) {
 }
 function hyperColors(P) {
   const { H } = P, n = P.tiles, face = H.coset.face;
-  const palette = n <= 12 ? PUZZLE_COLORS : n <= 20 ? PUZZLE_PALETTES[20] : n <= 30 ? PUZZLE_PALETTES[30]
-    : Array.from({ length: n }, (_, i) => vividHex((i * 137.508 + 29) % 360));
-  // neighbors: across each edge (the dart turned about its corner: x·S)
+  // neighbors: across each edge (the dart turned about its corner: x·S); colored as the torus's
+  // tiles are (tile-view.mjs's pickTileColors)
   const near = Array.from({ length: n }, () => new Set());
   for (let x = 0; x < H.n; x++) { const a = face.of[x], b = face.of[H.right[1][x]]; if (a !== b) { near[a].add(b); near[b].add(a); } }
-  // (six tiles, each touching all but one, like a cube's faces: a cube's colors, opposite pairs
-  // white–yellow, red–orange, blue–green)
-  if (n === 6 && near.every((s) => s.size === 4)) {
-    const out = new Array(6), opposite = (i) => [0, 1, 2, 3, 4, 5].find((j) => j !== i && !near[i].has(j));
-    [[0, 3], [1, 5], [2, 4]].forEach(([a, b]) => {
-      const i = [...out.keys()].find((k) => out[k] === undefined);
-      out[i] = PUZZLE_COLORS[a]; out[opposite(i)] = PUZZLE_COLORS[b];
-    });
-    return out;
-  }
-  const out = new Array(n), used = new Set();
-  for (let i = 0; i < n; i++) {
-    let best = -1, score = -Infinity;
-    palette.forEach((c, k) => {
-      if (used.has(k) && used.size < palette.length) return;
-      const d = Math.min(0.18, ...[...near[i]].filter((j) => out[j]).map((j) => colorDistance(c, out[j])));
-      if (d - 0.002 * k > score) { score = d - 0.002 * k; best = k; }
-    });
-    out[i] = palette[best]; used.add(best);
-  }
-  return out;
+  return pickTileColors(n, near);
 }
 
 // A face's color: a tile's (hyperColor), or a truncated corner's or edge's, chosen as every puzzle's

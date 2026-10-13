@@ -22,31 +22,49 @@ let uid = 0; // (a number per puzzle, for the cache's key)
 // tiles, the icosahedron's 20 up to 20, the rhombic triacontahedron's 30 up to 30 (past that,
 // hues spread by the golden angle). Tiles take colors in turn, outward from the middle, each
 // the one least like its neighbors' (colors near the palette's start win once it's clearly
-// different, so the cube's six come first), so look-alikes don't touch. A truncation's faces
-// take the solids' truncation colors: light for corners, deeper for edges.
+// different, so the cube's six come first), so look-alikes don't touch; six tiles each touching
+// all but one, like a cube's faces, get the cube's opposite pairs. The same for the hyperbolic
+// surfaces (hyper-view.mjs: pickTileColors). A truncation's faces are colored as every puzzle's
+// are (puzzle.mjs's trimFaceColors).
 const colorSets = new WeakMap();
 export function faceColor(P, f) {
   if (!colorSets.has(P)) colorSets.set(P, faceColors(P));
   return colorSets.get(P)[f];
 }
 export const tileColor = faceColor; // (the tiles are the first faces)
-function faceColors(P) {
-  const n = P.tiles.length;
+// n tiles' colors, given each one's neighbors (near[i]: a list or a Set of indices)
+export function pickTileColors(n, near) {
+  near = near.map((s) => [...s]);
   const palette = n <= 12 ? PUZZLE_COLORS : n <= 20 ? PUZZLE_PALETTES[20] : n <= 30 ? PUZZLE_PALETTES[30]
     : Array.from({ length: n }, (_, i) => vividHex((i * 137.508 + 29) % 360));
-  // neighbors: tiles sharing an edge or a corner
-  const reach = P.spec.tiling === "square" ? 1.45 : 1.01;
-  const near = P.tiles.map((t, i) => P.tiles.map((u, j) => j).filter((j) => j !== i && Math.sqrt(nearestCopy(P, P.tiles[j].center, t.center).dd) < reach));
-  const out = new Array(P.faces.length), used = new Set();
+  // (six tiles, each touching all but one, like a cube's faces: a cube's colors, opposite pairs
+  // white–yellow, red–orange, blue–green)
+  if (n === 6 && near.every((s) => s.length === 4)) {
+    const out = new Array(6), opposite = (i) => [0, 1, 2, 3, 4, 5].find((j) => j !== i && !near[i].includes(j));
+    [[0, 3], [1, 5], [2, 4]].forEach(([a, b]) => {
+      const i = [...out.keys()].find((k) => out[k] === undefined);
+      out[i] = PUZZLE_COLORS[a]; out[opposite(i)] = PUZZLE_COLORS[b];
+    });
+    return out;
+  }
+  const out = new Array(n), used = new Set();
   for (let i = 0; i < n; i++) {
     let best = -1, score = -Infinity;
     palette.forEach((c, k) => {
-      if (used.has(k)) return;
+      if (used.has(k) && used.size < palette.length) return;
       const d = Math.min(0.18, ...near[i].filter((j) => out[j]).map((j) => colorDistance(c, out[j])));
       if (d - 0.002 * k > score) { score = d - 0.002 * k; best = k; }
     });
     out[i] = palette[best]; used.add(best);
   }
+  return out;
+}
+function faceColors(P) {
+  const n = P.tiles.length;
+  // neighbors: tiles sharing an edge or a corner
+  const reach = P.spec.tiling === "square" ? 1.45 : 1.01;
+  const near = P.tiles.map((t, i) => P.tiles.map((u, j) => j).filter((j) => j !== i && Math.sqrt(nearestCopy(P, P.tiles[j].center, t.center).dd) < reach));
+  const out = [...pickTileColors(n, near), ...new Array(P.faces.length - n)];
   // the truncation's faces, as every puzzle's are (puzzle.mjs's trimFaceColors): each unlike the
   // faces on the same tiles, the tiles nearest its point (all as near: round a corner, or an edge)
   const tilesOf = P.faces.map((f, i) => {

@@ -767,6 +767,30 @@ function findPieces(P) {
   P.n = P.pieces.length;
 }
 // ---- state and moves: each piece's position, an element of H (0: home)
+// ---- counting, as every puzzle's: the pieces that show (not blacked out), and the smallest sticker
+// as a share of its tile (areas hyperbolic: the disk's area element is 4 / (1 − |z|²)², integrated
+// round each outline; a tile's area is (N − 2)π − N·2π/M)
+const diskAreaOf = (poly) => {
+  // (∮ F dy with ∂F/∂x = 4 / (1 − x² − y²)²: for a = 1 − y², F = 4 (x / (2a(a − x²)) + atanh(x / √a) / (2a^{3/2})))
+  const F = (x, y) => { const a = 1 - y * y, r = Math.sqrt(a); return 4 * (x / (2 * a * (a - x * x)) + Math.atanh(Math.max(-1 + 1e-15, Math.min(1 - 1e-15, x / r))) / (2 * a * r)); };
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length];
+    s += F((x0 + x1) / 2, (y0 + y1) / 2) * (y1 - y0);
+  }
+  return Math.abs(s);
+};
+export function hyperRegionArea(P, f) {
+  const r = P.regions[f];
+  if (r.area === undefined) { const [outer, ...holes] = r.poly; r.area = diskAreaOf(outer) - holes.reduce((t, h) => t + diskAreaOf(h), 0); }
+  return r.area;
+}
+export function hyperStats(P) {
+  const { N, M: M_ } = P.G, tile = (N - 2) * Math.PI - (N * 2 * Math.PI) / M_, shown = P.pieces.filter((pc) => !pc.black);
+  let smallest = Infinity;
+  for (const pc of shown) for (const { f } of pc.frags) smallest = Math.min(smallest, hyperRegionArea(P, f) / tile);
+  return { pieces: shown.length, smallest: Number.isFinite(smallest) ? smallest : 0 };
+}
 export const solvedHyperState = (P) => new Int32Array(P.n);
 export const inverseHyperMove = (P, m) => ({ ...m, q: -m.q });
 // the pieces in a ring (axis, layer): those whose name, moved where they are, includes it. Returns a
@@ -790,12 +814,17 @@ export function applyHyperMove(P, s, { axis, layer, q }) {
 }
 // solved: every sticker on its own tile (and, truncated, its corners' and edges' faces on theirs)
 export const isHyperSolved = (P, s) => P.pieces.every((pc, i) => pc.black || pc.checks.every(({ e, kind, home }) => P.H.coset[kind].of[P.H.mul(s[i], e)] === home));
-export function hyperScrambleMoves(P, count = 12 + 3 * P.tiles, rand = Math.random) {
-  const out = [];
-  if (!P.axes.length) return out;
-  for (let i = 0; i < count; i++) {
-    const axis = Math.floor(rand() * P.axes.length), ax = P.axes[axis], k = 1 + Math.floor(rand() * Math.floor(ax.order / 2));
+// (as the torus's: never the same circle twice running, which would be one turn; as many as it has)
+export function hyperScrambleMoves(P, count = 12 + 4 * P.tiles, rand = Math.random) {
+  const out = [], N = P.axes.length;
+  if (!N) return out;
+  let last = -1;
+  while (out.length < count) {
+    const axis = Math.floor(rand() * N), ax = P.axes[axis];
+    if (axis === last && N > 1) continue;
+    const k = 1 + Math.floor(rand() * Math.floor(ax.order / 2));
     out.push({ axis, layer: Math.floor(rand() * ax.radii.length), q: k === ax.order / 2 || rand() < 0.5 ? k : -k });
+    last = axis;
   }
   return out;
 }

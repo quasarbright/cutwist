@@ -822,7 +822,9 @@ function crossings(a, b) {
 // stats for the editor: how many pieces, and the smallest one's area as a share of a tile's
 export function tileStats(P) {
   const tileArea = P.pieces.length ? polyArea(P.tiles[0].corners) : 1;
-  return { pieces: P.n, smallest: P.n ? Math.min(...P.pieces.map((pc) => pc.area)) / tileArea : 0 };
+  // (the pieces that show, as every puzzle counts them: blacked-out ones aren't)
+  const shown = P.pieces.filter((pc) => !pc.black);
+  return { pieces: shown.length, smallest: shown.length ? Math.min(...shown.map((pc) => pc.area)) / tileArea : 0 };
 }
 const polyArea = (poly) => Math.abs(poly.reduce((s, a, i) => s + cross(a, poly[(i + 1) % poly.length]), 0)) / 2;
 // a preset's design, for the editor

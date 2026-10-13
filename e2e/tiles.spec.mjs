@@ -22,7 +22,7 @@ test("each tiling opens from the shelf, solved, flat (3D off till turned on)", a
     await expect(page.locator("#plane")).toBeVisible();
     await expect(page.locator("#c")).toBeHidden();
   }
-  await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a tile's middle");
+  await expect(page.locator(".nx-empty")).toHaveText("drag a circle · tap a middle");
 });
 
 test("size and skew: a² + ab + b² tiles; too small for a circle to fit grows", async ({ page }) => {

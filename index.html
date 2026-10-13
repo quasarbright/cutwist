@@ -784,7 +784,7 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear, pressAt } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims,
+      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims, hyperStats,
     } from "./hyper.mjs";
     import { HyperView, hyperColor, hyperTexturesByDefault } from "./hyper-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
@@ -1489,9 +1489,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         : scrambled && !idle ? "scrambling…"
         : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() || isSphere() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
         : isPlanar() ? "drag a row or column to slide it"
-        : isTiles() ? "drag a circle · tap a tile's middle"
-        : isSphere() ? "drag a circle · tap its middle · drag outside to rotate"
-        : isHyper() ? "drag a circle · tap a tile's middle · drag elsewhere to slide"
+        // (what each kind's own input does: a circle's middle is a tile's, a corner's or an edge's;
+        // a 3D view turns by a drag off the puzzle; the hyperbolic surface's turns are on its disk)
+        : isTiles() ? `drag a circle · tap a middle${view3D ? " · drag outside to rotate" : ""}`
+        : isSphere() ? "drag a circle or a sticker · tap a middle · drag outside to rotate"
+        : isHyper() ? (viewFlat ? `drag a circle · tap a middle · drag elsewhere to slide${view3D ? " the disk" : ""}` : "drag to rotate · turn it on the flat view")
         : "drag a sticker to turn · drag outside to rotate";
       nxRenderTape(solved);
     }
@@ -1557,8 +1559,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // A tile-turning design is the same, on a tiling instead of a solid, with its torus's size
     // and skew, and cuts' depths as circles' radii (in tile spacings)
     const isTileDesign = () => custom.rule === "tiles";
-    // (and a hyperbolic one: its tiling (M N-gons at a corner) and surface, and circles' radii,
-    // hyperbolic; no truncation yet)
+    // (and a hyperbolic or ball one: its tiling (M N-gons at a corner), surface, circles' radii
+    // (hyperbolic, or angles on the ball) and truncation)
     const isHyperDesign = () => custom.rule === "hyper";
     const isCircleDesign = () => isTileDesign() || isHyperDesign(); // (its cuts are circles, with radii)
     const design = () => (isTileDesign()
@@ -1614,7 +1616,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const N = int(c.N, 2, 12, 7), M = int(c.M, 2, 12, 3);
       if (!isHyperbolic(N, M) && !isSpherical(N, M)) return null;
       const cuts = (Array.isArray(c.cuts) ? c.cuts : []).filter((s) => ON_NAMES[s.on])
-        .map((s) => ({ on: s.on, depths: (Array.isArray(s.depths) ? s.depths : []).map(Number).filter((d) => Number.isFinite(d) && d > 0.05 && d < 5) }));
+        .map((s) => ({ on: s.on, depths: (Array.isArray(s.depths) ? s.depths : []).map(Number).filter(Number.isFinite).map((d) => Math.max(0.05, Math.min(5, d))) })); // (kept in range, as the solids' and tori's are; past a surface's own limit, the build brings it in)
       const truncate = {};
       for (const k of ["vertex", "edge"]) {
         const f = c.truncate && Number(c.truncate[k]);
@@ -1972,11 +1974,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       load(false);
     }
 
+    // how many pieces show (not blacked out, nor inside out of sight): what the numbers line and the
+    // editor's tag both say, on every kind of puzzle
+    const piecesShown = () => (isHyper() ? hyperStats(P) : isTiles() ? tileStats(P) : isSphere() ? sphereStats(P) : puzzleStats(P)).pieces;
     function showStats(n, tooMany) {
       if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isCircleDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
       if (isHyper()) {
-        $("bStats").title = "how many pieces, and the surface";
-        $("bStats").innerHTML = `${P.n} pieces · ${P.tiles} tiles · genus ${P.surface.genus}`;
+        const st = hyperStats(P), pct = st.smallest * 100;
+        $("bStats").title = "how many pieces show, the smallest sticker as a share of its tile (red: slivers), and the surface";
+        $("bStats").innerHTML = `${st.pieces} pieces · smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`) + ` · ${P.tiles} tiles · genus ${P.surface.genus}`;
         return;
       }
       if (isTiles()) {
@@ -2153,6 +2159,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         buildSurface();
         if (resetView) root.quaternion.copy(surfaceView());
       }
+      if (P && state) renderTape(); // (the hint says what each view on screen does)
     }
     function load(resetView = true) {
       let spec = currentSpec();
@@ -2181,7 +2188,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (!rulerDragging) renderBuilder();
       }
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
-      if (isCustom() && P && next.spec.solid !== P.spec.solid) resetView = true;
+      // (another shape: a new start view, as switching puzzles gives; another solid, or another kind of
+      // puzzle, or another tiling)
+      if (isCustom() && P && (next.spec.solid !== P.spec.solid || next.kind !== P.kind || next.N !== P.N || next.M !== P.M)) resetView = true;
       P = next;
       state = freshState();
       anim = null; queue = []; scrambled = false; scrambledState = null;
@@ -2248,7 +2257,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function customizePreset() {
       resetEdits();
       if (isTiles()) custom = tileCustom(tileDesign(currentSpec()));
-      else if (isHyper() || isSphere()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: P.spec.cuts, blackout: [] }); } // (the built cuts: a preset's circle is sized for its tiling)
+      // (the built cuts: a preset's circle is sized for its tiling; its truncation and blacked-out
+      // pieces too, as the torus's and solids' are)
+      else if (isHyper() || isSphere()) { const s = currentSpec(); custom = hyperCustom({ rule: "hyper", N: s.N, M: s.M, surface: s.surface | 0, cuts: P.spec.cuts, truncate: { ...(P.spec.truncate || {}) }, blackout: [...(P.spec.blackout || [])] }); }
       else {
         custom = toCustom(P);
         custom.cuts = solidSets(custom.cuts, custom.truncate);
@@ -2293,7 +2304,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("rear").setAttribute("aria-pressed", String(rearOn()));
       $("rear").title = ok ? "show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same"
         : "rear view needs the 3D view to be the only one on screen (turn off the flat view)";
-      $("reference").classList.toggle("is-rear", rearOn()); // (the solved card shows the back too)
+      $("reference").classList.toggle("is-rear", rearOn() && !isFlat()); // (the solved card shows the back too: a 3D one; a tiling's is its flat picture)
       placeSplit();
     }
     // the line between the two views (and the regions under it follow the panel opening and
@@ -3218,7 +3229,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (tagOf) {
         const R = RULERS[tagOf.r], v = tagOf.i !== null ? R.values()[tagOf.i] : undefined;
         const top = R.trim ? `${R.label} truncated` : v === undefined ? `add a cut round the ${R.label}${tagOf.still ? " (won't turn)" : ""}` : R.label;
-        const sub = edDrag ? (edDrag.out ? "let go to remove" : `${v.toFixed(3)}${edDrag.snapped ? " · snapped" : ""} · ${P.n ?? P.pieces.length} pieces`)
+        const sub = edDrag ? (edDrag.out ? "let go to remove" : `${v.toFixed(3)}${edDrag.snapped ? " · snapped" : ""} · ${piecesShown()} pieces`)
           : v !== undefined ? v.toFixed(3) : "";
         ctx.font = "500 12.5px 'JetBrains Mono', monospace";
         const wBox = Math.max(ctx.measureText(top).width, ctx.measureText(sub).width) + 20, hBox = sub ? 44 : 26;
@@ -3949,7 +3960,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const card = $("refPlane"), dpr = pixelRatio();
       card.hidden = false;
       if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
-      if (!editing()) refHyperView.drawSolvedCard(P);
+      if (!editing()) refHyperView.drawSolvedCard(P, { textures: showTextures });
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isHyper() || tdrag || hpan) return;
@@ -4289,11 +4300,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       } else if (isTiles()) {
         if (!viewFlat) q.set("flat", "off");
         if (view3D) q.set("3d", "on");
-        if (textureChoice !== null && textureChoice !== P.faces.length >= TEXTURE_MIN_FACES) q.set("textures", textureChoice ? "on" : "off");
       } else if (isHyper()) {
         if (!viewFlat) q.set("flat", "off");
         if (view3D) q.set("3d", "on");
-      } else if (textureChoice !== null && textureChoice !== texturesDefault()) q.set("textures", textureChoice ? "on" : "off");
+      }
+      if (!isPlanar() && textureChoice !== null && textureChoice !== texturesDefault()) q.set("textures", textureChoice ? "on" : "off");
       const url = `${location.pathname}?${q}`;
       // (window.history: this module's own `history` is the undo history)
       if (url !== location.pathname + location.search) window.history.replaceState(null, "", url);
@@ -5322,7 +5333,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function nxStacked() { return document.body.classList.contains("nx-stack"); }
     let bottomKey = "";
     function nxPlaceBottom() {
-      const algs = nx.algs.offsetWidth, ref = rearOn() ? 264 : 132; // (the card's width side by side, from the CSS)
+      const algs = nx.algs.offsetWidth, ref = rearOn() && !isFlat() ? 264 : 132; // (the card's width side by side, from the CSS)
       const gap = W - nxDrawer().right - (16 + algs + 16) - (16 + ref + 16);
       const stack = phone.matches || gap < TAPE_MIN, key = [algs, ref, stack].join();
       if (key === bottomKey) return; // (it runs every frame with the rear view on)
@@ -5487,7 +5498,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
                 axes: P.axes.map((a) => ({ kind: a.kind, order: a.order, layers: a.radii.length })),
                 kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}), hover: tileHover && tileHover.axis,
                 sizes: hyperSurfaces(hyperFileFor(P.spec)).map((s) => s.tiles), panned: hyperView.start ? hyperView.start.e !== 0 || Math.hypot(...mobius.apply(hyperView.start.m, [0, 0])) > 1e-6 : false,
-                surface3D: has3D(), views: { flat: viewFlat, surface: view3D } }
+                surface3D: has3D(), views: { flat: viewFlat, surface: view3D }, black: P.pieces.filter((pc) => pc.black).length }
             : isSphere()
             ? { sphere: true, N: P.N, M: P.M, tiles: P.tiles, pieces: P.n, faces: P.colors.length, axes: P.axes.map((a) => ({ order: a.order, layers: a.layers })),
                 kinds: P.pieces.reduce((k, pc) => ({ ...k, [pc.kind]: (k[pc.kind] || 0) + 1 }), {}) }
