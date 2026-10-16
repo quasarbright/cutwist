@@ -499,12 +499,12 @@ export class HyperView {
     if (!this.textures) return;
     const t = hyperTexture(this.P, kind, c);
     if (!t) return;
-    const { canvas } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
+    // (the pattern pinned to the canvas's pixels, filling just the path: no clip, no whole-canvas fill)
+    const { canvas } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width), pat = inkPattern(ctx, t, color, dpr);
+    pat.setTransform(ctx.getTransform().inverse());
     ctx.save();
-    ctx.clip(rule);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = inkPattern(ctx, t, color, dpr);
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = pat;
+    ctx.fill(rule);
     ctx.restore();
   }
   // A tile's truncated corners' and edges' faces (faces: indices into P.tileFaces), drawn over it

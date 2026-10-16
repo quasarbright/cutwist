@@ -288,3 +288,18 @@ test("a truncated tiling's own corners and edges, per repeating cell (not the ti
   for (const m of moves.slice().reverse()) applyTileMove(P, s, inverseTileMove(P, m));
   assert.ok(isTileSolved(P, s));
 });
+
+test("solved up to the torus's symmetries: the whole puzzle shifted a tile, or turned about a tile's middle, is solved; a turn on top isn't", async () => {
+  const { buildTiles, solvedTileState, applyTileMove, isTileSolved } = await import("./tiles.mjs");
+  for (const tiling of ["hex", "square", "triangle"]) {
+    const P = buildTiles({ tiling, a: 3, b: 0, cuts: [{ on: "face", depths: [0.45] }, { on: "vertex", depths: [0.3] }], blackout: [] });
+    const all = (k, t) => { const s = solvedTileState(P); for (let i = 0; i < P.n; i++) { const r = P.reduce(t); s[3 * i] = k; s[3 * i + 1] = r[0]; s[3 * i + 2] = r[1]; } return s; };
+    const step = P.K.cell[0], turn = P.K.base / P.K.order.face;
+    for (const s of [all(0, step), all(turn, [0, 0]), all(turn, step)]) {
+      assert.ok(isTileSolved(P, s), tiling);
+      // (a corner's circle: across three tiles, so colors move; a tile's own circle here turns just its middle)
+      applyTileMove(P, s, { axis: P.axes.findIndex((a) => a.kind === "vertex"), layer: 0, q: 1 });
+      assert.equal(isTileSolved(P, s), false, tiling);
+    }
+  }
+});

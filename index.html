@@ -1786,6 +1786,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const step = () => {
         if (job !== snapJob || !work.length) return;
         if (rulerDragging) { setTimeout(step, 120); return; } // (a cut held: its drag first, the search after)
+        // (only the editor uses them: not customizing, the search waits, and the puzzle has the page)
+        if (!editing()) { setTimeout(step, 300); return; }
         if (work[0][2] && typeof work[0][2].next === "function") {
           // (a hyperbolic handle's count changes: counts for a few ms a tick, a mark for each new one)
           const [r, i, gen] = work[0], until = performance.now() + 12;

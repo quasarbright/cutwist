@@ -805,17 +805,55 @@ export function applyTileMove(P, s, { axis, layer, q }) {
   return s;
 }
 // Solved: every sticker is on a face of its own color, which is its own face (every face has
-// its own color). A center turned in place is still solved; blacked-out pieces don't count.
-export function isTileSolved(P, s) {
+// its own color), or the whole puzzle is, moved by one symmetry of the torus (as a solid turned
+// as a whole is still solved): a shift by whole tiles and a turn, that carries the turning points
+// and the torus onto themselves. A center turned in place is still solved; blacked-out pieces
+// don't count.
+const solvedUnder = (P, s, k0, t0) => {
+  const R0 = P.R[k0];
   for (let i = 0; i < P.n; i++) {
     const k = s[3 * i], t = [s[3 * i + 1], s[3 * i + 2]], R = P.R[k];
-    if ((!k && !t[0] && !t[1]) || P.pieces[i].black) continue;
+    if (P.pieces[i].black || (k === k0 && t[0] === t0[0] && t[1] === t0[1])) continue;
     for (const st of P.pieces[i].stickers) {
       const h = st.home, x = [R[0][0] * h[0] + R[1][0] * h[1] + t[0], R[0][1] * h[0] + R[1][1] * h[1] + t[1]];
-      if (P.faceAt(x) !== st.face) return false;
+      const g = [R0[0][0] * h[0] + R0[1][0] * h[1] + t0[0], R0[0][1] * h[0] + R0[1][1] * h[1] + t0[1]];
+      if (P.faceAt(x) !== P.faceAt(g)) return false;
     }
   }
   return true;
+};
+// (whether turn k0 then shift t0 is a symmetry of this puzzle: the torus's steps onto steps, and
+// every turning point onto one of its own kind)
+function isSymmetry(P, k0, t0) {
+  const R0 = P.R[k0], { A, B, D } = P, inLattice = (v) => cross(v, B) % D === 0 && cross(A, v) % D === 0;
+  if (!inLattice(apply(R0, A)) || !inLattice(apply(R0, B))) return false;
+  if (!P.axisKeys) P.axisKeys = new Set(P.axes.map((a) => a.kind + ":" + key(P.reduce(a.home))));
+  return P.axes.every((a) => P.axisKeys.has(a.kind + ":" + key(P.reduce(add(apply(R0, a.home), t0)))));
+}
+export function isTileSolved(P, s) {
+  if (solvedUnder(P, s, 0, [0, 0])) return true;
+  // (the symmetry, if any: a piece's own pose, the turn as any of the torus's, as a piece turning
+  // onto itself (a center) can be turned any way; each tried once)
+  const tried = new Set();
+  for (let i = 0; i < P.n; i++) {
+    if (P.pieces[i].black) continue;
+    const t = [s[3 * i + 1], s[3 * i + 2]];
+    for (let d = 0; d < P.base; d++) {
+      const k0 = (s[3 * i] + d) % P.base, id = `${k0}:${t[0]},${t[1]}`;
+      if (tried.has(id)) continue;
+      tried.add(id);
+      // (the shift that takes the piece's anchor where turn k0 then t would, about its own anchor)
+      const a = P.pieces[i].anchorInt, R = P.R[s[3 * i]], R0 = P.R[k0];
+      const t0 = [R[0][0] * a[0] + R[1][0] * a[1] + t[0] - (R0[0][0] * a[0] + R0[1][0] * a[1]), R[0][1] * a[0] + R[1][1] * a[1] + t[1] - (R0[0][1] * a[0] + R0[1][1] * a[1])];
+      if (t0.some((x) => Math.abs(x - Math.round(x)) > 1e-9)) continue;
+      const T = t0.map(Math.round);
+      if (solvedUnder(P, s, k0, T) && isSymmetry(P, k0, T)) return true; // (a scramble fails the first quickly)
+    }
+    // (a scrambled puzzle: its first dozen pieces' poses have all failed. A piece turning onto itself
+    // about a point not its anchor, a ring, can be turned in place, so one piece isn't always enough)
+    if (tried.size > 12 * P.base) break;
+  }
+  return false;
 }
 // random turns, never the same point twice in a row
 export function tileScrambleMoves(P, count = 12 + 4 * P.tiles.length, rand = Math.random) {

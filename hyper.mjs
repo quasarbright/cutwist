@@ -939,7 +939,21 @@ export function applyHyperMove(P, s, { axis, layer, q }) {
   for (const i of hyperPiecesInLayer(P, s, axis, layer).keys()) s[i] = P.H.mul(ax.pow[k], s[i]);
 }
 // solved: every sticker on its own tile (and, truncated, its corners' and edges' faces on theirs)
-export const isHyperSolved = (P, s) => P.pieces.every((pc, i) => pc.black || pc.checks.every(({ e, kind, home }) => P.H.coset[kind].of[P.H.mul(s[i], e)] === home));
+// Solved: every piece home, or the whole surface carried by one of its symmetries (every element a
+// carries the surface onto itself, tiles to tiles and circles to circles: a·x for each position x),
+// as a solid turned as a whole is still solved. The symmetry, if any, is some piece's position: a
+// piece turning onto itself in place (a center) passes whatever it is, so the first dozen are tried.
+const solvedUnder = (P, s, a) => P.pieces.every((pc, i) => pc.black || pc.checks.every(({ e, kind }) => P.H.coset[kind].of[P.H.mul(s[i], e)] === P.H.coset[kind].of[P.H.mul(a, e)]));
+export const isHyperSolved = (P, s) => {
+  if (solvedUnder(P, s, 0)) return true;
+  const tried = new Set([0]);
+  for (let i = 0; i < P.n && tried.size <= 12; i++) {
+    if (P.pieces[i].black || tried.has(s[i])) continue;
+    tried.add(s[i]);
+    if (solvedUnder(P, s, s[i])) return true;
+  }
+  return false;
+};
 // (as the torus's: never the same circle twice running, which would be one turn; as many as it has)
 export function hyperScrambleMoves(P, count = 12 + 4 * P.tiles, rand = Math.random) {
   const out = [], N = P.axes.length;

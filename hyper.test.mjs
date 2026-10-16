@@ -246,3 +246,13 @@ test("a truncated tiling's own corners: the truncated heptagons' 14 round a tile
   for (const m of moves.slice().reverse()) applyHyperMove(P, s, inverseHyperMove(P, m));
   assert.ok(isHyperSolved(P, s));
 });
+
+test("solved up to the surface's symmetries: every piece carried by one element is solved; a turn on top isn't", () => {
+  const P = buildHyper({ rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.714] }], blackout: [] }, file(7, 3));
+  for (const a of [P.H.R, P.H.S, P.H.mul(P.H.R, P.H.S)]) {
+    const s = solvedHyperState(P).fill(a);
+    assert.ok(isHyperSolved(P, s));
+    applyHyperMove(P, s, { axis: 0, layer: 0, q: 1 });
+    assert.equal(isHyperSolved(P, s), false);
+  }
+});

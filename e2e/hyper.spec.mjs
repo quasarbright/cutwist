@@ -126,6 +126,7 @@ test("tapping a tile's middle turns it; dragging a circle turns it by as much as
 
 // (a tap turned only a tile's circle, as the flat tilings' does every kind's)
 test("tapping a corner's or an edge's middle turns its circle", async ({ page }) => {
+  test.setTimeout(150_000); // (3,356 pieces: a frame after each turn takes seconds in the test browser's software drawing)
   const design = { rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.714] }, { on: "vertex", depths: [0.6] }, { on: "edge", depths: [0.4] }], blackout: [] };
   await open(page, `?puzzle=custom&design=${Buffer.from(JSON.stringify(design)).toString("base64url")}`);
   const s0 = await settled(page);
