@@ -20,6 +20,7 @@ import { dot, add, sub, scale, cross, len, normalize, applyMat, mulMat, rotMat, 
 import { arrangement, faceInner, faceHas } from "./tiles.mjs";
 import { HYPER_PARAMS } from "./hyper.mjs";
 import { regularDepths } from "./regular.mjs";
+import { checkPieces } from "./budget.mjs";
 
 const TAU = 2 * Math.PI;
 // (what circles go round: tiles' middles, corners, edges' middles, and a truncated tiling's own
@@ -203,7 +204,8 @@ function prismColors(N, M, H, faces) {
 const truncationOf = (spec) => Object.fromEntries(["vertex", "edge"].flatMap((k) => { const f = spec.truncate && spec.truncate[k]; return Number.isFinite(f) && f > 0 && f < 1 ? [[k, f]] : []; }));
 
 // ---- building a puzzle: spec { N, M, cuts: [{ on, depths: [radius] }], truncate, blackout }
-export function buildSphere(spec) {
+// (limit: stop with TooManyPieces once there are more pieces than that; see budget.mjs)
+export function buildSphere(spec, { limit } = {}) {
   const { N, M } = spec, G = sphereGeometry(N, M), H = sphereGroup(N, M);
   const radii = Object.fromEntries(KINDS.map((k) => [k, radiiOf(spec, k)]));
   // the faces: the tiles, then the truncated corners' and edges' (P.faceBase: where each kind's start)
@@ -220,7 +222,7 @@ export function buildSphere(spec) {
   const colors = trimFaceColors(given, nearByTiles(tilesOf));
   const which = (p) => normals.findIndex((v) => len(sub(v, p)) < 1e-6);
   const P = {
-    kind: "sphere", spec, N, M, G, H, radii, truncate, faceBase, R: 1, size: 2,
+    kind: "sphere", spec, N, M, G, H, radii, limit, truncate, faceBase, R: 1, size: 2,
     normals, colors, textures: faceTextures(colors), texturesByDefault: colors.length >= TEXTURE_MIN_FACES,
     // (for the axis stubs, which start just past the surface: the solid's farthest points along
     // them. Every axis goes through a tile's middle, a corner or an edge's middle, all on the ball.)
@@ -434,6 +436,7 @@ function findPieces(P) {
     if (!groupsOf.has(top)) groupsOf.set(top, []);
     groupsOf.get(top).push({ x: H.reps[t], f });
   }
+  checkPieces(groupsOf.size, P.limit);
   const pieceOf = new Int32Array(T * nR).fill(-1);
   P.pieces = [];
   for (const frags of groupsOf.values()) {

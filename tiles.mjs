@@ -28,6 +28,7 @@
 // same shape as the other puzzles' moves, so the undo history and algorithms work unchanged.
 
 import { regularDepths, unionOutline } from "./regular.mjs";
+import { checkPieces } from "./budget.mjs";
 
 const SQ3 = Math.sqrt(3);
 const mod = (a, n) => ((a % n) + n) % n;
@@ -342,7 +343,8 @@ function exactRadii(spec) {
   });
   return out;
 }
-export function buildTiles(spec) {
+// (limit: stop with TooManyPieces once there are more pieces than that; see budget.mjs)
+export function buildTiles(spec, { limit } = {}) {
   spec = exactRadii(spec);
   const K = TILINGS[spec.tiling], G = geometry(K);
   let A = K.steps(spec.a, spec.b), B = K.rot(A);
@@ -375,7 +377,7 @@ export function buildTiles(spec) {
     const radii = [...new Set([...radiiOf(spec, kind), ...also(kind)])].sort((a, b) => a - b);
     return radii.length ? P.points[kind].map((pt) => ({ ...pt, kind, radii, order: K.order[kind], step: K.base / K.order[kind] })) : [];
   });
-  findPieces(P);
+  findPieces(P, limit);
   P.n = P.pieces.length;
   P.order = Math.max(...P.axes.map((a) => a.order), 1);
   return P;
@@ -749,9 +751,10 @@ const signedArea = (loop) => loop.reduce((s, { c, r, a0, a1 }) => s + r * r * (a
 export const outlineArea = (loops) => Math.abs(loops.reduce((s, l) => s + signedArea(l), 0));
 
 // every cell's copy of the pattern's pieces, at the copy near the flat view's middle
-function findPieces(P) {
+function findPieces(P, limit) {
   const { G } = P, pattern = cellPattern(P);
   const cells = findPoints(P, "cell");
+  checkPieces(cells.length * pattern.length, limit);
   P.pieces = [];
   for (const cell of cells) {
     const d = cell.home, dp = G.toPlane(d);

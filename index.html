@@ -168,6 +168,15 @@
       background: var(--panel); border: 1px solid var(--border); border-radius: 12px; transition: border-color .3s;
     }
     #nx-tape.is-solved { border-color: var(--accent); }
+    #nx-tape:has(.nx-limit:not([hidden])) { flex-wrap: wrap; border-color: var(--danger); }
+    .nx-limit {
+      flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px;
+      padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--border); font: .78rem var(--font-mono); color: var(--danger);
+    }
+    .nx-limit[hidden] { display: none; }
+    .nx-limit-acts { display: flex; gap: 6px; }
+    .nx-limit .btn { padding: 4px 10px; font-size: .78rem; }
+    .nx-limit .btn[hidden] { display: none; }
     .nx-moves { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; padding: 8px 10px; overflow-x: auto; scrollbar-width: none; }
     .nx-moves::-webkit-scrollbar { display: none; }
     .nx-empty { color: var(--muted); font: .8rem var(--font-mono); white-space: nowrap; padding: 3px 4px; }
@@ -594,6 +603,8 @@
   <div id="nx-algs"></div>
   <div class="nx-preview" id="algPreview" hidden></div>
   <div id="nx-tape">
+    <!-- past the piece limit (budget.mjs): a row over the rest, never over the puzzle -->
+    <div class="nx-limit" id="limitNote" role="status" hidden><span id="limitText"></span><span class="nx-limit-acts"><button class="btn" id="limitBuild" title="build it anyway: it may turn slowly">build anyway</button><button class="btn" id="limitUndo" title="back to the last design under the limit">undo</button></span></div>
     <div class="ed-hint" id="edHint"><span id="edTip"></span><span class="ed-note" id="edNote" hidden></span><span class="ed-stats" id="bStats"></span><button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button></div>
     <div class="nx-moves" id="tapeMoves"></div>
     <div class="nx-side">
@@ -789,6 +800,7 @@
       hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims, hyperStats, truncatedKinds,
     } from "./hyper.mjs";
     import { HyperView, hyperColor, hyperTexturesByDefault } from "./hyper-view.mjs";
+    import { PIECE_LIMITS, TooManyPieces } from "./budget.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
     import { buildSphere, isSpherical, sphereGeometry, regionShape, sphereStats, sphereSnapCandidates, sphereCountBreaks, SPHERE_RADIUS_RANGE, ROUND_PRESETS, roundCuts, sphereRegularTrims } from "./sphere.mjs";
 
@@ -1535,7 +1547,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       icosahedron: "Icosahedron", rhombicDodecahedron: "Rhombic dodecahedron",
     };
     const ON_NAMES = { face: "around faces", vertex: "around corners", edge: "around edges", tvertex: "around the truncation's corners", tedge: "around the truncation's edges" };
-    const MAX_PIECES = 6000; // past this the page bogs down drawing them
     // A design: the solid, optional trims of its corners/edges, cut sets ({ on, depths }), and
     // blacked-out piece kinds.
     const [TRIM_MIN, TRIM_MAX] = TRIM_RANGE;
@@ -1694,13 +1705,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       redoStack = [];
       showHistory();
     }
+    // a snapshot as a whole design: an edit can turn a solid into a tiling, or a torus into a ball
+    const parseDesign = (s) => {
+      const d = JSON.parse(s);
+      return d.rule === "tiles" ? tileCustom(d) : d.rule === "hyper" ? hyperCustom(d) : { name: "Custom", rule: "custom", size: 2, fixed: true, ...d };
+    };
     // move a snapshot from one stack to the other, saving the current design on the other
     function stepEdit(from, to) {
       if (!from.length) return;
       to.push(snapshot());
       // (as a whole design: an edit can turn a solid into a tiling, or a torus into a ball)
-      const d = JSON.parse(from.pop());
-      custom = d.rule === "tiles" ? tileCustom(d) : d.rule === "hyper" ? hyperCustom(d) : { name: "Custom", rule: "custom", size: 2, fixed: true, ...d };
+      custom = parseDesign(from.pop());
       showHistory();
       renderParams();
       renderBuilder();
@@ -1811,13 +1826,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           showSnaps();
         } else if (snapWorker) {
           // (checked off the page's thread, one at a time: a check can take a second)
-          snapAsk({ spec, target: t, f, maxPieces: MAX_PIECES }).then((ok) => {
+          snapAsk({ spec, target: t, f, maxPieces: PIECE_LIMITS.solid }).then((ok) => {
             if (job !== snapJob) return;
             if (ok) { snaps[r][i].push(R.depth(f)); showSnaps(); }
             setTimeout(step, 0);
           });
           return;
-        } else if (isGoodSnap(spec, t, f, MAX_PIECES)) { snaps[r][i].push(R.depth(f)); showSnaps(); }
+        } else if (isGoodSnap(spec, t, f, PIECE_LIMITS.solid)) { snaps[r][i].push(R.depth(f)); showSnaps(); }
         setTimeout(step, 0);
       };
       setTimeout(step, 150);
@@ -2003,8 +2018,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       clearTimeout(shrunkTimer);
       shrunkTimer = setTimeout(() => { el.hidden = true; }, 5000);
     }
-    function showStats(n, tooMany) {
-      if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isCircleDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
+    function showStats() {
+      if (overLimit) { $("bStats").textContent = ""; return; } // (the notice says how many)
       if (isHyper()) {
         const st = hyperStats(P), pct = st.smallest * 100;
         $("bStats").title = "how many pieces show, the smallest sticker as a share of its tile (red: slivers), and the surface";
@@ -2187,6 +2202,85 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (P && state) renderTape(); // (the hint says what each view on screen does)
     }
+    // ---------- the piece limits (budget.mjs) ----------
+    // A design past its kind's limit isn't built: the build stops as soon as it knows, and a notice
+    // over the tools says so, with build anyway and undo (back to the last design under the limit).
+    // The design itself is kept, in the editor and in the link, and editing goes on: back under
+    // the limit, it builds and the notice goes. Meanwhile the last puzzle under the limit stays
+    // up, if it's the same shape (only its cuts and blacked-out pieces differ); otherwise, as on
+    // opening a link to one, the shape uncut stands in.
+    // (planar puzzles have no limit: their grids' sizes are capped by their steppers)
+    const limitType = (spec) => (spec.rule === "planar" ? null : spec.rule === "tiles" ? "tiles" : isRound(spec) ? "sphere" : spec.rule === "hyper" ? "hyper" : "solid");
+    const LIMIT_WHERE = { solid: "a solid", sphere: "a ball", tiles: "a torus", hyper: "a hyperbolic surface" };
+    let overLimit = null; // { limit, type }: the design showing in the editor and the link is past it
+    let unlimited = false; // (build anyway: no limit till a build comes in under it again)
+    let lastGood = null; // the design (or preset) last built under the limit: what the notice's undo goes back to
+    const goodDesigns = new Set(); // (and every design built under it: undo stops at the first of those)
+    let shownShape = ""; // the shape of the puzzle up (shapeKey)
+    function buildAny(spec, limit, n = size) {
+      const opts = { limit };
+      return spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec, opts) : isRound(spec) ? buildSphere(roundSpec(spec), opts)
+        : spec.rule === "hyper" ? buildHyper(withCuts(spec), hyperFileFor(spec), opts) : buildPuzzle(spec, n, opts);
+    }
+    // everything about a puzzle but its cuts, blacked-out pieces and size: its shape
+    const shapeKey = (spec) => `${presetIdx}:` + JSON.stringify({ ...spec, cuts: undefined, blackout: undefined, size: undefined, faceRows: undefined, cutsFor: undefined, autoCut: undefined });
+    function goodState() {
+      if (!isCustom()) return { presetIdx, paramVals: { ...paramVals }, size };
+      const design = snapshot();
+      if (goodDesigns.size > 300) goodDesigns.clear(); // (only the last few hundred: undo goes back 100)
+      goodDesigns.add(design);
+      return { design };
+    }
+    function tooMany(spec, e, resetView) {
+      const bare = !!(overLimit && overLimit.bare); // (the uncut shape up stays up)
+      overLimit = { limit: e.limit, type: limitType(spec), bare };
+      if (P && shapeKey(spec) === shownShape) {
+        // (the last puzzle under the limit stays up, as it was: just what's round it follows the design)
+        writeURL();
+        if (isCustom()) showStats();
+      } else {
+        // (the shape uncut: a solid's sets with no depths, a preset at size 1, a tiling with no circles)
+        const uncut = spec.rule === "custom" ? { ...spec, faceRows: undefined, cuts: spec.cuts.map((c) => ({ ...c, depths: [] })), blackout: [] }
+          : spec.rule === "tiles" || spec.rule === "hyper" ? { ...spec, cutsFor: undefined, autoCut: false, cuts: [], blackout: [] } : spec;
+        overLimit.bare = true;
+        show(buildAny(uncut, undefined, 1), spec, resetView);
+      }
+      showLimit();
+    }
+    function showLimit() {
+      const el = $("limitNote");
+      el.hidden = !overLimit;
+      if (!overLimit) return;
+      $("limitText").textContent = `Over ${overLimit.limit.toLocaleString("en-US")} pieces: too many for ${LIMIT_WHERE[overLimit.type]} to turn smoothly. ` +
+        (overLimit.bare ? "Showing it uncut." : `Showing the last ${isCustom() ? "design" : "size"} under that.`);
+      $("limitBuild").textContent = "build anyway";
+      $("limitBuild").disabled = false;
+      // (back to the last one under the limit: none on opening a link to one)
+      $("limitUndo").hidden = !lastGood || ("design" in lastGood) !== isCustom();
+    }
+    $("limitBuild").onclick = () => {
+      unlimited = true;
+      $("limitBuild").textContent = "building…";
+      $("limitBuild").disabled = true;
+      // (a frame to show it's building first: a big one can take seconds)
+      requestAnimationFrame(() => setTimeout(() => { load(false); if (isCustom()) computeSnaps(); }, 0));
+    };
+    $("limitUndo").onclick = () => {
+      const g = lastGood;
+      if (!g) return;
+      if (!("design" in g)) { presetIdx = g.presetIdx; paramVals = { ...g.paramVals }; size = g.size; renderParams(); load(false); return; }
+      // (undo, as many times as it takes to come to a design that was built under the limit, each
+      // step redoable: a drag past the limit goes back to where it started. Or if there's none in
+      // the history, the last one built, as one more edit)
+      while (undoStack.length && !goodDesigns.has(snapshot())) { redoStack.push(snapshot()); custom = parseDesign(undoStack.pop()); }
+      if (!goodDesigns.has(snapshot())) { pushUndo(); custom = parseDesign(g.design); }
+      showHistory();
+      renderParams();
+      renderBuilder();
+      load(false);
+      computeSnaps();
+    };
+
     function load(resetView = true) {
       let spec = currentSpec();
       if (spec.rule === "tiles") { // (too few tiles for a circle to fit: a preset grows to the nearest size that fits)
@@ -2206,8 +2300,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); if (isCustom()) computeSnaps(); }).catch((err) => console.error(err));
         return;
       }
-      let next = spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec) : isRound(spec) ? buildSphere(roundSpec(spec))
-        : spec.rule === "hyper" ? buildHyper(withCuts(spec), hyperFileFor(spec)) : buildPuzzle(spec, size);
+      // (past its kind's piece limit the build stops partway: the notice asks before building it
+      // anyway, and the last puzzle under the limit stays up meanwhile; see tooMany)
+      const type = limitType(spec), limit = type && !unlimited ? PIECE_LIMITS[type] : undefined;
+      let next;
+      try { next = buildAny(spec, limit); }
+      catch (e) { if (!(e instanceof TooManyPieces)) throw e; tooMany(spec, e, resetView); return; }
+      if (type && next.pieces.length <= PIECE_LIMITS[type]) unlimited = false; // (back under: the limit's back)
       if (spec.rule === "hyper" && isCustom() && next.shrunk) {
         // (a design's circles too big for this surface, or too many to work out, came in till they
         // fit: the design takes them as built, and its rulers show them, unless one's being dragged)
@@ -2215,7 +2314,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (!rulerDragging) renderBuilder();
         noteShrunk("surface");
       }
-      if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
+      overLimit = null;
+      lastGood = goodState();
+      showLimit();
+      show(next, spec, resetView);
+    }
+    // the puzzle built from spec, up: a fresh start on it, and everything round it to match
+    function show(next, spec, resetView) {
+      shownShape = shapeKey(spec);
       // (another shape: a new start view, as switching puzzles gives; another solid, or another kind of
       // puzzle, or another tiling)
       if (isCustom() && P && (next.spec.solid !== P.spec.solid || next.kind !== P.kind || next.N !== P.N || next.M !== P.M)) resetView = true;
@@ -2272,6 +2378,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // pick a puzzle: its index in MENU, or "custom" (the shelf and the test hook)
     function choosePreset(v) {
       presetIdx = v;
+      unlimited = false; // (build anyway was for the one before)
       paramVals = {};
       textureChoice = null;
       size = currentSpec().size;
@@ -3274,7 +3381,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (tagOf) {
         const R = RULERS[tagOf.r], v = tagOf.i !== null ? R.values()[tagOf.i] : undefined;
         const top = R.trim ? `${R.label} truncated` : v === undefined ? `add a cut round the ${R.label}${tagOf.still ? " (won't turn)" : ""}` : R.label;
-        const sub = edDrag ? (edDrag.out ? "let go to remove" : `${v.toFixed(3)}${edDrag.snapped ? " · snapped" : ""} · ${piecesShown()} pieces`)
+        const sub = edDrag ? (edDrag.out ? "let go to remove" : `${v.toFixed(3)}${edDrag.snapped ? " · snapped" : ""} · ${overLimit ? `over ${overLimit.limit.toLocaleString("en-US")}` : piecesShown()} pieces`)
           : v !== undefined ? v.toFixed(3) : "";
         ctx.font = "500 12.5px 'JetBrains Mono', monospace";
         const wBox = Math.max(ctx.measureText(top).width, ctx.measureText(sub).width) + 20, hBox = sub ? 44 : 26;
@@ -5496,7 +5603,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       async settled() {
         for (const t0 = performance.now(); performance.now() - t0 < 10000;) {
           const s = currentSpec();
-          if (s.rule !== "hyper" || (isRound(s) && isSphere() && P.N === s.N && P.M === s.M) || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || s.cutsFor || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
+          if (overLimit || s.rule !== "hyper" || (isRound(s) && isSphere() && P.N === s.N && P.M === s.M) || (isHyper() && P.N === s.N && P.M === s.M && (P.spec.surface | 0) === (s.surface | 0) && (s.autoCut || s.cutsFor || JSON.stringify(P.spec.cuts) === JSON.stringify(s.cuts)))) return this.info(); // (a preset's circle is worked out for its tiling)
           await new Promise((r) => setTimeout(r, 25));
         }
         const s = currentSpec();
@@ -5531,6 +5638,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       info() {
         return {
           id: isCustom() ? "custom" : MENU[presetIdx].id, title: puzzleName, size, rear: rearOn(),
+          // (past the piece limit: the limit, and whether the shape uncut is standing in; see tooMany)
+          overLimit: overLimit && { limit: overLimit.limit, bare: overLimit.bare },
           ...(isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }

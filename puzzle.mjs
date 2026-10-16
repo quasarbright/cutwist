@@ -10,6 +10,7 @@
 // so the whole puzzle state is an integer array and moves are table lookups: no drift.
 
 import { regularDepths } from "./regular.mjs";
+import { checkPieces, TooManyPieces } from "./budget.mjs";
 
 export const EPS = 1e-6;
 export const PHI = (1 + Math.sqrt(5)) / 2;
@@ -680,7 +681,8 @@ function exactDepths(spec) {
   }));
   return out;
 }
-export function buildPuzzle(spec, size = spec.size) {
+// (limit: stop with TooManyPieces once there are more pieces than that; see budget.mjs)
+export function buildPuzzle(spec, size = spec.size, { limit } = {}) {
   const custom = spec.rule === "custom";
   if (custom) spec = exactDepths(spec);
   let normals, colors, solid, baseSolid, baseNormals, labels = null;
@@ -731,8 +733,10 @@ export function buildPuzzle(spec, size = spec.size) {
 
   let pieces = size > 0 ? [solid] : [];
   for (const ax of axes)
-    for (const off of ax.offsets)
+    for (const off of ax.offsets) {
       pieces = pieces.flatMap((p) => splitPiece(p, ax.dir, off, -1).filter(Boolean));
+      checkPieces(pieces.length, limit);
+    }
 
   const group = rotationGroup(normals, labels);
   for (const ax of axes) {
@@ -1127,8 +1131,9 @@ export function isGoodSnap(spec, target, f, maxPieces = 6000) {
       return { left: shortestEdge(solid), count: solid.polys.length };
     }
     const cuts = cutSets(spec).map((set, si) => (si === target.s ? { ...set, depths: set.depths.map((d, j) => (j === target.i ? v : d)) } : set));
-    const P = buildPuzzle({ ...spec, cuts, blackout: [] });
-    return P.pieces.length > maxPieces ? null : { left: puzzleStats(P).smallest, count: P.pieces.length };
+    let P;
+    try { P = buildPuzzle({ ...spec, cuts, blackout: [] }, spec.size, { limit: maxPieces }); } catch (e) { if (e instanceof TooManyPieces) return null; throw e; }
+    return { left: puzzleStats(P).smallest, count: P.pieces.length };
   };
   const here = at(f);
   if (here === null || here.left <= 0) return false;

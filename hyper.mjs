@@ -15,6 +15,7 @@
 // applied on the left to every piece in the ring: positions stay exact.
 // No drawing here (hyper-view.mjs draws the disk).
 import { regularDepths } from "./regular.mjs";
+import { checkPieces } from "./budget.mjs";
 import { enumerate, parseRelator, wordPerm } from "./todd-coxeter.mjs";
 import { arrangement, faceInner, faceHas } from "./tiles.mjs";
 
@@ -267,7 +268,8 @@ const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on
 
 // ---- building a puzzle: spec { N, M, surface, cuts, blackout }, file: regular-maps/N-M.json
 const surfaceCache = new WeakMap();
-export function buildHyper(spec, file) {
+// (limit: stop with TooManyPieces once there are more pieces than that; see budget.mjs)
+export function buildHyper(spec, file, { limit } = {}) {
   const { N } = spec, M_ = spec.M, G = geometry(N, M_);
   const list = hyperSurfaces(file), surface = list[Math.max(0, Math.min(list.length - 1, spec.surface | 0))];
   // (the surface's group and circle limits don't change with the cuts: worked out once, for
@@ -333,7 +335,7 @@ export function buildHyper(spec, file) {
     return { kind, coset, rep: h, order: order[kind], radii: radii[kind], pow };
   }) : []);
   P.axisIndex = new Map(P.axes.map((a, i) => [`${a.kind}:${a.coset}`, i]));
-  findPieces(P);
+  findPieces(P, limit);
   findStickers(P);
   return P;
 }
@@ -787,7 +789,7 @@ export function hyperRadiusLimit(P, kind, i, radii = P.radii) {
 // 0, and the same steps from every tile. A piece is { frags: [{ x, f }] (at home), name, stickers
 // (each fragment's x: its tile), faces, kind, type, black }; it moves by g as g·x for each.
 // Fragments inside no circle never move: the tile's color shows there.
-function findPieces(P) {
+function findPieces(P, limit) {
   const { G, H, radii } = P, N = G.N;
   P.regions = []; P.pieces = []; P.n = 0; P.circles = [];
   if (!Object.keys(radii).some((k) => radii[k].length)) return;
@@ -873,6 +875,7 @@ function findPieces(P) {
     if (!groups.has(top)) groups.set(top, []);
     groups.get(top).push({ x: reps[t], f });
   });
+  checkPieces(groups.size, limit);
   const pieceOf = new Int32Array(T * nR).fill(-1);
   for (const frags of groups.values()) {
     const i = P.pieces.length, { x, f } = frags[0];
