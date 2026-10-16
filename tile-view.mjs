@@ -296,7 +296,7 @@ export class TileView {
             ctx.strokeStyle = BODY;
             ctx.stroke(outlinePath(pc.outline));
           } else if (mode === "ids") this.pieceIds(ctx, pc, tileTextures(P));
-          else this.piece(ctx, pc, alpha, look.lit && look.lit.has(i), look.textures ? tileTextures(P) : null);
+          else this.piece(ctx, pc, alpha, look.lit && look.lit.has(i) ? look.litAlpha ?? 0.34 : 0, look.textures ? tileTextures(P) : null);
           ctx.restore();
         }
     }
@@ -315,7 +315,7 @@ export class TileView {
     if (pc.black) {
       ctx.fillStyle = BLACK;
       ctx.fill(path, "evenodd");
-      if (lit) { ctx.fillStyle = "rgba(255, 255, 255, 0.34)"; ctx.fill(path, "evenodd"); }
+      if (lit) { ctx.fillStyle = `rgba(255, 255, 255, ${lit})`; ctx.fill(path, "evenodd"); }
       return;
     }
     for (const st of pc.stickers) {
@@ -327,7 +327,7 @@ export class TileView {
         ctx.fillStyle = color;
         ctx.fill();
         if (textures && textures[st.face]) this.texture(ctx, poly, textures[st.face], color);
-        if (lit) { ctx.fillStyle = "rgba(255, 255, 255, 0.34)"; ctx.fill(); }
+        if (lit) { ctx.fillStyle = `rgba(255, 255, 255, ${lit})`; ctx.fill(); }
         ctx.stroke(faceSides(this.P, poly)); // (the face's edges)
       }
     }
@@ -428,6 +428,12 @@ const HANDS = {
 // shape and size: one layer, so the "difference" blend inverts each pixel once
 const MASK_PAD = 2; // (units around the 24-unit box, for the outline)
 const masks = new Map();
+// One copy of the pointer at canvas px (x, y) (ctx unscaled, "difference" blend on): its hand or arrow,
+// k canvas px per icon unit (24 units across). The hyperbolic disk's copies are drawn with it too.
+export function drawPointerCopy(ctx, cursor, x, y, k) {
+  const icon = HANDS[cursor] || HANDS.arrow;
+  ctx.drawImage(handMask(icon, k), Math.round(x - (icon.hot[0] + MASK_PAD) * k), Math.round(y - (icon.hot[1] + MASK_PAD) * k));
+}
 function handMask(h, k) {
   const id = Object.keys(HANDS).find((n) => HANDS[n] === h) + ":" + k.toFixed(3);
   if (!masks.has(id)) {
@@ -574,12 +580,26 @@ export function circleNear(P, p, tol) {
 // the turning point whose middle p is on (well inside its first circle: the part a click
 // turns), or null
 export function axisNear(P, p) { const hit = axisHit(P, p); return hit ? hit.axis : null; }
-// the same, with how far p is from it: { axis, d }, or null
+// the same, with how far p is from it: { axis, d }, or null. A middle's zone, on every tile puzzle
+// (the balls' and the hyperbolic surfaces' too): half its smallest circle, and no more than a third
+// of the way to the nearest other middle.
+const zones = new WeakMap();
+function middleZones(P) {
+  if (!zones.has(P)) zones.set(P, P.axes.map((ax, i) => {
+    let near = Infinity;
+    P.axes.forEach((o, j) => { if (j !== i) near = Math.min(near, Math.sqrt(nearestCopy(P, o.center, ax.center).dd)); });
+    // (its own copies round the torus are other middles too)
+    for (const v of [P.Ap, P.Bp, [P.Ap[0] + P.Bp[0], P.Ap[1] + P.Bp[1]], [P.Ap[0] - P.Bp[0], P.Ap[1] - P.Bp[1]]]) near = Math.min(near, Math.hypot(...v));
+    return Math.min(0.5 * ax.radii[0], near / 3);
+  }));
+  return zones.get(P);
+}
 export function axisHit(P, p) {
   let best = null;
+  const zone = middleZones(P);
   P.axes.forEach((ax, axis) => {
-    const d = Math.sqrt(nearestCopy(P, ax.center, p).dd), zone = Math.min(0.25, 0.55 * ax.radii[0]);
-    if (d < zone && (!best || d < best.d)) best = { axis, d };
+    const d = Math.sqrt(nearestCopy(P, ax.center, p).dd);
+    if (d < zone[axis] && (!best || d < best.d)) best = { axis, d };
   });
   return best;
 }

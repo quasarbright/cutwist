@@ -12,7 +12,7 @@
 import { mobius as Mb, darts, hdist, diskCircle, tileEdges } from "./hyper.mjs";
 import { faceHas } from "./tiles.mjs";
 import { trimFaceColors, nearByTiles, faceTextures, TEXTURE_MIN_FACES } from "./puzzle.mjs";
-import { inkPattern, pickTileColors } from "./tile-view.mjs";
+import { inkPattern, pickTileColors, drawPointerCopy } from "./tile-view.mjs";
 
 const BODY = "#0a0b0e";
 const BLACK = "#1c1f27";
@@ -278,12 +278,16 @@ export class HyperView {
   // the same, with how far the point is from it: { axis, px }, or null
   middleHit(px, py) {
     if (!this.shows(px, py)) return null;
-    const { P } = this, { G } = P, z = this.toDisk(px, py), zone0 = 0.45 * Math.min(G.Ri, G.edgeLength / 2);
+    const { P } = this, { G } = P, z = this.toDisk(px, py);
     const k = ((1 - (z[0] ** 2 + z[1] ** 2)) / 2) * this.R; // (px per hyperbolic unit there)
+    // (a middle's zone, as every tile puzzle's: half its smallest circle, and no more than a third of
+    // the way to the nearest other middle, of its own kind or another with circles)
+    const kinds = ["face", "vertex", "edge"].filter((kind) => P.radii[kind].length), at = { face: [0, 0], vertex: G.corners[0], edge: G.mids[0] };
+    const same = { face: 2 * G.Ri, vertex: G.edgeLength, edge: hdist(G.mids[0], G.mids[1]) };
+    const nearest = (kind) => Math.min(same[kind], ...kinds.filter((o) => o !== kind).map((o) => Math.min(...(o === "face" ? [[0, 0]] : o === "vertex" ? G.corners : G.mids).map((q) => hdist(at[kind], q)))));
     let best = null;
-    for (const kind of ["face", "vertex", "edge"]) {
-      if (!P.radii[kind].length) continue;
-      const zone = Math.min(zone0, 0.55 * P.radii[kind][0]);
+    for (const kind of kinds) {
+      const zone = Math.min(0.5 * P.radii[kind][0], nearest(kind) / 3);
       for (const { axis, at } of this.axisCopies(kind)) { const d = hdist(z, at); if (d < zone && (!best || d < best.d)) best = { axis, d }; }
     }
     return best ? { axis: best.axis, px: best.d * k } : null;
@@ -634,14 +638,17 @@ export class HyperView {
   }
   // the pointer's copies: wherever the spot under it shows again, a small mark drawn as the negative
   // of what's under it (the real pointer's own copy left out)
-  drawPointers(ctx, { at, real }) {
+  // the pointer's copies, as the torus shows them (tile-view.mjs): what the pointer shows (an arrow,
+  // an open or closed hand, a pointing one), white in "difference", smaller toward the rim
+  drawPointers(ctx, { at, real, cursor }) {
+    const { canvas } = this, dpr = canvas.width / Math.max(1, canvas.clientWidth || canvas.width), m = ctx.getTransform();
     ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = "difference";
-    ctx.fillStyle = "#fff";
     for (const z of this.copiesOf(at)) {
       if (real && abs([z[0] - at[0], z[1] - at[1]]) < 1e-6) continue;
-      const p = this.toScreen(z), s = Math.max(1.5, 7 * (1 - (z[0] ** 2 + z[1] ** 2)));
-      ctx.beginPath(); ctx.arc(p.x, p.y, s, 0, 2 * Math.PI); ctx.fill();
+      const p = m.transformPoint(this.toScreen(z)), shrink = Math.max(0.25, Math.round(20 * (1 - (z[0] ** 2 + z[1] ** 2))) / 20);
+      drawPointerCopy(ctx, cursor, p.x, p.y, 0.85 * dpr * shrink);
     }
     ctx.restore();
   }

@@ -247,6 +247,8 @@
       font: .78rem var(--font-mono); color: var(--muted);
     }
     .ed-stats { color: var(--text); white-space: nowrap; }
+    .ed-note { color: var(--accent); }
+    .ed-note[hidden] { display: none; }
     .ed-stats .warn { color: var(--danger); }
     .ed-hint .tw-link { font-size: .78rem; }
     #edit { position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
@@ -592,7 +594,7 @@
   <div id="nx-algs"></div>
   <div class="nx-preview" id="algPreview" hidden></div>
   <div id="nx-tape">
-    <div class="ed-hint" id="edHint"><span id="edTip"></span><span class="ed-stats" id="bStats"></span><button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button></div>
+    <div class="ed-hint" id="edHint"><span id="edTip"></span><span class="ed-note" id="edNote" hidden></span><span class="ed-stats" id="bStats"></span><button class="tw-link" id="bRestore" title="bring back every blacked-out piece" hidden>restore all</button></div>
     <div class="nx-moves" id="tapeMoves"></div>
     <div class="nx-side">
       <span class="nx-status" id="tapeStatus"></span>
@@ -1977,6 +1979,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // how many pieces show (not blacked out, nor inside out of sight): what the numbers line and the
     // editor's tag both say, on every kind of puzzle
     const piecesShown = () => (isHyper() ? hyperStats(P) : isTiles() ? tileStats(P) : isSphere() ? sphereStats(P) : puzzleStats(P)).pieces;
+    // Saying so when a design's circles were made smaller to fit (bigger, a circle would reach round
+    // the torus or surface to overlap itself, or there'd be too many to work out): in the hint line,
+    // a few seconds
+    let shrunkTimer = 0;
+    function noteShrunk(where) {
+      const el = $("edNote");
+      el.textContent = `circles made smaller to fit this ${where}`;
+      el.hidden = false;
+      clearTimeout(shrunkTimer);
+      shrunkTimer = setTimeout(() => { el.hidden = true; }, 5000);
+    }
     function showStats(n, tooMany) {
       if (tooMany) { $("bStats").innerHTML = `<span class="warn">${n} pieces: too many to draw. Use fewer or ${isCircleDesign() ? "smaller" : "shallower"} cuts.</span>`; return; }
       if (isHyper()) {
@@ -2166,8 +2179,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (spec.rule === "tiles") { // (too few tiles for a circle to fit: a preset grows to the nearest size that fits)
         // (a design's circles shrink to fit instead, keeping the size you picked)
         if (isCustom()) {
-          const cap = tileRadiusCap(custom);
+          const cap = tileRadiusCap(custom), before = JSON.stringify(custom.cuts);
           custom.cuts = custom.cuts.map((c) => ({ ...c, depths: [...new Set(c.depths.map((d) => Math.min(d, cap)))] }));
+          if (JSON.stringify(custom.cuts) !== before) noteShrunk("torus");
           spec = currentSpec();
         } else {
           const fit = snapTiles(spec);
@@ -2186,6 +2200,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         // fit: the design takes them as built, and its rulers show them, unless one's being dragged)
         custom.cuts = next.spec.cuts;
         if (!rulerDragging) renderBuilder();
+        noteShrunk("surface");
       }
       if (isCustom() && next.pieces.length > MAX_PIECES) { showStats(next.pieces.length, true); return; }
       // (another shape: a new start view, as switching puzzles gives; another solid, or another kind of
@@ -2579,7 +2594,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // hovering: the ring a press would grab outlined, and the cursor to say what a press does
     // (x null: the pointer's gone)
     function hoverBall(x, y) {
-      const p = painting || x === null ? null : ballPoint(x, y), c = p && roundCircleAt(p), m = p && !c && roundMiddleAt(p);
+      const p = painting || x === null ? null : ballPoint(x, y), m = p && roundMiddleAt(p);
+      let c = p && roundCircleAt(p);
+      if (c && m && m.d * pxPerRadian(p) < c.px) c = null; // (as a press would take it)
       showRing(c ? c.axis : null, c ? c.layer : 0);
       canvas.style.cursor = c ? "grab" : m ? "pointer" : "";
     }
@@ -2634,7 +2651,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (seg) { drag = { mode: "segment", x: e.clientX, y: e.clientY, seg, clockwise: e.button === 0 }; return; }
       // (a ball: a circle's line grabs its ring, a middle is a tap to turn; see roundCircleAt)
       if (isSphere() && !e.shiftKey && !painting && (e.button === 0 || e.button === 2)) {
-        const p = ballPoint(e.clientX, e.clientY), c = p && e.button === 0 ? roundCircleAt(p) : null, m = p && !c ? roundMiddleAt(p) : null;
+        // (a circle's line and a middle both in reach: the nearer, as on every tile puzzle)
+        const p = ballPoint(e.clientX, e.clientY), m = p ? roundMiddleAt(p) : null;
+        let c = p && e.button === 0 ? roundCircleAt(p) : null;
+        if (c && m && m.d * pxPerRadian(p) < c.px) c = null;
         if (c) {
           flush();
           drag = { mode: "ring", x: e.clientX, y: e.clientY, axis: c.axis, layer: c.layer, last: angleAbout(p, P.axes[c.axis].dir), theta: 0 };
@@ -3895,7 +3915,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // and the shader's turn
     function tileSurface(turn, look) {
       // (textures: the shader's, from the picture of which tile is where, redrawn with the state)
-      const key = state.join(",") + "|" + JSON.stringify(look.hover) + "|" + (look.lit ? [...look.lit].join(".") : "");
+      // (lit pieces pulse, as on the flat view: redrawn as the light changes, in fiftieths)
+      const key = state.join(",") + "|" + JSON.stringify(look.hover) + "|" + (look.lit ? [...look.lit].join(".") + ":" + Math.round((look.litAlpha ?? 0.34) * 50) : "");
       if (key !== texKey) {
         const moved = texKey.split("|")[0] !== state.join(",");
         texKey = key;
