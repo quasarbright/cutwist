@@ -189,7 +189,7 @@ export class HyperView {
   tileLines(P, e) {
     this.atTile(P, e, 60);
     // (as far as the tile's corners and the biggest ring's width past them: all a turn can bring in)
-    const { G } = P, ring = Math.max(0, ...["face", "vertex", "edge"].flatMap((k) => P.radii[k]));
+    const { G } = P, ring = Math.max(0, ...Object.keys(P.radii).flatMap((k) => P.radii[k]));
     // (near: reaching the tile itself, all a still picture needs; listed first)
     const reach = Math.tanh((G.Rv + 2 * ring) / 2), within = (d) => ({ c, r }) => abs(c) - r < d && r - abs(c) < d;
     const meets = within(reach), near = within(Math.tanh(G.Rv / 2) * 1.02);
@@ -198,6 +198,7 @@ export class HyperView {
       copies.push({ axis, at });
       for (const r of P.radii[kind]) { const circle = diskCircle(at, r); if (meets(circle)) cuts.push(circle); }
     }
+    for (const { kind, at } of this.stillCopies()) for (const r of P.radii[kind]) { const circle = diskCircle(at, r); if (meets(circle)) cuts.push(circle); }
     // (each tile's edges: the circle through an edge's ends and middle, where the tile is; every
     // seen tile's, the same circle once. Taken from one side of each edge only, as drawing does,
     // the ones whose side is past the tiles seen went missing, and a turned ring brought them in.)
@@ -547,9 +548,29 @@ export class HyperView {
     }
   }
   // every circle at every visible copy of its middle: the pieces' outlines
+  // every visible copy of a truncated tiling's own corners (edges' middles) with circles round them,
+  // which turn about nothing: { kind, at }, from each visible tile
+  stillCopies() {
+    const { P } = this, vis = this.listVisible();
+    if (!P.tk) return [];
+    if (vis.still) return vis.still;
+    const seen = new Set(), out = [];
+    for (const d of vis.tiles) for (const l of P.tk.local) {
+      if (l.into || !(P.radii[l.kind] || []).length) continue;
+      const at = Mb.apply(d.m, l.q), key = `${l.kind}:${Math.round(at[0] * 1e6)}:${Math.round(at[1] * 1e6)}`;
+      if (seen.has(key)) continue;
+      seen.add(key); out.push({ kind: l.kind, at });
+    }
+    return (vis.still = out);
+  }
   circleLines(ctx) {
     const { P } = this;
     ctx.strokeStyle = BODY;
+    for (const { kind, at } of this.stillCopies()) {
+      if (diskCircle(at, P.G.Rv).r * this.R < PIECE_PX) continue;
+      ctx.lineWidth = this.circleWidth(at);
+      for (const r of P.radii[kind]) { const { c, r: er } = diskCircle(at, r), p = this.toScreen(c); ctx.beginPath(); ctx.arc(p.x, p.y, er * this.R, 0, 2 * Math.PI); ctx.stroke(); }
+    }
     for (const kind of ["face", "vertex", "edge"]) {
       if (!P.radii[kind].length) continue;
       for (const { at } of this.axisCopies(kind)) {

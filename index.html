@@ -786,7 +786,7 @@
     import { TileView, faceColor, circleNear, axisNear, pieceNear, pressAt } from "./tile-view.mjs";
     import {
       HYPER_PRESETS, HYPER_PARAMS, buildHyper, solvedHyperState, applyHyperMove, inverseHyperMove, isHyperSolved, hyperScrambleMoves, hyperPiecesInLayer, hyperSurfaces, isHyperbolic, surfaceLabel, mobius,
-      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims, hyperStats,
+      hyperSnapCandidates, hyperRadiusLimit, hyperCountBreaks, geometry as hyperGeometry, hdist, diskCircle, toKlein, fromKlein, hyperRegularTrims, hyperStats, truncatedKinds,
     } from "./hyper.mjs";
     import { HyperView, hyperColor, hyperTexturesByDefault } from "./hyper-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
@@ -1534,7 +1534,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       tetrahedron: "Tetrahedron", cube: "Cube", octahedron: "Octahedron", dodecahedron: "Dodecahedron",
       icosahedron: "Icosahedron", rhombicDodecahedron: "Rhombic dodecahedron",
     };
-    const ON_NAMES = { face: "around faces", vertex: "around corners", edge: "around edges" };
+    const ON_NAMES = { face: "around faces", vertex: "around corners", edge: "around edges", tvertex: "around the truncation's corners", tedge: "around the truncation's edges" };
     const MAX_PIECES = 6000; // past this the page bogs down drawing them
     // A design: the solid, optional trims of its corners/edges, cut sets ({ on, depths }), and
     // blacked-out piece kinds.
@@ -1545,7 +1545,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const TILING_TRIM_RANGE = [0.02, TRIM_MAX], trimRange = () => (isCircleDesign() ? TILING_TRIM_RANGE : TRIM_RANGE);
     // always three cut sets, one per kind, in this order (a design from a link or a preset
     // may list them differently, or repeat a kind)
-    const threeSets = (cuts) => ["face", "vertex", "edge"].map((on) => ({ on, depths: (cuts || []).filter((c) => c.on === on).flatMap((c) => c.depths) }));
+    // (a tiling's: round its tiles' middles, corners and edges' middles, and, truncated, round the
+    // truncated tiling's own corners and edges' middles, as a truncated solid's corners and edges)
+    const threeSets = (cuts) => ["face", "vertex", "edge", "tvertex", "tedge"].map((on) => ({ on, depths: (cuts || []).filter((c) => c.on === on).flatMap((c) => c.depths) }));
     // A solid's design has five: the same three, then cuts around the faces truncation makes at its
     // corners and at its edges, each type of face with its own (its own faces' set says so: of
     // "face"). A face set without `of` (an older link, a preset) goes around every face, so its
@@ -1748,7 +1750,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (isTileDesign()) {
           // (a tiling's cut marks: circles through other points of the drawing, no check needed)
           if (t.trim) work.push([r, i, null]);
-          else snaps[r][i] = tileSnapCandidates(spec, { kind: CUT_KINDS[t.s], i: t.i });
+          else snaps[r][i] = tileSnapCandidates(spec, { kind: custom.cuts[t.s].on, i: t.i });
           return;
         }
         if (isHyperDesign()) {
@@ -1756,14 +1758,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           // handle's index there is where its value is. Then, a little at a time, every radius
           // where the pieces count changes, whatever the geometry above found)
           if (!t.trim && isHyper()) {
-            const kind = CUT_KINDS[t.s], at = P.radii[kind].findIndex((x) => Math.abs(x - v) < 1e-5);
+            const kind = custom.cuts[t.s].on, at = P.radii[kind].findIndex((x) => Math.abs(x - v) < 1e-5);
             if (at < 0) return;
             snaps[r][i] = hyperSnapCandidates(P, kind, at);
             work.push([r, i, hyperCountBreaks(P, kind, at, 0.05, hyperRulerMax(kind), snaps[r][i].slice())]);
           }
           // (a ball's: the same, on the sphere)
           if (!t.trim && isSphere()) {
-            const kind = CUT_KINDS[t.s], at = P.radii[kind].findIndex((x) => Math.abs(x - v) < 1e-5);
+            const kind = custom.cuts[t.s].on, at = P.radii[kind].findIndex((x) => Math.abs(x - v) < 1e-5);
             if (at < 0) return;
             snaps[r][i] = sphereSnapCandidates(P, kind, at);
             work.push([r, i, sphereCountBreaks(P, kind, at, ...SPHERE_RADIUS_RANGE, snaps[r][i].slice())]);
@@ -1853,11 +1855,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (of === "vertex") return "corner faces";
         if (of === "edge") return "edge faces";
         if (on === "face") return isCircleDesign() ? "tiles" : "faces";
+        if (on === "tvertex") return "corners";
+        if (on === "tedge") return "edges";
         if (isCircleDesign() && trimmed(on)) return on === "vertex" ? "corner faces" : "edge faces";
         return on === "vertex" ? "corners" : "edges";
       },
       // whether there's anything for it to go around now (a truncation's faces only once it's truncated)
-      get exists() { return !!setOf(on, of) && (!of || of === "face" || (custom.truncate && custom.truncate[of] !== undefined)); },
+      // (a truncated tiling's own corners and edges: once it's truncated)
+      get exists() {
+        const cut = (k) => custom.truncate && custom.truncate[k] !== undefined;
+        if (on === "tvertex" || on === "tedge") return isCircleDesign() && !!setOf(on) && (cut("vertex") || cut("edge")) && truncatedPointsSupported();
+        return !!setOf(on, of) && (!of || of === "face" || cut(of));
+      },
       depth: (v) => v,
       values: () => (setOf(on, of) ? setOf(on, of).depths : []),
       set: (i, v) => { setOf(on, of).depths[i] = v; },
@@ -1877,8 +1886,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       remove: () => { delete custom.truncate[kind]; },
       target: () => ({ trim: kind }),
     });
-    const RULERS = [trimRuler("vertex"), trimRuler("edge"), ...CUT_KINDS.map((on) => cutRuler(on, on === "face" ? "face" : null)), cutRuler("face", "vertex"), cutRuler("face", "edge")];
+    const RULERS = [trimRuler("vertex"), trimRuler("edge"), ...CUT_KINDS.map((on) => cutRuler(on, on === "face" ? "face" : null)), cutRuler("face", "vertex"), cutRuler("face", "edge"), cutRuler("tvertex"), cutRuler("tedge")];
     const rulerOf = (R) => RULERS.indexOf(R);
+    // (which tilings have cuts round their truncation's own corners and edges so far)
+    const truncatedPointsSupported = () => isSphere() || isTiles() || isHyper();
 
     let sel = { r: 2, i: 0 }; // (the cut last grabbed: its snaps are worked out first)
     const isSnapped = (r, i) => snapping && ((snaps[r] || [])[i] || []).some((f) => Math.abs(f - RULERS[r].values()[i]) < 1e-9);
@@ -2933,7 +2944,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const ballTilesAt = (kind, p) => P.H.normals.filter((c) => Math.abs(angleTo(c, p) - ballTrimR(kind)) < 1e-6);
     const toward = (c, p) => normalize(sub(p, scale(c, dot(p, c))));
     const ballGeo = {
-      sites: (R) => P.H.points[R.trim || R.on].map((p) => ({ at: p, p, n: p })),
+      // (a truncated tiling's own corners and edges: where they're on no turning axis, hollow)
+      sites: (R) => (P.pts || P.H.points)[R.trim || R.on].map((p) => ({ at: p, p, n: p, turns: R.trim || !R.on.startsWith("t") || P.H.mats.filter((m) => len(sub(applyMat(m, p), p)) < 1e-6).length > 1 })),
       probe: (x, y) => ballPoint(x, y),
       value(R, p, w) {
         if (!R.trim) return angleTo(w, p);
@@ -2983,7 +2995,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const circlePx = (c, r, toScr) => Array.from({ length: 97 }, (_, k) => { const t = (k * TAU) / 96; return toScr([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)]); });
     const tileGeo = {
       flat: true,
-      sites: (R) => tileCopies(P.points[R.trim || R.on]).map(({ c }) => ({ at: c, s: scr2(tileView.toScreen(c)) })),
+      // (a truncated tiling's own corners and edges: where they're on no turning point, hollow)
+      sites: (R) => {
+        const still = !R.trim && R.on.startsWith("t"), turns = (pt) => (pt.turns ??= P.axes.some((a) => Math.sqrt(nearestCopy(P, a.center, pt.center).dd) < 1e-6));
+        return tileCopies(P.points[R.trim || R.on]).map(({ c, tile }) => ({ at: c, s: scr2(tileView.toScreen(c)), turns: !still || turns(tile) }));
+      },
       probe: (x, y) => (tileView.shows(x, y) ? tileView.toPlane(x, y) : null),
       value(R, o, w) {
         if (!R.trim) return Math.hypot(w[0] - o[0], w[1] - o[1]);
@@ -3001,16 +3017,22 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // the hyperbolic disk: every visible copy of each point (one per spot), from the visible tiles
     // (each tile's map from tile 0's frame). A truncation's line in a tile is straight in the Klein
     // picture, square to the way to the corner, at tanh of its fraction of the corner's distance.
-    const hyperLocal = (kind) => (kind === "face" ? [[0, 0]] : kind === "vertex" ? P.G.corners : P.G.mids);
+    // (a truncated tiling's own corners or edges: every one of tile 0's, of every pattern, and the ones
+    // on a turning point too; the build works them out once there are circles round them)
+    const truncatedLocal = (base) => (P.tk || truncatedKinds(P.G, P.H, custom.truncate || {})).local.filter((l) => l.base === base);
+    const hyperLocal = (kind) => (kind === "face" ? [[0, 0]] : kind === "vertex" ? P.G.corners : kind === "edge" ? P.G.mids : truncatedLocal(kind).map((l) => l.q));
     const hyperTrimR = (kind) => (kind === "vertex" ? P.G.Rv : P.G.Ri);
     // (only where the tiles are big enough to aim at: a tile's middle to its edge at least 24 px)
+    // (each { z, turns }: a truncated tiling's own corner or edge turns only where it's a turning point too)
     function hyperSitesOf(kind) {
       const seen = new Set(), out = [];
       if (!hyperView.P || hyperView.P.G !== P.G) return out; // (not drawn yet; a rebuild of the same tiling draws next frame)
-      for (const d of hyperView.listVisible().tiles) for (const q of hyperLocal(kind)) {
+      // (not the tiling's own points: a corner left a corner is cut round as the corners already are)
+      const locals = kind.startsWith("t") ? truncatedLocal(kind).filter((l) => !l.into).map((l) => ({ q: l.q, turns: false })) : hyperLocal(kind).map((q) => ({ q, turns: true }));
+      for (const d of hyperView.listVisible().tiles) for (const { q, turns } of locals) {
         const z = mobius.apply(d.m, q), key = `${Math.round(z[0] * 1e5)}:${Math.round(z[1] * 1e5)}`;
         if (((1 - z[0] * z[0] - z[1] * z[1]) / 2) * hyperView.R * P.G.Ri < 24 || seen.has(key)) continue;
-        seen.add(key); out.push(z);
+        seen.add(key); out.push({ z, turns });
       }
       return out;
     }
@@ -3023,7 +3045,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const unit2 = (p) => { const l = Math.hypot(p[0], p[1]); return [p[0] / l, p[1] / l]; };
     const hyperGeo = {
       flat: true,
-      sites: (R) => hyperSitesOf(R.trim || R.on).map((z) => ({ at: z, s: scr2(hyperView.toScreen(z)) })),
+      // (a truncated tiling's own corners and edges: on no turning point, hollow)
+      sites: (R) => hyperSitesOf(R.trim || R.on).map(({ z, turns }) => ({ at: z, s: scr2(hyperView.toScreen(z)), turns })),
       probe: (x, y) => (hyperView.shows(x, y) ? hyperView.toDisk(x, y) : null),
       value(R, z, w) {
         if (!R.trim) return hdist(w, z);
@@ -5433,7 +5456,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const g = edGeo();
         if (!g) return [];
         const view = edViews(g)[0];
-        return edRulers().flatMap((R) => edSites(g, R, view).map((st) => ({ r: rulerOf(R), label: R.label, x: st.x, y: st.y })));
+        return edRulers().flatMap((R) => edSites(g, R, view).map((st) => ({ r: rulerOf(R), label: R.label, x: st.x, y: st.y, turns: st.turns !== false })));
       },
       editCurve(r, i, v) {
         const g = edGeo(), R = RULERS[r], view = edViews(g)[0];

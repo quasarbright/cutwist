@@ -22,7 +22,9 @@ import { HYPER_PARAMS } from "./hyper.mjs";
 import { regularDepths } from "./regular.mjs";
 
 const TAU = 2 * Math.PI;
-const KINDS = ["face", "vertex", "edge"];
+// (what circles go round: tiles' middles, corners, edges' middles, and a truncated tiling's own
+// corners and edges' middles)
+const KINDS = ["face", "vertex", "edge", "tvertex", "tedge"];
 const matClose = (a, b) => a.every((x, i) => Math.abs(x - b[i]) < 1e-6);
 const transpose = (m) => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
 
@@ -227,7 +229,9 @@ export function buildSphere(spec) {
     tiles: T,
   };
   // every circle: a cap { p, r, c: cos r } around every point of a kind, for each of its radii
-  const capsOf = () => KINDS.flatMap((kind) => radii[kind].flatMap((r, ring) => H.points[kind].map((p, at) => ({ kind, at, ring, p, r, c: Math.cos(r) }))));
+  // (every point of each kind: the tiling's, and, truncated, its own corners' and edges' middles)
+  P.pts = { ...H.points, ...(trims.length ? truncatedPoints(G, H, truncate) : { tvertex: [], tedge: [] }) };
+  const capsOf = () => KINDS.flatMap((kind) => radii[kind].flatMap((r, ring) => P.pts[kind].map((p, at) => ({ kind, at, ring, p, r, c: Math.cos(r) }))));
   P.caps = capsOf();
   // (a radius within 1e-5 of a snap mark is that mark exactly: a hair off leaves slivers too thin to
   // work out reliably, the lesson of the flat tiles' color popping)
@@ -507,14 +511,14 @@ function onTwo(a, ca, b, cb) {
   return [add(x0, scale(n, g)), sub(x0, scale(n, g))];
 }
 export function sphereSnapCandidates(P, kind, i) {
-  const { H } = P, [lo, hi] = SPHERE_RADIUS_RANGE, p0 = H.points[kind][0], own = P.radii[kind].filter((_, j) => j !== i);
+  const [lo, hi] = SPHERE_RADIUS_RANGE, p0 = P.pts[kind][0], own = P.radii[kind].filter((_, j) => j !== i);
   const out = [], add1 = (d) => {
     if (!(d > lo + 1e-6 && d < hi - 1e-6) || own.some((r) => Math.abs(r - d) < 1e-6) || out.some((m) => Math.abs(m - d) < 1e-9)) return;
     out.push(d);
   };
-  const pts = KINDS.flatMap((k) => H.points[k]);
+  const pts = KINDS.flatMap((k) => P.pts[k]);
   for (const q of pts) add1(angle(p0, q)); // (through a point)
-  const copies = H.points[kind].filter((q) => angle(p0, q) > 1e-9);
+  const copies = P.pts[kind].filter((q) => angle(p0, q) > 1e-9);
   for (const q of copies) { const d = angle(p0, q); add1(d / 2); add1(Math.PI - d / 2); } // (touching a copy)
   // (the other circles: every radius but this one, round every point)
   const others = P.caps.filter((k) => !(k.kind === kind && k.ring === P.radii[kind].indexOf(P.radii[kind][i])));
@@ -553,44 +557,58 @@ function roundAbout(o, pts) {
   const [e1, e2] = basisOf(o);
   return pts.filter((p) => len(sub(p, o)) > 1e-9).sort((p, q) => Math.atan2(dot(p, e2), dot(p, e1)) - Math.atan2(dot(q, e2), dot(q, e1)));
 }
-export function sphereRegularTrims(spec, kind, [lo, hi]) {
-  const G = sphereGeometry(spec.N, spec.M), { c0 } = G;
-  const toward = (p) => normalize(sub(p, scale(c0, dot(p, c0))));
-  const build = (f) => {
-    const truncate = { ...(spec.truncate || {}), [kind]: f }, out = new Map();
-    const kinds = ["vertex", "edge"].filter((k) => truncate[k] !== undefined).map((k) => {
-      const dirs = (k === "vertex" ? G.corners : G.mids).map(toward), t = truncate[k] * (k === "vertex" ? G.Rv : G.Ri);
-      return { k, dirs, cut: dirs.map((u) => sub(scale(u, Math.cos(t)), scale(c0, Math.sin(t)))) };
-    });
-    // (a part: tile 0, past its cut, further toward its point than toward the others, and not a
-    // corner's if it's an edge's; the tile's own face: short of every cut)
-    const part = (i, at) => {
-      const halves = [...G.edgeNormals];
-      for (const [j, { k, dirs, cut }] of kinds.entries()) {
-        if (j < at) halves.push(...cut.map((c) => scale(c, -1))); // (not an earlier kind's)
-        else if (j === at) { halves.push(cut[i]); dirs.forEach((u, m) => { if (m !== i) halves.push(sub(dirs[i], u)); }); }
-      }
-      return hullOn(halves);
-    };
-    const core = hullOn([...G.edgeNormals, ...kinds.flatMap(({ cut }) => cut.map((c) => scale(c, -1)))]);
-    if (core.length >= 3) out.set("face", roundAbout(normalize(core.reduce(add, [0, 0, 0])), core));
-    kinds.forEach(({ k }, at) => {
-      // (the face round point 0 of the kind: tile 0's part, turned round the point into each tile there)
-      const o = k === "vertex" ? G.corners[0] : G.mids[0], turns = k === "vertex" ? G.M : 2, pts = [];
-      const p0 = part(0, at);
-      for (let j = 0; j < turns; j++) { const T = rotMat(o, (TAU * j) / turns); for (const p of p0) { const q = applyMat(T, p); if (!pts.some((r) => len(sub(r, q)) < 1e-9)) pts.push(q); } }
-      if (pts.length >= 3) out.set(k, roundAbout(o, pts));
-    });
-    return out;
+// The faces round tile 0 truncated (truncate: { vertex, edge }, fractions as buildSphere's): tile 0's own
+// face, and the face round its corner 0 (edge 0's middle) of each kind truncated, as loops of corners
+// in order. Every face of the truncated tiling is one of these turned.
+function faceLoops(G, truncate) {
+  const { c0 } = G, toward = (p) => normalize(sub(p, scale(c0, dot(p, c0)))), out = new Map();
+  const kinds = ["vertex", "edge"].filter((k) => truncate[k] !== undefined).map((k) => {
+    const dirs = (k === "vertex" ? G.corners : G.mids).map(toward), t = truncate[k] * (k === "vertex" ? G.Rv : G.Ri);
+    return { k, dirs, cut: dirs.map((u) => sub(scale(u, Math.cos(t)), scale(c0, Math.sin(t)))) };
+  });
+  // (a part: tile 0, past its cut, further toward its point than toward the others, and not a
+  // corner's if it's an edge's; the tile's own face: short of every cut)
+  const part = (i, at) => {
+    const halves = [...G.edgeNormals];
+    for (const [j, { dirs, cut }] of kinds.entries()) {
+      if (j < at) halves.push(...cut.map((c) => scale(c, -1))); // (not an earlier kind's)
+      else if (j === at) { halves.push(cut[i]); dirs.forEach((u, m) => { if (m !== i) halves.push(sub(dirs[i], u)); }); }
+    }
+    return hullOn(halves);
   };
-  return regularDepths(build, lo, hi, 120, arc);
+  const core = hullOn([...G.edgeNormals, ...kinds.flatMap(({ cut }) => cut.map((c) => scale(c, -1)))]);
+  if (core.length >= 3) out.set("face", roundAbout(normalize(core.reduce(add, [0, 0, 0])), core));
+  kinds.forEach(({ k }, at) => {
+    // (the face round point 0 of the kind: tile 0's part, turned round the point into each tile there)
+    const o = k === "vertex" ? G.corners[0] : G.mids[0], turns = k === "vertex" ? G.M : 2, pts = [];
+    const p0 = part(0, at);
+    for (let j = 0; j < turns; j++) { const T = rotMat(o, (TAU * j) / turns); for (const p of p0) { const q = applyMat(T, p); if (!pts.some((r) => len(sub(r, q)) < 1e-9)) pts.push(q); } }
+    if (pts.length >= 3) out.set(k, roundAbout(o, pts));
+  });
+  return out;
+}
+export function sphereRegularTrims(spec, kind, [lo, hi]) {
+  const G = sphereGeometry(spec.N, spec.M);
+  return regularDepths((f) => faceLoops(G, { ...(spec.truncate || {}), [kind]: f }), lo, hi, 120, arc);
+}
+// A truncated tiling's own corners and edges' middles (cuts round them split pieces, as round a
+// truncated solid's: mostly they're on no turning axis, so they don't turn): every corner of its
+// faces, and the middle of every side, carried all round the ball by the tiling's turns
+function truncatedPoints(G, H, truncate) {
+  const loops = [...faceLoops(G, truncate).values()], out = { tvertex: [], tedge: [] };
+  const put = (list, q) => { if (!list.some((r) => len(sub(r, q)) < 1e-7)) list.push(q); };
+  const corners = loops.flat(), mids = loops.flatMap((l) => l.map((a, i) => normalize(add(a, l[(i + 1) % l.length]))));
+  for (const m of H.mats) { for (const p of corners) put(out.tvertex, applyMat(m, p)); for (const p of mids) put(out.tedge, applyMat(m, p)); }
+  // (not the tiling's own points: a corner left a corner, cut round as the corners already are)
+  const own = [...H.normals, ...H.points.vertex, ...H.points.edge], mine = (q) => !own.some((o) => len(sub(o, q)) < 1e-7);
+  return { tvertex: out.tvertex.filter(mine), tedge: out.tedge.filter(mine) };
 }
 
 // How many pieces there'd be with circle i of a kind at radius r and the rest as they are
 export function spherePieceCountAt(P, kind, i, r) {
   const radii = Object.fromEntries(KINDS.map((k) => [k, [...P.radii[k]]]));
   radii[kind][i] = r;
-  return buildSphere({ N: P.N, M: P.M, cuts: KINDS.map((on) => ({ on, depths: radii[on] })), blackout: [] }).n;
+  return buildSphere({ N: P.N, M: P.M, truncate: P.truncate, cuts: KINDS.map((on) => ({ on, depths: radii[on] })), blackout: [] }).n;
 }
 // The radii from lo to hi where circle i's pieces count changes (as hyper.mjs's hyperCountBreaks: a
 // generator, for the page to run a little at a time; yields { at } for each change found, {} after

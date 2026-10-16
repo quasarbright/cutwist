@@ -274,3 +274,17 @@ test("the radius stops short of a circle meeting its own copy, and no mark lies 
   assert.equal(tilesFit({ ...spec, cuts: [{ on: "face", depths: [cap] }] }), true);
   assert.ok(tileSnapCandidates(spec, { kind: "face", i: 0 }).every((r) => r <= cap));
 });
+
+test("a truncated tiling's own corners and edges, per repeating cell (not the tiling's own: its edges' middles stay those): the truncated square tiling's 4 and 4, the truncated hexagons' 6 and 6; circles round them cut pieces and turns still undo", async () => {
+  const { truncatedPoints, geometry, TILINGS, buildTiles, tileScrambleMoves, solvedTileState, applyTileMove, inverseTileMove, isTileSolved } = await import("./tiles.mjs");
+  const count = (tiling, t) => { const r = truncatedPoints(geometry(TILINGS[tiling]), t); return [r.tvertex.length, r.tedge.length]; };
+  assert.deepEqual(count("square", { vertex: 0.7 }), [4, 4]);
+  assert.deepEqual(count("hex", { vertex: 0.9 }), [6, 6]);
+  const base = { tiling: "square", a: 3, b: 0, truncate: { vertex: 0.7 }, blackout: [] };
+  const P0 = buildTiles({ ...base, cuts: [{ on: "face", depths: [0.3] }] }), P = buildTiles({ ...base, cuts: [{ on: "face", depths: [0.3] }, { on: "tvertex", depths: [0.12] }] });
+  assert.equal(P.n, P0.n + 36); // (a small circle round each of the 36 corners: a piece each)
+  const moves = tileScrambleMoves(P, 30), s = solvedTileState(P);
+  for (const m of moves) applyTileMove(P, s, m);
+  for (const m of moves.slice().reverse()) applyTileMove(P, s, inverseTileMove(P, m));
+  assert.ok(isTileSolved(P, s));
+});

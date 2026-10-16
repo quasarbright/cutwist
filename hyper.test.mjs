@@ -234,3 +234,15 @@ test("a deep truncation still builds: corners' and edges' faces past where they 
     assert.ok(P.n > 0, JSON.stringify(truncate));
   }
 });
+
+test("a truncated tiling's own corners: the truncated heptagons' 14 round a tile; circles round them cut pieces, and turns still undo", () => {
+  const f = file(7, 3), P0 = buildHyper({ rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.7] }], truncate: { vertex: 0.9 }, blackout: [] }, f);
+  const P = buildHyper({ rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.7] }, { on: "tvertex", depths: [0.1] }], truncate: { vertex: 0.9 }, blackout: [] }, f);
+  assert.equal(P.tk.local.filter((l) => l.base === "tvertex").length, 14);
+  assert.ok(P.n > P0.n);
+  assert.equal(P.axes.length, P0.axes.length);
+  const moves = hyperScrambleMoves(P, 30), s = solvedHyperState(P);
+  for (const m of moves) applyHyperMove(P, s, m);
+  for (const m of moves.slice().reverse()) applyHyperMove(P, s, inverseHyperMove(P, m));
+  assert.ok(isHyperSolved(P, s));
+});

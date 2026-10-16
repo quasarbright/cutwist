@@ -152,6 +152,84 @@ function axisPoints(G, H, d) {
   return out;
 }
 
+// ---- a truncated tiling's own corners and edges' middles (cuts round them split pieces, as round a
+// truncated solid's or the other tilings'; on no turning point, they don't turn)
+// Its corners: the corners of tile 0's truncated faces (tileFaces) where three faces or more meet;
+// its edges' middles: the middle of each side between two of those where the faces either side
+// differ. Each is named on the surface as a tile, corner or edge is, by an element of the group:
+// points alike (carried onto one another by the tiling's turns) are a pattern (a kind: "tvertex",
+// "tvertex~1", ...; "tedge", ...), each point of it the pattern's first point carried by an element,
+// and as none of them is a turning point, a different element for each (the "point" coset: every
+// element its own). One that is a turning point too (a tiling's corner, with only its edges
+// truncated) is that point: its circles turn with it (into). Per surface and truncation:
+// { kinds, base (kind → "tvertex" or "tedge"), local: [{ kind, base, q (tile 0's frame), h (the
+// element carrying the pattern's first point to q), into }] }.
+const truncCache = new WeakMap();
+export function truncatedKinds(G, H, truncate) {
+  if (truncate.vertex === undefined && truncate.edge === undefined) return { kinds: [], base: {}, local: [] };
+  if (!truncCache.has(H)) truncCache.set(H, new Map());
+  const id = `${truncate.vertex}:${truncate.edge}`, cache = truncCache.get(H);
+  if (cache.has(id)) return cache.get(id);
+  const faces = tileFaces(G, truncate);
+  // (the darts round tile 0, each tile's every turn, for which face a point is in and for patterns)
+  const tiles = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, cx(0)) < 2 * G.Rv + 0.2), all = [];
+  for (const d of tiles) { let m = d.m, e = d.e; for (let j = 0; j < G.N; j++) { all.push({ m, e }); m = M.mul(m, G.A); e = H.right[0][e]; } }
+  const inPoly = (poly, k) => { const sides = poly.map((a, j) => { const b = poly[(j + 1) % poly.length]; return (b[0] - a[0]) * (k[1] - a[1]) - (b[1] - a[1]) * (k[0] - a[0]); }); return sides.every((x) => x >= -1e-12) || sides.every((x) => x <= 1e-12); };
+  const pointKey = (z) => `${Math.round(z[0] * 1e6)},${Math.round(z[1] * 1e6)}`;
+  const faceAt = (z) => {
+    for (const t of tiles) {
+      const w = M.apply(M.inv(t.m), z);
+      if (!inTile0(G, w)) continue;
+      const k = toKlein(w), fc = faces.find((f) => inPoly(f.klein, k)) || faces[0];
+      return fc.kind + "@" + pointKey(M.apply(t.m, fc.kind === "face" ? cx(0) : fc.kind === "vertex" ? G.corners[fc.i] : G.mids[fc.i]));
+    }
+    return "?";
+  };
+  const e = 1e-6, around = (z) => new Set(Array.from({ length: 16 }, (_, j) => { const a = (j * Math.PI) / 8 + 0.1; return faceAt([z[0] + e * Math.cos(a), z[1] + e * Math.sin(a)]); }));
+  const corners = new PointSet(1e-8), cornerList = [];
+  for (const fc of faces) for (const k of fc.klein) { const z = fromKlein(k); if (!corners.has(z) && around(z).size >= 3) { corners.add(z); cornerList.push(z); } }
+  // (a side's middle, along the line from a to b: halfway, hyperbolically)
+  const halfway = (a, b) => { const T = M.to(a), w = M.apply(M.inv(T), b), l = abs(w), t = Math.tanh(Math.atanh(l) / 2); return M.apply(T, [(w[0] / l) * t, (w[1] / l) * t]); };
+  const mids = new PointSet(1e-8), midList = [];
+  for (const fc of faces) fc.klein.forEach((k, j) => {
+    const a = fromKlein(k), b = fromKlein(fc.klein[(j + 1) % fc.klein.length]);
+    if (!corners.has(a) || !corners.has(b) || abs(sub(a, b)) < 1e-9) return;
+    const m = halfway(a, b), n = [-(b[1] - a[1]), b[0] - a[0]], l = abs(n);
+    if (faceAt([m[0] + (n[0] / l) * e, m[1] + (n[1] / l) * e]) === faceAt([m[0] - (n[0] / l) * e, m[1] - (n[1] / l) * e])) return;
+    if (!mids.has(m)) { mids.add(m); midList.push(m); }
+  });
+  // (patterns: a point is another's pattern when some turn carries the pattern's first point onto it)
+  const out = { kinds: [], base: {}, local: [] }, own = { vertex: G.corners, edge: G.mids, face: [cx(0)] };
+  for (const [base, list] of [["tvertex", cornerList], ["tedge", midList]]) {
+    const firsts = [];
+    for (const q of list) {
+      const into = Object.keys(own).find((k) => own[k].some((o) => abs(sub(o, q)) < 1e-7));
+      if (into) { out.local.push({ kind: into, base, q, h: 0, into }); continue; }
+      let found = null;
+      for (const f of firsts) { const d = all.find((d) => abs(sub(M.apply(d.m, f.q), q)) < 1e-7); if (d) { found = { kind: f.kind, h: d.e }; break; } }
+      if (!found) { const kind = firsts.length ? `${base}~${firsts.length}` : base; firsts.push({ kind, q }); out.kinds.push(kind); out.base[kind] = base; found = { kind, h: 0 }; }
+      out.local.push({ kind: found.kind, base, q, h: found.h });
+    }
+  }
+  cache.set(id, out);
+  return out;
+}
+// every element its own (a point on no turning point: each element carries it somewhere else)
+const pointCosets = new WeakMap();
+const cosetOf = (H, kind) => {
+  if (H.coset[kind]) return H.coset[kind];
+  if (!pointCosets.has(H)) { const of = Int32Array.from({ length: H.n }, (_, i) => i); pointCosets.set(H, { of, reps: Array.from(of) }); }
+  return pointCosets.get(H);
+};
+// a dart's points: axisPoints, and (P truncated, with circles round its own corners or edges) those
+const pointsOf = (P, d) => {
+  const out = axisPoints(P.G, P.H, d);
+  if (P.tk) for (const l of P.tk.local) if (!l.into) out.push({ kind: l.kind, p: M.apply(d.m, l.q), e: P.H.mul(d.e, l.h) });
+  return out;
+};
+// the first point of a kind, in tile 0's frame
+const homeOf = (P, kind) => (kind === "face" ? cx(0) : kind === "vertex" ? P.G.corners[0] : kind === "edge" ? P.G.mids[P.G.edge] : P.tk.local.find((l) => l.kind === kind && l.h === 0).q);
+
 // ---- presets and parameters
 export const HYPER_PARAMS = [
   // (down to 2: few enough tiles round a corner, or sides, make a ball, see sphere.mjs; 2 sides is a
@@ -200,6 +278,18 @@ export function buildHyper(spec, file) {
   const P = { kind: "hyper", spec, G, H, surface, N, M: M_, tiles: H.coset.face.reps.length };
   // (the limits are in the data, worked out ahead: see data/add-caps.mjs)
   P.cap = { ...(kept.cap ??= surface.caps || radiusCaps(P)) };
+  // (truncated, with circles round its own corners or edges: those points' patterns too, each a kind
+  // with its own limit; the ones on a turning point add their circles to that point's)
+  // (each pattern's limit is kept with the patterns: the editor asks for it before there's a circle)
+  const tCuts = ["tvertex", "tedge"].some((b) => radiiOf(spec, b).length), truncate = truncationOf(spec);
+  const tk = truncate.vertex !== undefined || truncate.edge !== undefined ? truncatedKinds(G, H, truncate) : null;
+  P.tk = tCuts ? tk : null;
+  if (tk) { P.tk = tk; tk.caps ??= pointCaps(P); Object.assign(P.cap, tk.caps); for (const b of ["tvertex", "tedge"]) if (!(b in P.cap)) P.cap[b] = Math.min(5, ...tk.kinds.filter((k) => tk.base[k] === b).map((k) => tk.caps[k])); P.tk = tCuts ? tk : null; }
+  P.kinds = [...KINDS, ...(P.tk ? P.tk.kinds : [])];
+  const baseOf = (k) => (P.tk && P.tk.base[k]) || k;
+  const into = (k) => (P.tk ? [...new Set(P.tk.local.filter((l) => l.into === k).map((l) => l.base))] : []);
+  const wanted = (k) => [...new Set([...radiiOf(spec, baseOf(k)), ...(KINDS.includes(k) ? into(k).flatMap((b) => radiiOf(spec, b)) : [])])].sort((a, b) => a - b);
+
   // A preset's circle on another tiling: around each tile, a bit past its corners, as the presets
   // are (1.15 corner radii), or as big as fits on this surface and still works out
   if (spec.autoCut) {
@@ -212,25 +302,28 @@ export function buildHyper(spec, file) {
   // would do, otherwise a step (so the biggest few come down together, not one to nothing).
   // 3 decimals, as a ruler sets them.
   const down = (r) => Math.floor(r * 1000) / 1000;
-  P.radii = Object.fromEntries(KINDS.map((k) => [k, [...new Set(radiiOf(spec, k).map((r) => (r < P.cap[k] ? r : down(P.cap[k] - 0.005))))].sort((a, b) => a - b)]));
-  let shrunk = KINDS.some((k) => radiiOf(spec, k).some((r) => r >= P.cap[k]));
-  const all = () => KINDS.flatMap((k) => P.radii[k].map((r, j) => [k, j, r])).sort((a, b) => b[2] - a[2]);
+  P.radii = Object.fromEntries(P.kinds.map((k) => [k, [...new Set(wanted(k).map((r) => (r < P.cap[k] ? r : down(P.cap[k] - 0.005))))].sort((a, b) => a - b)]));
+  let shrunk = P.kinds.some((k) => wanted(k).some((r) => r >= P.cap[k]));
+  const all = () => P.kinds.flatMap((k) => P.radii[k].map((r, j) => [k, j, r])).sort((a, b) => b[2] - a[2]);
   while (!fits(P, P.radii)) {
     const [[kind, i, r], second] = all(), next = second ? second[2] : 0.05;
-    const trial = Object.fromEntries(KINDS.map((k) => [k, [...P.radii[k]]]));
+    const trial = Object.fromEntries(P.kinds.map((k) => [k, [...P.radii[k]]]));
     trial[kind][i] = next;
     const to = Math.min(down(r - 0.001), fits(P, trial) ? down(hyperRadiusLimit(P, kind, i)) : down(next < r - 1e-9 ? Math.max(next, r - 0.05) : r - 0.05));
     if (to < 0.05) P.radii[kind].splice(i, 1); else P.radii[kind][i] = to;
     P.radii[kind] = [...new Set(P.radii[kind])].sort((a, b) => a - b);
     shrunk = true;
   }
-  if (shrunk) { P.shrunk = true; P.spec = spec = { ...spec, cuts: KINDS.map((on) => ({ on, depths: [...P.radii[on]] })) }; }
+  // (as the design has them: a pattern's circles under their own set's name, the first pattern's)
+  if (shrunk) { P.shrunk = true; P.spec = spec = { ...spec, cuts: [...KINDS, "tvertex", "tedge"].map((on) => ({ on, depths: [...(P.radii[on] || radiiOf(spec, on))] })) }; }
   // (a radius within 1e-5 of a snap mark is that mark exactly: a hair off leaves slivers too
   // thin to work out reliably, the lesson of the flat tiles' color popping)
-  for (const kind of KINDS) P.radii[kind].forEach((r, i) => {
+  for (const kind of P.kinds) P.radii[kind].forEach((r, i) => {
     const m = hyperSnapCandidates(P, kind, i, r + 1e-4, r - 1e-4).find((m) => Math.abs(m - r) < 1e-5);
     if (m !== undefined) P.radii[kind][i] = m;
   });
+  // (the design's own sets read the built radii: a truncated tiling's corners' as the first pattern's)
+  for (const b of ["tvertex", "tedge"]) if (!P.radii[b]) P.radii[b] = [];
   const radii = P.radii;
   // the axes: every tile, corner or edge of the surface with circles around it
   const order = { face: N, vertex: M_, edge: 2 }, step = { face: H.R, vertex: H.S, edge: H.RS };
@@ -393,24 +486,24 @@ function onTwoPlanes(u, a, w, b) {
 // within a hair of a radius: only circles reaching that band matter then).
 export function hyperSnapCandidates(P, kind, i, upTo = P.cap[kind], from = 0) {
   const { G, H } = P, cap = Math.min(P.cap[kind], upTo), own = P.radii[kind].filter((_, j) => j !== i);
-  const rmax = Math.max(0, ...KINDS.flatMap((k) => P.radii[k]));
-  const p0 = kind === "face" ? cx(0) : kind === "vertex" ? G.corners[0] : G.mids[G.edge], P0 = toHyp(p0);
+  const rmax = Math.max(0, ...Object.keys(P.radii).flatMap((k) => P.radii[k]));
+  const p0 = homeOf(P, kind), P0 = toHyp(p0);
   // (marks from same-kind circles, touching one or meeting among its ring, are at least half the
   // way to the nearest one: a tile's neighbor's middle, along an edge, or two edges round a corner)
-  const nearest = kind === "face" ? 2 * G.Ri : kind === "vertex" ? hdist(G.corners[0], G.corners[1]) : hdist(G.mids[0], G.mids[1]);
+  const nearest = kind === "face" ? 2 * G.Ri : kind === "vertex" ? hdist(G.corners[0], G.corners[1]) : kind === "edge" ? hdist(G.mids[0], G.mids[1]) : 2 * (P.cap[kind] + 0.02);
   // (and no further than the circles budget looks: past that the tiles run to millions, and a
   // circle that big gets the marks from what's nearer)
-  const reach = Math.min(axisDistances(G, H).exact, Math.max(cap + rmax, cap < nearest / 2 ? 0 : Math.max(2 * cap, 1.5 * nearest)));
+  const reach = Math.min(distancesFor(P).exact, Math.max(cap + rmax, cap < nearest / 2 ? 0 : Math.max(2 * cap, 1.5 * nearest)));
   // every axis point near it, once
   const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, p0) < reach + G.Rv), seen = new PointSet(1e-9), pts = [];
-  for (const d of near) for (const a of axisPoints(G, H, d)) {
+  for (const d of near) for (const a of pointsOf(P, d)) {
     if (seen.has(a.p) || hdist(a.p, p0) > reach) continue;
     seen.add(a.p); pts.push({ kind: a.kind, p: a.p, X: toHyp(a.p), d: hdist(a.p, p0) });
   }
   const copies = pts.filter((a) => a.kind === kind && a.d > 1e-9 && a.d < 2 * cap);
   // the other circles (every radius but this one), near enough to matter: reaching the band of
   // radii from `from` to the cap
-  const fixed = pts.flatMap((a) => P.radii[a.kind].flatMap((r, j) => (a.kind === kind && j === i ? [] : a.d - r < cap && a.d + r > from ? [{ ...a, r }] : [])));
+  const fixed = pts.flatMap((a) => (P.radii[a.kind] || []).flatMap((r, j) => (a.kind === kind && j === i ? [] : a.d - r < cap && a.d + r > from ? [{ ...a, r }] : [])));
   // (marks kept once: within 1e-9 is the same, found by its bucket and the ones beside it)
   const out = [], seenD = new Set(), bucket = (d) => Math.round(d * 1e9);
   const add = (d) => {
@@ -479,6 +572,31 @@ function radiusCaps(P) {
   }
   return Object.fromEntries(KINDS.map((k) => [k, best[k] / 2 - 0.02]));
 }
+// The same for a truncated tiling's own corners' and edges' patterns: less than halfway to the nearest
+// other copy of a point (the same element carrying the pattern's first point there)
+function pointCaps(P) {
+  const { G, H } = P, kinds = P.tk.kinds, best = Object.fromEntries(kinds.map((k) => [k, Infinity])), home = Object.fromEntries(kinds.map((k) => [k, homeOf(P, k)]));
+  const heap = new MinHeap(), seen = new PointSet(1e-9);
+  heap.push(0, { m: M.I, e: 0 }); seen.add(cx(0));
+  while (heap.size) {
+    const [dist, d] = heap.pop();
+    if (dist > 12 || kinds.every((k) => best[k] + G.Rv < dist)) break;
+    for (const a of pointsOf(P, d)) {
+      if (!(a.kind in best) || a.e !== 0) continue;
+      const r = hdist(a.p, home[a.kind]);
+      if (r > 1e-6 && r < best[a.kind]) best[a.kind] = r;
+    }
+    let m = d.m, e = d.e;
+    for (let k = 0; k < G.N; k++) {
+      for (const next of [{ m: M.norm(M.mul(m, G.B)), e: H.right[1][e] }, { m: M.norm(M.mul(m, G.Bi)), e: H.rightInv[1][e] }]) {
+        const p = M.apply(next.m, cx(0));
+        if (abs(p) < 1 && !seen.has(p)) { seen.add(p); heap.push(hdist(p, cx(0)), next); }
+      }
+      m = M.mul(m, G.A); e = H.right[0][e];
+    }
+  }
+  return Object.fromEntries(kinds.map((k) => [k, Math.min(5, best[k] / 2 - 0.02)]));
+}
 // (a binary heap of [key, value], smallest key first)
 class MinHeap {
   constructor() { this.a = []; }
@@ -519,17 +637,24 @@ const fits = (P, radii) => { const n = hyperCircleCount(P, radii); return n <= M
 const distanceCache = new WeakMap();
 function axisDistances(G, H) {
   if (distanceCache.has(G)) return distanceCache.get(G);
+  const out = pointDistances(G, H, KINDS, (d) => axisPoints(G, H, d));
+  distanceCache.set(G, out);
+  return out;
+}
+// (and with a truncated tiling's own corners and edges: kept with their patterns)
+const distancesFor = (P) => (P.tk ? (P.tk.dist ??= pointDistances(P.G, P.H, P.kinds, (d) => pointsOf(P, d))) : axisDistances(P.G, P.H));
+function pointDistances(G, H, kinds, pointsAt) {
   // (tiles nearest first: once the next tile's middle is D away, every point within D − Rv has
   // been seen, so the lists are complete that far)
-  const found = { face: [], vertex: [], edge: [] }, points = new PointSet(1e-9), tiles = new PointSet(1e-9), heap = new MinHeap();
+  const found = Object.fromEntries(kinds.map((k) => [k, []])), points = new PointSet(1e-9), tiles = new PointSet(1e-9), heap = new MinHeap();
   const within = (k, r) => found[k].reduce((n, a) => n + (a.d <= r), 0);
   heap.push(0, { m: M.I, e: 0 }); tiles.add(cx(0));
   let exact = 0;
   while (heap.size) {
     const [dist, d] = heap.pop();
     exact = dist - G.Rv;
-    if (dist > 14 || (dist > G.Rv && KINDS.every((k) => found[k].length > MAX_CIRCLES && within(k, exact) > MAX_CIRCLES))) break;
-    for (const a of axisPoints(G, H, d)) if (!points.has(a.p)) { points.add(a.p); found[a.kind].push({ d: hdist(a.p, cx(0)), p: a.p }); }
+    if (dist > 14 || (dist > G.Rv && kinds.every((k) => found[k].length > MAX_CIRCLES && within(k, exact) > MAX_CIRCLES))) break;
+    for (const a of pointsAt(d)) if (!points.has(a.p)) { points.add(a.p); found[a.kind].push({ d: hdist(a.p, cx(0)), p: a.p }); }
     let m = d.m, e = d.e;
     for (let k = 0; k < G.N; k++) {
       for (const next of [{ m: M.norm(M.mul(m, G.B)), e: H.right[1][e] }, { m: M.norm(M.mul(m, G.Bi)), e: H.rightInv[1][e] }]) {
@@ -540,17 +665,17 @@ function axisDistances(G, H) {
     }
   }
   const out = { exact, dists: {}, points: {} };
-  for (const k of KINDS) { const l = found[k].filter((a) => a.d <= exact).sort((a, b) => a.d - b.d); out.dists[k] = l.map((a) => a.d); out.points[k] = l.map((a) => a.p); }
-  distanceCache.set(G, out);
+  for (const k of kinds) { const l = found[k].filter((a) => a.d <= exact).sort((a, b) => a.d - b.d); out.dists[k] = l.map((a) => a.d); out.points[k] = l.map((a) => a.p); }
   return out;
 }
 const within = (list, reach) => { let lo = 0, hi = list.length; while (lo < hi) { const m = (lo + hi) >> 1; if (list[m] <= reach) lo = m + 1; else hi = m; } return lo; };
 // the circles a design with these radii ({ face, vertex, edge: [radius] }) needs (Infinity: more
 // than ever fits, as far as anyone needs to know)
 export function hyperCircleCount(P, radii) {
-  const { exact, dists } = axisDistances(P.G, P.H);
+  const { exact, dists } = distancesFor(P);
   let n = 0;
-  for (const k of KINDS) for (const r of radii[k]) {
+  for (const k of Object.keys(radii)) for (const r of radii[k]) {
+    if (!dists[k]) continue;
     const reach = reachesTile0(P.G, r);
     if (reach > exact) return Infinity;
     n += within(dists[k], reach);
@@ -583,8 +708,8 @@ function crossings(a, b) {
 // where it crosses the edges), or for a circle wholly inside, plus one for each point inside where
 // two circles cross. (Exact but where three lines meet at a point; a budget needs no more.)
 export function fragmentCount(P, radii) {
-  const { G } = P, { dists, points } = axisDistances(G, P.H), edges = tileEdges(G), circles = [];
-  for (const k of KINDS) for (const r of radii[k]) for (let j = 0, n = within(dists[k], reachesTile0(G, r)); j < n; j++) circles.push(diskCircle(points[k][j], r));
+  const { G } = P, { dists, points } = distancesFor(P), edges = tileEdges(G), circles = [];
+  for (const k of Object.keys(radii)) if (dists[k]) for (const r of radii[k]) for (let j = 0, n = within(dists[k], reachesTile0(G, r)); j < n; j++) circles.push(diskCircle(points[k][j], r));
   let count = 1;
   for (const c of circles) {
     const across = edges.reduce((s, e) => s + crossings(c, e).filter((z) => inTile0(G, z, 1e-12)).length, 0);
@@ -595,12 +720,13 @@ export function fragmentCount(P, radii) {
 }
 // How many pieces there'd be with circle i of a kind at radius r and the rest as they are (-1:
 // that doesn't fit), worked out as the build does, without blacking out or snapping.
+// (a truncated tiling's corners' patterns are one set of circles: changed together)
+const tied = (P, kind) => (P.tk ? P.kinds.filter((k) => (P.tk.base[k] || k) === (P.tk.base[kind] || kind)) : [kind]);
 export function hyperPieceCountAt(P, kind, i, r) {
-  const radii = Object.fromEntries(KINDS.map((k) => [k, [...P.radii[k]]]));
-  radii[kind][i] = r;
-  radii[kind] = [...new Set(radii[kind])].sort((a, b) => a - b);
+  const radii = Object.fromEntries(Object.keys(P.radii).map((k) => [k, [...P.radii[k]]]));
+  for (const k of tied(P, kind)) { radii[k][i] = r; radii[k] = [...new Set(radii[k])].sort((a, b) => a - b); }
   if (r >= P.cap[kind] || !fits(P, radii)) return -1;
-  const Q = { G: P.G, H: P.H, tiles: P.tiles, cap: P.cap, spec: { ...P.spec, blackout: [] }, radii };
+  const Q = { G: P.G, H: P.H, tiles: P.tiles, cap: P.cap, spec: { ...P.spec, blackout: [] }, radii, tk: P.tk, kinds: P.kinds };
   findPieces(Q);
   return Q.n;
 }
@@ -643,7 +769,7 @@ export function* hyperCountBreaks(P, kind, i, lo, hi, marks = [], samples = 48, 
 // the biggest radius circle i of a kind (i past the end: a new one) can have and still be worked
 // out, given the others: under the surface's limit and the budget
 export function hyperRadiusLimit(P, kind, i, radii = P.radii) {
-  const at = (r) => { const rs = Object.fromEntries(KINDS.map((k) => [k, [...radii[k]]])); rs[kind][i] = r; return fits(P, rs); };
+  const at = (r) => { const rs = Object.fromEntries(Object.keys(radii).map((k) => [k, [...radii[k]]])); for (const k of tied(P, kind)) if (rs[k]) rs[k][i] = r; return fits(P, rs); };
   let lo = 0.05, hi = P.cap[kind];
   if (at(hi)) return hi;
   if (!at(lo)) return lo;
@@ -664,19 +790,19 @@ export function hyperRadiusLimit(P, kind, i, radii = P.radii) {
 function findPieces(P) {
   const { G, H, radii } = P, N = G.N;
   P.regions = []; P.pieces = []; P.n = 0; P.circles = [];
-  if (!KINDS.some((k) => radii[k].length)) return;
+  if (!Object.keys(radii).some((k) => radii[k].length)) return;
   if (!fits(P, radii)) { P.tooBig = true; return; } // (buildHyper shrinks circles so this doesn't happen)
   const edges = tileEdges(G), inTile = (z) => inTile0(G, z);
   // the circles reaching into tile 0
-  const rmax = Math.max(...KINDS.flatMap((k) => radii[k]));
+  const rmax = Math.max(...Object.keys(radii).flatMap((k) => radii[k]));
   const near = darts(G, H, { m: M.I, e: 0 }, (c) => hdist(c, cx(0)) < 2 * G.Rv + rmax + 0.05);
   const points = new PointSet(1e-9), axes = [], circles = [];
-  for (const d of near) for (const a of axisPoints(G, H, d)) {
-    if (!radii[a.kind].length || points.has(a.p)) continue;
+  for (const d of near) for (const a of pointsOf(P, d)) {
+    if (!(radii[a.kind] || []).length || points.has(a.p)) continue;
     points.add(a.p);
     const dist = hdist(a.p, cx(0)), reach = radii[a.kind].map((r, ring) => [r, ring]).filter(([r]) => dist <= reachesTile0(G, r));
     if (!reach.length) continue;
-    axes.push({ ...a, coset: H.coset[a.kind].of[a.e] });
+    axes.push({ ...a, coset: cosetOf(H, a.kind).of[a.e] });
     for (const [r, ring] of reach) circles.push({ ...diskCircle(a.p, r), axis: axes.length - 1, ring, p: a.p, radius: r });
   }
   P.circles = circles; P.edges = edges;
@@ -751,7 +877,7 @@ function findPieces(P) {
   for (const frags of groups.values()) {
     const i = P.pieces.length, { x, f } = frags[0];
     for (const fr of frags) pieceOf[canon(fr.x, fr.f)] = i;
-    const name = new Map(R[f].name.map(([kind, e, ring]) => [`${kind}:${H.coset[kind].of[H.mul(x, e)]}`, ring]));
+    const name = new Map(R[f].name.map(([kind, e, ring]) => [`${kind}:${cosetOf(H, kind).of[H.mul(x, e)]}`, ring]));
     const stickers = frags.map((fr) => fr.x), faces = stickers.map((s) => H.coset.face.of[s]);
     P.pieces.push({ frags, name, stickers, faces, kind: new Set(faces).size });
   }

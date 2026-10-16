@@ -171,3 +171,19 @@ test("blacking out a kind takes its stickers off", () => {
   const Q = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [1.1] }], blackout: [corner] });
   assert.equal(sphereStats(Q).pieces, 26 - 8);
 });
+
+test("a truncated tiling's own corners and edges: a truncated cube's ball has 24 new corners and 24 new edges (its 12 others' middles are the cube's), and circles round them cut pieces, the ball still covered once", () => {
+  const truncate = { vertex: 0.7 }, P = buildSphere({ N: 4, M: 3, cuts: [], truncate, blackout: [] });
+  assert.equal(P.pts.tvertex.length, 24);
+  assert.equal(P.pts.tedge.length, 24);
+  const plain = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [0.6] }], truncate, blackout: [] });
+  const cut = buildSphere({ N: 4, M: 3, cuts: [{ on: "face", depths: [0.6] }, { on: "tvertex", depths: [0.15] }], truncate, blackout: [] });
+  assert.ok(cut.n > plain.n);
+  assert.equal(cut.axes.length, plain.axes.length); // (round no turning point: they don't turn)
+  let area = 0;
+  for (const pc of cut.pieces) for (const st of pc.stickers) area += regionArea(cut, st.f);
+  assert.ok(Math.abs(area - 4 * Math.PI) < 1e-3, area);
+  // (with only the edges truncated, the cube's corners are corners still: not new ones, cut round
+  // with the corners' own set)
+  assert.equal(buildSphere({ N: 4, M: 3, cuts: [], truncate: { edge: 0.7 }, blackout: [] }).pts.tvertex.length, 24);
+});

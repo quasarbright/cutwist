@@ -69,6 +69,10 @@ export const TILINGS = {
   },
 };
 export const KINDS = ["face", "vertex", "edge"];
+// What circles go round: those, and, truncated, the truncated tiling's own corners and edges' middles
+// (as a truncated solid's corners and edges: cuts round them split pieces; on no turning point, they
+// don't turn)
+export const CIRCLE_KINDS = [...KINDS, "tvertex", "tedge"];
 
 // The puzzles, by tiling (each tiling is a family, like a solid's), each with its (a, b): a
 // circle around every tile, around every corner, a crystal (circles out to the neighbors'
@@ -106,7 +110,7 @@ export const tileCount = ({ tiling, a, b }) => (tiling === "triangle" ? 2 : 1) *
 // the radius ranges the customize editor offers (cuts), in plane units
 export const TILE_CUT_RANGE = [0.05, 1.6];
 const radiiOf = (spec, kind) => [...new Set((spec.cuts || []).filter((c) => c.on === kind).flatMap((c) => c.depths).filter((r) => r > 0))].sort((a, b) => a - b);
-const widest = (spec) => Math.max(0, ...KINDS.flatMap((k) => radiiOf(spec, k)));
+const widest = (spec) => Math.max(0, ...CIRCLE_KINDS.flatMap((k) => radiiOf(spec, k)));
 // Whether every circle fits on the torus without reaching around to overlap itself: the step to
 // a point's next copy is longer than the widest circle is across.
 export function tilesFit(spec) {
@@ -139,7 +143,7 @@ const add = (a, b) => [a[0] + b[0], a[1] + b[1]], sub = (a, b) => [a[0] - b[0], 
 const kindAt = (K, [x, y]) => KINDS.find((k) => K.classes[k].some(([a, b]) => mod(x - a, K.fine) === 0 && mod(y - b, K.fine) === 0)) || null;
 
 // the plane geometry of a tiling, shared by every puzzle on it
-function geometry(K) {
+export function geometry(K) {
   if (K.geo) return K.geo;
   const G = { K };
   G.toPlane = (v) => toPlane(K, v);
@@ -254,12 +258,85 @@ function faceOf(G, p, truncate) {
   return c;
 }
 
+// ---- a truncated tiling's own corners and edges' middles ----
+// Its corners: the corners of the tiles' parts (tileParts) where three faces or more meet (a tile's
+// corner inside a corner's face isn't one, nor a point along a side). Its edges: the sides between
+// two of those where the faces either side differ (sides of parts that meet in a straight line,
+// through no corner, are one edge). As plane points, one of each in the tiling's repeating cell
+// (internal [0, fine)²): every other is one of these moved by whole cells.
+const truncCache = new Map();
+export function truncatedPoints(G, truncate) {
+  const id = `${G.K.name}:${truncate.vertex}:${truncate.edge}`;
+  if (truncCache.has(id)) return truncCache.get(id);
+  const { K } = G, faceKey = (q) => key(faceOf(G, q, truncate)), e = 1e-6;
+  const isCorner = (q) => new Set(Array.from({ length: 16 }, (_, j) => { const a = (j * Math.PI) / 8 + 0.1; return faceKey([q[0] + e * Math.cos(a), q[1] + e * Math.sin(a)]); })).size >= 3;
+  const sides = [], cand = [];
+  for (const c of G.near("face", [0, 0], 4)) {
+    const pc = G.toPlane(c);
+    for (const pt of tileParts(G, c, truncate)) {
+      const poly = pt.poly.map(([x, y]) => [x + pc[0], y + pc[1]]);
+      poly.forEach((a, j) => {
+        const b = poly[(j + 1) % poly.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        cand.push(a);
+        if (l < 1e-9) return;
+        const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n = [-(b[1] - a[1]) / l, (b[0] - a[0]) / l];
+        if (faceKey([m[0] + n[0] * e, m[1] + n[1] * e]) !== faceKey([m[0] - n[0] * e, m[1] - n[1] * e])) sides.push([a, b]);
+      });
+    }
+  }
+  const same = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-7;
+  const corners = [];
+  for (const q of cand) if (!corners.some((r) => same(r, q)) && isCorner(q)) corners.push(q);
+  const corner = (q) => corners.some((r) => same(r, q));
+  // (each side out to the corners at its ends, along sides in line with it)
+  const mids = [];
+  for (const [a0, b0] of sides) {
+    let a = a0, b = b0;
+    const dir = [b0[0] - a0[0], b0[1] - a0[1]], inLine = (u, v) => Math.abs(dir[0] * (v[1] - u[1]) - dir[1] * (v[0] - u[0])) < 1e-9;
+    for (let k = 0; k < 20 && !corner(a); k++) { const next = sides.find(([u, v]) => (same(u, a) && !same(v, b) && inLine(a, v)) || (same(v, a) && !same(u, b) && inLine(a, u))); if (!next) break; a = same(next[0], a) ? next[1] : next[0]; }
+    for (let k = 0; k < 20 && !corner(b); k++) { const next = sides.find(([u, v]) => (same(u, b) && !same(v, a) && inLine(b, v)) || (same(v, b) && !same(u, a) && inLine(b, u))); if (!next) break; b = same(next[0], b) ? next[1] : next[0]; }
+    if (corner(a) && corner(b)) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; if (!mids.some((r) => same(r, m))) mids.push(m); }
+  }
+  // (one of each per cell: internal coordinates in [0, fine))
+  const inCell = (q) => G.fromPlane(q).every((x) => x >= -1e-7 && x < K.fine - 1e-7);
+  // (not the tiling's own points: a corner left a corner, cut round as the corners already are)
+  const mine = (q) => { const v = G.fromPlane(q), w = v.map(Math.round); return !(Math.hypot(v[0] - w[0], v[1] - w[1]) < 1e-7 && kindAt(K, w)); };
+  const out = { tvertex: corners.filter(inCell).filter(mine), tedge: mids.filter(inCell).filter(mine) };
+  truncCache.set(id, out);
+  return out;
+}
+// every one of a truncated tiling's own corners (edges' middles) on the torus, once each, as
+// findPoints gives the others ({ center }, plane)
+function truncatedOnTorus(P, kind) {
+  const { G, Ap, Bp } = P, det = Ap[0] * Bp[1] - Ap[1] * Bp[0], out = [];
+  const reach = Math.hypot(Ap[0] + Bp[0], Ap[1] + Bp[1]) + Math.hypot(Ap[0] - Bp[0], Ap[1] - Bp[1]);
+  for (const q of pointsNear(G, kind, [(Ap[0] + Bp[0]) / 2, (Ap[1] + Bp[1]) / 2], reach, P.truncate)) {
+    // (in the torus's own steps, and back: in its cell spanned by A and B)
+    const u = (q[0] * Bp[1] - q[1] * Bp[0]) / det, v = (Ap[0] * q[1] - Ap[1] * q[0]) / det;
+    if (u < -1e-7 || u >= 1 - 1e-7 || v < -1e-7 || v >= 1 - 1e-7) continue;
+    if (!out.some((o) => Math.hypot(o.center[0] - q[0], o.center[1] - q[1]) < 1e-7)) out.push({ center: q });
+  }
+  return out;
+}
+// every point of a kind within plane distance d of plane point p (plane points); for a truncated
+// tiling's own corners and edges, its truncation
+function pointsNear(G, kind, p, d, truncate = {}) {
+  if (KINDS.includes(kind)) return G.near(kind, p, d).map((v) => G.toPlane(v));
+  if (truncate.vertex === undefined && truncate.edge === undefined) return [];
+  const { K } = G, base = truncatedPoints(G, truncate)[kind], v1 = G.toPlane([K.fine, 0]), v2 = G.toPlane([0, K.fine]), x = G.fromPlane(p).map((t) => t / K.fine), out = [];
+  const unit = Math.min(Math.hypot(...v1), Math.hypot(...v2), Math.hypot(v1[0] - v2[0], v1[1] - v2[1])), reach = Math.ceil(d / unit) + 2;
+  for (let i = Math.floor(x[0]) - reach; i <= Math.ceil(x[0]) + reach; i++)
+    for (let j = Math.floor(x[1]) - reach; j <= Math.ceil(x[1]) + reach; j++)
+      for (const q of base) { const r = [q[0] + i * v1[0] + j * v2[0], q[1] + i * v1[1] + j * v2[1]]; if (Math.hypot(r[0] - p[0], r[1] - p[1]) < d) out.push(r); }
+  return out;
+}
+
 // A radius within 1e-5 of one where circles meet (a snap mark) is that radius exactly: a
 // rounded one (from a link, or typed) leaves circles a hair from meeting, specks of pieces too
 // small to see or to work out reliably.
 function exactRadii(spec) {
   const cuts = (spec.cuts || []).map((c) => ({ ...c, depths: [...c.depths] })), out = { ...spec, cuts };
-  for (const kind of KINDS) radiiOf(out, kind).forEach((r, i) => {
+  for (const kind of CIRCLE_KINDS) radiiOf(out, kind).forEach((r, i) => {
     const m = tileSnapCandidates(out, { kind, i }).find((m) => Math.abs(m - r) < 1e-5);
     if (m !== undefined && m !== r) for (const c of cuts) if (c.on === kind) c.depths = c.depths.map((d) => (d === r ? m : d));
   });
@@ -278,6 +355,7 @@ export function buildTiles(spec) {
   // every point on the torus, by kind, at its copy nearest the middle of the flat view
   P.points = {};
   for (const kind of KINDS) P.points[kind] = findPoints(P, kind);
+  for (const kind of ["tvertex", "tedge"]) P.points[kind] = truncatedOnTorus(P, kind);
   P.tiles = P.points.face.map((t) => ({ ...t, corners: G.shapeOf(t.home).corners.map((o) => P.toPlane(add(t.home, o))) }));
   // the faces: the tiles, then (truncated) the corners' and edges' faces
   P.faces = [...P.points.face.map((t) => ({ ...t, kind: "face" })),
@@ -287,8 +365,14 @@ export function buildTiles(spec) {
   P.faceAt = (v) => P.faceIndex.get(key(P.reduce(v))); // the face whose point is internal point v
   P.tileAt = P.faceAt;
   // the turning points: every point of a kind with a cut set, its circles' radii and its turn
+  // (a truncated tiling's own corners or edges' middles where they're a turning point too, as the
+  // tiling's corners are when only its edges are truncated: their circles turn with that point's)
+  const also = (kind) => ["tvertex", "tedge"].flatMap((t) => {
+    const p0 = G.toPlane(K.classes[kind][0]);
+    return pointsNear(G, t, p0, 1e-6, truncate).length ? radiiOf(spec, t) : [];
+  });
   P.axes = KINDS.flatMap((kind) => {
-    const radii = radiiOf(spec, kind);
+    const radii = [...new Set([...radiiOf(spec, kind), ...also(kind)])].sort((a, b) => a - b);
     return radii.length ? P.points[kind].map((pt) => ({ ...pt, kind, radii, order: K.order[kind], step: K.base / K.order[kind] })) : [];
   });
   findPieces(P);
@@ -351,7 +435,7 @@ function findPoints(P, kind) {
 const patterns = new Map(); // tiling, cuts and truncation → the cell's pieces
 function cellPattern(P) {
   const { K, G, spec, truncate } = P;
-  const cutsKey = KINDS.map((k) => radiiOf(spec, k).join("/")).join("|");
+  const cutsKey = CIRCLE_KINDS.map((k) => radiiOf(spec, k).join("/")).join("|");
   const id = `${spec.tiling}:${cutsKey}:${truncate.vertex}:${truncate.edge}`;
   if (patterns.has(id)) return patterns.get(id);
   const rmax = widest(spec), out = [];
@@ -360,7 +444,11 @@ function cellPattern(P) {
   // (every circle that can bound a piece whose middle is in the cell: a piece is inside some
   // circle, so it's within 2·rmax of its middle, and the circles bounding it reach that circle)
   const half = Math.hypot(...cellP[0]) + 2 * rmax + 0.1;
-  const circles = KINDS.flatMap((kind) => radiiOf(spec, kind).flatMap((r) => G.near(kind, mid, half * Math.SQRT2 + r).map((c) => ({ c: G.toPlane(c), r }))));
+  // (a truncated tiling's corner can be one of the tiling's points too, with circles of both sets:
+  // each circle once)
+  const circles = [];
+  for (const kind of CIRCLE_KINDS) for (const r of radiiOf(spec, kind)) for (const c of pointsNear(G, kind, mid, half * Math.SQRT2 + r, truncate))
+    if (!circles.some((o) => o.r === r && Math.hypot(o.c[0] - c[0], o.c[1] - c[1]) < 1e-9)) circles.push({ c, r });
   const cellInv = inverse2(K.cell);
   // Which copy of a region is the cell's: the one whose middle, nudged off points and lines (a
   // piece centered on a corner has its middle there) at 17°, clear of every edge's direction,
@@ -761,17 +849,18 @@ export const signedTurn = (P, q, axis = 0) => { const n = P.axes[axis] ? P.axes[
 export function tileSnapCandidates(spec, target) {
   const K = TILINGS[spec.tiling], G = geometry(K), [lo, hi] = TILE_CUT_RANGE;
   const top = Math.min(hi, spec.a ? tileRadiusCap(spec) : hi);
-  const c0 = K.classes[target.kind][0], p0 = G.toPlane(c0), out = [];
+  const truncate = spec.truncate || {}, p0 = KINDS.includes(target.kind) ? G.toPlane(K.classes[target.kind][0]) : (truncatedPoints(G, truncate)[target.kind] || [])[0], out = [];
+  if (!p0) return out;
   const own = radiiOf(spec, target.kind).filter((r, i) => i !== target.i); // (landing on one of these just merges the two)
   // (exact: a mark rounded off would put circles a hair from meeting, not meeting)
   const addD = (d) => { if (d > lo + 1e-6 && d < top - 1e-6 && !own.some((r) => Math.abs(r - d) < 1e-6) && !out.some((e) => Math.abs(e - d) < 1e-9)) out.push(d); };
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   // through other points: tiles' corners, middles, edges' middles
-  for (const kind of KINDS) for (const v of G.near(kind, p0, top)) addD(dist(G.toPlane(v), p0));
+  for (const kind of CIRCLE_KINDS) for (const v of pointsNear(G, kind, p0, top, truncate)) addD(dist(v, p0));
   // its copies (the other points of its kind) and the other circles
-  const copies = G.near(target.kind, p0, 2 * top).map((v) => G.toPlane(v)).filter((q) => dist(q, p0) > 1e-9);
-  const others = KINDS.flatMap((kind) => radiiOf(spec, kind).filter((r, i) => !(kind === target.kind && i === target.i)).flatMap((r) =>
-    G.near(kind, p0, top + r + 1e-6).map((v) => ({ p: G.toPlane(v), r }))));
+  const copies = pointsNear(G, target.kind, p0, 2 * top, truncate).filter((q) => dist(q, p0) > 1e-9);
+  const others = CIRCLE_KINDS.flatMap((kind) => radiiOf(spec, kind).filter((r, i) => !(kind === target.kind && i === target.i)).flatMap((r) =>
+    pointsNear(G, kind, p0, top + r + 1e-6, truncate).map((v) => ({ p: v, r }))));
   for (const q of copies) addD(dist(q, p0) / 2);
   for (const o of others) { const d = dist(o.p, p0); addD(d - o.r); addD(d + o.r); addD(o.r - d); }
   for (let i = 0; i < others.length; i++)

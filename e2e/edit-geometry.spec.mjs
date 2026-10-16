@@ -139,3 +139,23 @@ test("the four-wedge beach ball's corner truncation snaps where the wedges are s
   await dragCut(page, 0, 0, 0.85, 8);
   expect((await rulers(page))[0].values[0]).toBeGreaterThan(0.75);
 });
+
+// (a truncated tiling's own corners: dots, hollow where they don't turn, and a click there cuts
+// round every one, as on a truncated solid)
+for (const [name, design] of [
+  ["ball", { rule: "hyper", N: 4, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.6] }], blackout: [] }],
+  ["torus", { rule: "tiles", tiling: "square", a: 3, b: 0, cuts: [{ on: "face", depths: [0.3] }], blackout: [] }],
+  ["hyperbolic surface", { rule: "hyper", N: 7, M: 3, surface: 0, cuts: [{ on: "face", depths: [0.7] }], blackout: [] }],
+]) {
+  test(`a truncated ${name}: cuts round its own corners`, async ({ page }) => {
+    await customize(page, { ...design, truncate: { vertex: 0.9 } });
+    const dots = (await page.evaluate(() => window.cutwist.editSites())).filter((s) => s.r === 7);
+    expect(dots.length).toBeGreaterThan(0);
+    expect(dots.some((d) => !d.turns)).toBe(true);
+    const before = (await info(page)).pieces;
+    await editDot(page, "corners");
+    await settled(page);
+    expect((await rulers(page))[7].values.length).toBe(1);
+    expect((await info(page)).pieces).toBeGreaterThan(before);
+  });
+}
