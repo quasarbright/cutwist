@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { mapGroup, permOrder, parseRelator, enumerate, wordPerm, generatedSize } from "./todd-coxeter.mjs";
 import { isPuzzleSurface } from "./hyper.mjs";
+import { pool, isMainThread } from "./workers.mjs";
 
 const dir = new URL("./regular-maps/", import.meta.url);
 const read = (f) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
@@ -17,6 +18,37 @@ const index = read("index.json");
 // (every tiling's file; the index lists only those with surfaces for a puzzle)
 const tilings = readdirSync(dir).filter((f) => /^\d+-\d+\.json$/.test(f)).map((f) => { const file = read(f); return [`${file.N},${file.M}`, file]; });
 const paper = JSON.parse(readFileSync(new URL("./data/conder-dobcsanyi-genus-2-6.json", import.meta.url), "utf8")).maps;
+
+// One tiling's file rebuilt (run in a worker, a tiling each, side by side): what's wrong, and how
+// many surfaces it has
+export function rebuild(key) {
+  const file = tilings.find(([k]) => k === key)[1], wrong = [];
+  let n = 0;
+  const [N, M] = key.split(",").map(Number);
+  if (file.N !== N || file.M !== M) wrong.push(`${key}: file says {${file.N},${file.M}}`);
+  const built = file.groups.map((g) => enumerate(g.letters.length, g.relators.map((r) => parseRelator(r, g.letters)), 2000000));
+  file.groups.forEach((g, i) => { if (built[i].size !== g.order) wrong.push(`${key} group ${i}: ${built[i].size}, stored ${g.order}`); });
+  let last = 0;
+  for (const s of file.surfaces) {
+    n++;
+    const g = built[s.group], letters = file.groups[s.group].letters, flagged = letters === "abc";
+    const R = wordPerm(g.gens, parseRelator(s.tile, letters)), S = wordPerm(g.gens, parseRelator(s.corner, letters));
+    const per = flagged ? 2 : 1, tiles = g.size / (per * N), corners = g.size / (per * M), edges = g.size / (2 * per);
+    const orientable = flagged ? generatedSize([R, S]) === g.size / 2 : true, chi = corners - edges + tiles;
+    const genus = orientable ? (2 - chi) / 2 : 2 - chi;
+    if (permOrder(R) !== N || permOrder(S) !== M || tiles !== s.tiles || genus !== s.genus || orientable !== s.orientable)
+      wrong.push(`${key} ${JSON.stringify(s)}: rebuilt as {${permOrder(R)},${permOrder(S)}}, ${tiles} tiles, genus ${genus}, ${orientable ? "orientable" : "one-sided"}`);
+    if (s.tiles < last) wrong.push(`${key}: out of order at ${s.tiles} tiles`);
+    last = s.tiles;
+  }
+  const sizes = file.surfaces.filter(isPuzzleSurface).map((s) => s.tiles);
+  if (JSON.stringify(index.tilings[key] || []) !== JSON.stringify(sizes)) wrong.push(`${key}: index sizes differ from the file's puzzle surfaces`);
+  return { wrong, n };
+}
+
+if (isMainThread) {
+// (the biggest groups first: they take longest)
+const rebuilt = pool(import.meta.url, "rebuild", tilings.slice().sort((a, b) => b[1].groups.length - a[1].groups.length).map(([k]) => k));
 
 test("the relator notation: powers, brackets, commutators, and Conder's a*b", () => {
   assert.deepEqual(parseRelator("R^3"), [0, 0, 0]);
@@ -29,31 +61,10 @@ test("the relator notation: powers, brackets, commutators, and Conder's a*b", ()
   assert.equal(enumerate(2, ["R^5", "S^3", "(RS)^2"].map((r) => parseRelator(r))).size, 60);
 });
 
-test("every surface rebuilds: turns of the right orders, and its tiles, genus and sides as stored", () => {
-  const wrong = [];
-  let n = 0;
-  for (const [key, file] of tilings) {
-    const [N, M] = key.split(",").map(Number);
-    if (file.N !== N || file.M !== M) wrong.push(`${key}: file says {${file.N},${file.M}}`);
-    const built = file.groups.map((g) => enumerate(g.letters.length, g.relators.map((r) => parseRelator(r, g.letters)), 2000000));
-    file.groups.forEach((g, i) => { if (built[i].size !== g.order) wrong.push(`${key} group ${i}: ${built[i].size}, stored ${g.order}`); });
-    let last = 0;
-    for (const s of file.surfaces) {
-      n++;
-      const g = built[s.group], letters = file.groups[s.group].letters, flagged = letters === "abc";
-      const R = wordPerm(g.gens, parseRelator(s.tile, letters)), S = wordPerm(g.gens, parseRelator(s.corner, letters));
-      const per = flagged ? 2 : 1, tiles = g.size / (per * N), corners = g.size / (per * M), edges = g.size / (2 * per);
-      const orientable = flagged ? generatedSize([R, S]) === g.size / 2 : true, chi = corners - edges + tiles;
-      const genus = orientable ? (2 - chi) / 2 : 2 - chi;
-      if (permOrder(R) !== N || permOrder(S) !== M || tiles !== s.tiles || genus !== s.genus || orientable !== s.orientable)
-        wrong.push(`${key} ${JSON.stringify(s)}: rebuilt as {${permOrder(R)},${permOrder(S)}}, ${tiles} tiles, genus ${genus}, ${orientable ? "orientable" : "one-sided"}`);
-      if (s.tiles < last) wrong.push(`${key}: out of order at ${s.tiles} tiles`);
-      last = s.tiles;
-    }
-    const sizes = file.surfaces.filter(isPuzzleSurface).map((s) => s.tiles);
-    if (JSON.stringify(index.tilings[key] || []) !== JSON.stringify(sizes)) wrong.push(`${key}: index sizes differ from the file's puzzle surfaces`);
-  }
-  assert.deepEqual(wrong, []);
+test("every surface rebuilds: turns of the right orders, and its tiles, genus and sides as stored", async () => {
+  const all = await Promise.all(rebuilt);
+  assert.deepEqual(all.flatMap((r) => r.wrong), []);
+  const n = all.reduce((s, r) => s + r.n, 0);
   assert.ok(n > 8000, `${n} surfaces`);
 });
 
@@ -87,3 +98,4 @@ test("the paper's maps (genus 2 to 6, transcribed by hand): each checks out, and
   assert.deepEqual(wrong, []);
   assert.equal(paper.length, 59);
 });
+}

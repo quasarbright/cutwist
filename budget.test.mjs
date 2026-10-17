@@ -26,14 +26,8 @@ for (const [kind, build] of Object.entries(KINDS)) test(`a ${NAMES[kind]} past i
   assert.ok(P.pieces.length > 1 && P.pieces.length <= PIECE_LIMITS[kind], `${P.pieces.length} pieces`);
 });
 
-test("a solid stops as soon as it's past: a design of 37,000 pieces turned down in a fraction of the time it takes to build", () => {
+// (a design of 37,000 pieces, built whole, takes 6 s)
+test("a solid stops as soon as it's past: a design of 37,000 pieces turned down with not much more than the limit cut", () => {
   const spec = { rule: "custom", solid: "dodecahedron", truncate: {}, cuts: [{ on: "face", depths: [0.36, 0.48, 0.6, 0.72, 0.84] }, { on: "vertex", depths: [0.545, 0.635, 0.725, 0.815, 0.905] }], blackout: [] };
-  let t = performance.now();
-  assert.throws(() => buildPuzzle(spec, 2, { limit: PIECE_LIMITS.solid }), TooManyPieces);
-  const stop = performance.now() - t;
-  t = performance.now();
-  const n = buildPuzzle(spec, 2).pieces.length;
-  const all = performance.now() - t;
-  assert.ok(n > 30000, `${n}`);
-  assert.ok(stop < all / 4, `stopped in ${stop.toFixed(0)} ms, built in ${all.toFixed(0)} ms`);
+  assert.throws(() => buildPuzzle(spec, 2, { limit: PIECE_LIMITS.solid }), (e) => e instanceof TooManyPieces && e.count < 2 * PIECE_LIMITS.solid);
 });

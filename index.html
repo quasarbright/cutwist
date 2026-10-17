@@ -2210,6 +2210,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // up, if it's the same shape (only its cuts and blacked-out pieces differ); otherwise, as on
     // opening a link to one, the shape uncut stands in.
     // (planar puzzles have no limit: their grids' sizes are capped by their steppers)
+    // (a test sets smaller limits, before the page loads, to try them on small puzzles)
+    if (window.cutwistLimits) Object.assign(PIECE_LIMITS, window.cutwistLimits);
     const limitType = (spec) => (spec.rule === "planar" ? null : spec.rule === "tiles" ? "tiles" : isRound(spec) ? "sphere" : spec.rule === "hyper" ? "hyper" : "solid");
     const LIMIT_WHERE = { solid: "a solid", sphere: "a ball", tiles: "a torus", hyper: "a hyperbolic surface" };
     let overLimit = null; // { limit, type }: the design showing in the editor and the link is past it

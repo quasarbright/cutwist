@@ -1,6 +1,10 @@
 // Unit tests for the tile-turning puzzles (tiles.mjs).
 // Run: node --test
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
+import { pool, isMainThread } from "./workers.mjs";
+
+// (tests on the main thread only: the workers import this file for its checks)
+const test = isMainThread ? nodeTest : () => {};
 import assert from "node:assert/strict";
 import {
   TILE_PRESETS, buildTiles, solvedTileState, applyTileMove, inverseTileMove, isTileSolved, tileScrambleMoves,
@@ -82,26 +86,34 @@ function checkCover(P, rand, count = 250) {
   }
 }
 
-test("no color drawn where it isn't: at every snap radius, each covered point is in exactly one piece", () => {
-  const rand = seeded(11);
-  for (const tiling of ["hex", "square", "triangle"]) {
+// The cover checks, a case each, run in workers side by side: every circle kind on every tiling at
+// each of its snap radii, then the presets and a few big and doubled designs (throws if a check fails)
+const COVER_CASES = [...["hex", "square", "triangle"].flatMap((tiling) => ["face", "vertex", "edge"].map((kind) => ["marks", tiling, kind])), ["presets"], ["big"]];
+export function cover(k) {
+  const [what, tiling, kind] = COVER_CASES[k], rand = seeded(11 + k);
+  if (what === "marks") {
     const base = presetSpec(tiling, TILE_PRESETS.find((p) => p.tiling === tiling).a, TILE_PRESETS.find((p) => p.tiling === tiling).b);
-    for (const kind of ["face", "vertex", "edge"]) {
-      // (the radii where the drawing changes: circles touching, or meeting at a point; and a
-      // hair to either side)
-      const marks = tileSnapCandidates({ ...base, cuts: [] }, { kind, i: 0 }).filter((r) => r <= 1.05);
-      for (const r of marks) for (const d of [0, 0.002]) {
-        const spec = { ...base, cuts: [{ on: kind, depths: [r + d] }] };
-        if (tilesFit(spec)) checkCover(buildTiles(spec), rand, 60);
-      }
+    // (the radii where the drawing changes: circles touching, or meeting at a point; and a hair to
+    // either side)
+    const marks = tileSnapCandidates({ ...base, cuts: [] }, { kind, i: 0 }).filter((r) => r <= 1.05);
+    for (const r of marks) for (const d of [0, 0.002]) {
+      const spec = { ...base, cuts: [{ on: kind, depths: [r + d] }] };
+      if (tilesFit(spec)) checkCover(buildTiles(spec), rand, 60);
     }
+  } else if (what === "presets") for (const spec of TILE_PRESETS) checkCover(buildTiles(spec), rand);
+  else {
+    // (big circles: many crossings, and many tiny pieces)
+    for (const r of [1, 1.3]) checkCover(preset("hex", 2, 2, { cuts: [{ on: "vertex", depths: [r] }] }), rand, 120);
+    // (two kinds at once, both through the corners)
+    checkCover(preset("triangle", 2, 0, { cuts: [{ on: "face", depths: [0.5] }, { on: "vertex", depths: [0.5] }] }), rand);
+    checkCover(preset("hex", 2, 2, { cuts: [{ on: "face", depths: [1 / Math.sqrt(3)] }, { on: "vertex", depths: [1 / Math.sqrt(3)] }] }), rand);
   }
-  for (const spec of TILE_PRESETS) checkCover(buildTiles(spec), rand);
-  // (big circles: many crossings, and many tiny pieces)
-  for (const r of [1, 1.3]) checkCover(preset("hex", 2, 2, { cuts: [{ on: "vertex", depths: [r] }] }), rand, 120);
-  // (two kinds at once, both through the corners)
-  checkCover(preset("triangle", 2, 0, { cuts: [{ on: "face", depths: [0.5] }, { on: "vertex", depths: [0.5] }] }), rand);
-  checkCover(preset("hex", 2, 2, { cuts: [{ on: "face", depths: [1 / Math.sqrt(3)] }, { on: "vertex", depths: [1 / Math.sqrt(3)] }] }), rand);
+  return true;
+}
+const covered = isMainThread ? pool(import.meta.url, "cover", COVER_CASES.map((_, k) => k)) : [];
+
+test("no color drawn where it isn't: at every snap radius, each covered point is in exactly one piece", async () => {
+  await Promise.all(covered);
 });
 
 test("piece types: every piece of a type alike, and each type on every cell (so blacking one out takes them all)", () => {

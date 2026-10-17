@@ -26,12 +26,17 @@ test("?background shows only a full-screen canvas, the grid about the screen's s
   expect(errors).toEqual([]);
 });
 
+// (on a fake clock, run a frame at a time as fast as they draw: a round takes most of a minute)
 test("?background unscrambles, then starts a new round", async ({ page }) => {
-  test.setTimeout(90_000);
+  await page.clock.install();
   await openBackground(page);
-  await page.waitForFunction(() => window.cutwistBackground.info().phase === "solve");
-  await page.waitForFunction(() => window.cutwistBackground.info().phase === "linger", null, { timeout: 60_000 });
+  const until = async (phase, ms) => {
+    for (let t = 0; t < ms && (await info(page)).phase !== phase; t += 500) await page.clock.runFor(500);
+    expect((await info(page)).phase).toBe(phase);
+  };
+  await until("solve", 5_000);
+  await until("linger", 120_000);
   expect((await info(page)).movesLeft).toBe(0);
-  await page.waitForFunction(() => window.cutwistBackground.info().phase === "fade", null, { timeout: 5_000 });
+  await until("fade", 5_000);
   expect((await info(page)).movesLeft).toBeGreaterThan(0);
 });

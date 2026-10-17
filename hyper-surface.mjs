@@ -200,28 +200,47 @@ function untangle(tris, ref, xz, free, { lambda = 1, rounds = 40, steps = 200 } 
     const m = inv.subarray(4 * i, 4 * i + 4);
     return [u0 * m[0] + w0 * m[2], u0 * m[1] + w0 * m[3], u1 * m[0] + w1 * m[2], u1 * m[1] + w1 * m[3]];
   };
-  const minDet = (X) => { let m = Infinity; for (let i = 0; i < T; i++) { const [a, b, c, d] = jac(i, X); m = Math.min(m, a * d - b * c); } return m; };
+  // (minDet and energy work J out as jac does, the same sums in the same order, without its arrays:
+  // they run over every triangle at every step of the minimizing, most of the time a layout takes)
+  const T0 = new Int32Array(T), T1 = new Int32Array(T), T2 = new Int32Array(T);
+  tris.forEach(([a, b, c], i) => { T0[i] = a; T1[i] = b; T2[i] = c; });
+  const minDet = (X) => {
+    let m = Infinity;
+    for (let i = 0; i < T; i++) {
+      const va = T0[i], vb = T1[i], vc = T2[i], u0 = X[2 * vb] - X[2 * va], u1 = X[2 * vb + 1] - X[2 * va + 1], w0 = X[2 * vc] - X[2 * va], w1 = X[2 * vc + 1] - X[2 * va + 1];
+      const m0 = inv[4 * i], m1 = inv[4 * i + 1], m2 = inv[4 * i + 2], m3 = inv[4 * i + 3];
+      const a = u0 * m0 + w0 * m2, b = u0 * m1 + w0 * m3, c = u1 * m0 + w1 * m2, d = u1 * m1 + w1 * m3;
+      m = Math.min(m, a * d - b * c);
+    }
+    return m;
+  };
   const energy = (X, eps, grad) => {
     let E = 0;
     if (grad) grad.fill(0);
     for (let i = 0; i < T; i++) {
-      const [a, b, c, d] = jac(i, X), D = a * d - b * c, root = Math.sqrt(eps * eps + D * D), chi = (D + root) / 2;
+      const va = T0[i], vb = T1[i], vc = T2[i], u0 = X[2 * vb] - X[2 * va], u1 = X[2 * vb + 1] - X[2 * va + 1], w0 = X[2 * vc] - X[2 * va], w1 = X[2 * vc + 1] - X[2 * va + 1];
+      const m0 = inv[4 * i], m1 = inv[4 * i + 1], m2 = inv[4 * i + 2], m3 = inv[4 * i + 3];
+      const a = u0 * m0 + w0 * m2, b = u0 * m1 + w0 * m3, c = u1 * m0 + w1 * m2, d = u1 * m1 + w1 * m3;
+      const D = a * d - b * c, root = Math.sqrt(eps * eps + D * D), chi = (D + root) / 2;
       const top = a * a + b * b + c * c + d * d + lambda * (D * D + 1);
       E += area[i] * (top / chi);
       if (!grad) continue;
-      // ∂f/∂J, then through J = U·S⁻¹ to the corners (U's columns: b − a and c − a)
-      const dchi = (1 + D / root) / 2, cof = [d, -c, -b, a], J = [a, b, c, d];
-      const g = J.map((x, j) => area[i] * ((2 * x + 2 * lambda * D * cof[j]) / chi - (top * dchi * cof[j]) / (chi * chi)));
-      const m = inv.subarray(4 * i, 4 * i + 4);
-      const gu0 = g[0] * m[0] + g[1] * m[1], gu1 = g[2] * m[0] + g[3] * m[1], gw0 = g[0] * m[2] + g[1] * m[3], gw1 = g[2] * m[2] + g[3] * m[3];
-      const [va, vb, vc] = tris[i];
+      // ∂f/∂J (cof: d, −c, −b, a), then through J = U·S⁻¹ to the corners (U's columns: b − a and c − a)
+      const dchi = (1 + D / root) / 2, ar = area[i];
+      const g0 = ar * ((2 * a + 2 * lambda * D * d) / chi - (top * dchi * d) / (chi * chi));
+      const g1 = ar * ((2 * b + 2 * lambda * D * -c) / chi - (top * dchi * -c) / (chi * chi));
+      const g2 = ar * ((2 * c + 2 * lambda * D * -b) / chi - (top * dchi * -b) / (chi * chi));
+      const g3 = ar * ((2 * d + 2 * lambda * D * a) / chi - (top * dchi * a) / (chi * chi));
+      const gu0 = g0 * m0 + g1 * m1, gu1 = g2 * m0 + g3 * m1, gw0 = g0 * m2 + g1 * m3, gw1 = g2 * m2 + g3 * m3;
       grad[2 * vb] += gu0; grad[2 * vb + 1] += gu1; grad[2 * vc] += gw0; grad[2 * vc + 1] += gw1;
       grad[2 * va] -= gu0 + gw0; grad[2 * va + 1] -= gu1 + gw1;
     }
     if (grad) for (let v = 0; v < free.length; v++) if (!free[v]) grad[2 * v] = grad[2 * v + 1] = 0;
     return E;
   };
-  const lbfgs = (eps) => minimize((X, g) => energy(X, eps, g), xz, steps);
+  // (only the free vertices move: the minimizing works on just their coordinates)
+  const active = Int32Array.from({ length: free.length * 2 }, (_, j) => j).filter((j) => free[j >> 1]);
+  const lbfgs = (eps) => minimize((X, g) => energy(X, eps, g), xz, steps, 8, null, active);
   // ε as the paper has it: down each round by how much the energy fell, kept near the worst det
   let eps = 1, E = energy(xz, eps);
   for (let r = 0; r < rounds; r++) {
@@ -237,30 +256,35 @@ function untangle(tris, ref, xz, free, { lambda = 1, rounds = 40, steps = 200 } 
 
 // The least of an energy, from x (moved there, in place): L-BFGS (a few pairs) with a backtracking
 // line search. f(X, g) returns the energy at X, its gradient into g; project(X), if given, puts a
-// tried X back where it may be (on a surface), in place. Returns the energy.
-function minimize(f, x, steps, mem = 8, project = null) {
-  const L = x.length, X2 = new Float64Array(L), d = new Float64Array(L), g = new Float64Array(L), g2 = new Float64Array(L), S = [], Y = [];
-  const dot = (p, q) => { let s = 0; for (let j = 0; j < L; j++) s += p[j] * q[j]; return s; };
-  const axpy = (p, a, q) => { for (let j = 0; j < L; j++) p[j] += a * q[j]; };
+// tried X back where it may be (on a surface), in place. active, if given, lists the only
+// coordinates that move (f's gradient is 0 at the rest): the steps are worked out on just those,
+// the same sums but for the zeros. Returns the energy.
+function minimize(f, x, steps, mem = 8, project = null, active = null) {
+  const L = x.length, idx = active ?? Int32Array.from({ length: L }, (_, j) => j), K = idx.length;
+  const X2 = Float64Array.from(x), d = new Float64Array(K), g = new Float64Array(L), g2 = new Float64Array(L), S = [], Y = [];
+  // (d, S and Y on the active coordinates; x, X2, g and g2 whole)
+  const dot = (p, q) => { let s = 0; for (let k = 0; k < K; k++) s += p[k] * q[k]; return s; };
+  const dotG = (G, q) => { let s = 0; for (let k = 0; k < K; k++) s += G[idx[k]] * q[k]; return s; };
+  const axpy = (p, a, q) => { for (let k = 0; k < K; k++) p[k] += a * q[k]; };
   let E = f(x, g);
   for (let it = 0; it < steps; it++) {
     const al = [];
-    for (let j = 0; j < L; j++) d[j] = -g[j];
+    for (let k = 0; k < K; k++) d[k] = -g[idx[k]];
     for (let j = S.length - 1; j >= 0; j--) { const a = dot(S[j], d) / dot(Y[j], S[j]); al[j] = a; axpy(d, -a, Y[j]); }
-    if (S.length) { const y = Y.at(-1), s = S.at(-1), gam = dot(s, y) / dot(y, y); for (let j = 0; j < L; j++) d[j] *= gam; }
+    if (S.length) { const y = Y.at(-1), s = S.at(-1), gam = dot(s, y) / dot(y, y); for (let k = 0; k < K; k++) d[k] *= gam; }
     for (let j = 0; j < S.length; j++) { const b = dot(Y[j], d) / dot(Y[j], S[j]); axpy(d, al[j] - b, S[j]); }
-    let slope = dot(g, d);
-    if (slope >= 0) { for (let j = 0; j < L; j++) d[j] = -g[j]; slope = dot(g, d); S.length = Y.length = 0; }
+    let slope = dotG(g, d);
+    if (slope >= 0) { for (let k = 0; k < K; k++) d[k] = -g[idx[k]]; slope = dotG(g, d); S.length = Y.length = 0; }
     let t = 1, E2;
     for (let tries = 0; tries < 30; tries++, t /= 2) {
-      for (let j = 0; j < L; j++) X2[j] = x[j] + t * d[j];
+      for (let k = 0; k < K; k++) X2[idx[k]] = x[idx[k]] + t * d[k];
       if (project) project(X2);
       E2 = f(X2, g2);
       if (E2 <= E + 1e-4 * t * slope) break;
     }
     if (!(E2 < E)) break;
-    const s = new Float64Array(L), y = new Float64Array(L);
-    for (let j = 0; j < L; j++) { s[j] = X2[j] - x[j]; y[j] = g2[j] - g[j]; }
+    const s = new Float64Array(K), y = new Float64Array(K);
+    for (let k = 0; k < K; k++) { s[k] = X2[idx[k]] - x[idx[k]]; y[k] = g2[idx[k]] - g[idx[k]]; }
     if (dot(s, y) > 1e-12) { S.push(s); Y.push(y); if (S.length > mem) { S.shift(); Y.shift(); } }
     x.set(X2); g.set(g2);
     const done = E - E2 < 1e-10 * Math.abs(E);
