@@ -7,8 +7,9 @@
 // it) about the turn's middle. A zoom is the camera into the third (its triangle onto the whole's),
 // the smallest triangles that come back in growing into their places as it goes.
 //
-// The turns are circles, as the tori's are: one through the corners of every triangle's middle (its
-// ring), and one round each third (the third); a press on a circle's line drags it.
+// The turns are circles, as the tori's are, in the middle of the triangle they turn (as drawn in the
+// issue): the inner one its ring, the outer one the whole triangle; a press on a circle's line drags
+// it. A dot at the very middle zooms in on that triangle.
 import { inkPattern } from "./tile-view.mjs";
 import { faceTextures } from "./puzzle.mjs";
 
@@ -72,12 +73,18 @@ export class SierView {
     this.P.addr.forEach((a, i) => { if (inTri(p, G[i]) && (best === null || a.length > this.P.addr[best].length)) best = i; });
     return best;
   }
-  // every turn's circle, on screen: { axis, layer, x, y, r }. A ring's through the corners of its
-  // triangle's middle; a third's round the third (through its corners)
+  // a middle's inner circle's radius on screen (the inverted triangle's: it touches its sides)
+  inRadius(C) { const M = middleOf(C), m = this.toScreen(centerOf(M)), a = this.toScreen(M[1]), b = this.toScreen(M[2]); return Math.abs((b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x)) / Math.hypot(b.x - a.x, b.y - a.y); }
+  // every turn's circle, on screen: { axis, layer, x, y, r }: in its triangle's middle, the ring's
+  // inside the whole triangle's
   circles() {
     const { P } = this, G = this.places(), out = [];
-    const round = (C, axis, layer) => { const m = this.toScreen(centerOf(C)), q = this.toScreen(C[0]); out.push({ axis, layer, x: m.x, y: m.y, r: Math.hypot(q.x - m.x, q.y - m.y) }); };
-    P.axes.forEach((ax, h) => { if (ax.kind !== "hole") return; const C = G[P.index(ax.p)]; if (ax.ring) round(middleOf(C), h, 0); if (ax.depth === 1) round(C, h, 1); });
+    P.axes.forEach((ax, h) => {
+      if (ax.kind !== "hole") return;
+      const C = G[P.index(ax.p)], m = this.toScreen(centerOf(C)), r = this.inRadius(C);
+      if (ax.ring) out.push({ axis: h, layer: 0, x: m.x, y: m.y, r: (ax.layers > 1 ? 0.48 : 0.7) * r });
+      if (ax.layers > 1) out.push({ axis: h, layer: 1, x: m.x, y: m.y, r: 0.8 * r });
+    });
     return out;
   }
   // the circle whose line passes nearest a point, within tol px: { axis, layer, px (how near) }, or null
@@ -94,8 +101,9 @@ export class SierView {
   dotAt(px, py) {
     const h = this.holeAt(px, py);
     if (h === null || h === 0) return null;
-    const M = middleOf(this.places()[this.P.index(this.P.middles[h])]), m = this.toScreen(centerOf(M)), q = this.toScreen(M[0]);
-    return Math.hypot(px - m.x, py - m.y) < 0.45 * Math.hypot(q.x - m.x, q.y - m.y) ? h : null;
+    // (the dot's own zone: inside the inner circle, if any, or most of the middle)
+    const C = this.places()[this.P.index(this.P.middles[h])], m = this.toScreen(centerOf(C)), r = this.inRadius(C), inner = this.circles().find((q) => q.x === m.x && q.y === m.y);
+    return Math.hypot(px - m.x, py - m.y) < (inner ? 0.25 * r : 0.6 * r) ? h : null;
   }
   // a middle on screen (h: its index in P.middles)
   holeCenter(h) { return this.toScreen(centerOf(this.places()[this.P.index(this.P.middles[h])])); }
@@ -149,15 +157,16 @@ export class SierView {
       ctx.restore();
     }
   }
-  // the turns' circles: thin dark lines, the one hovered or turning lit as the tori light theirs
-  // (yellow over black)
+  // the turns' circles: black, as drawn in the issue, the one hovered or turning lit as the tori
+  // light theirs (yellow over black)
   drawCircles(hover) {
     const { ctx } = this;
     ctx.save();
     for (const c of this.circles()) {
       ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 2 * Math.PI);
-      if (hover && hover.axis === c.axis && hover.layer === c.layer) { ctx.lineWidth = 5; ctx.strokeStyle = BODY; ctx.stroke(); ctx.lineWidth = 2.6; ctx.strokeStyle = HOVER; ctx.stroke(); }
-      else { ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(10, 11, 14, 0.6)"; ctx.stroke(); }
+      const w = Math.max(1.5, Math.min(3.5, c.r * 0.09));
+      if (hover && hover.axis === c.axis && hover.layer === c.layer) { ctx.lineWidth = w + 2.4; ctx.strokeStyle = BODY; ctx.stroke(); ctx.lineWidth = w; ctx.strokeStyle = HOVER; ctx.stroke(); }
+      else { ctx.lineWidth = w; ctx.strokeStyle = BODY; ctx.stroke(); }
     }
     ctx.restore();
   }
@@ -165,9 +174,9 @@ export class SierView {
   drawDots(hover) {
     const { ctx, P } = this;
     for (let h = 1; h < P.middles.length; h++) {
-      const c = this.holeCenter(h), r = Math.max(2.5, Math.min(5, (this.scale / 2 ** P.middles[h].length) * 0.035));
+      const c = this.holeCenter(h), r = Math.max(2.5, Math.min(6, this.inRadius(this.places()[P.index(P.middles[h])]) * 0.12));
       ctx.beginPath(); ctx.arc(c.x, c.y, h === hover ? r + 1.5 : r, 0, 2 * Math.PI);
-      ctx.fillStyle = h === hover ? HOVER : "rgba(10, 11, 14, 0.38)";
+      ctx.fillStyle = h === hover ? HOVER : BODY;
       ctx.fill();
     }
   }
