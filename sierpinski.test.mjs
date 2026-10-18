@@ -18,14 +18,15 @@ test("a turn three times is nothing, a zoom L times is nothing; and what each ta
   for (const L of [3, 4]) {
     const P = build(L);
     for (let axis = 0; axis < P.axes.length; axis++) for (let layer = 0; layer < P.axes[axis].layers; layer++) {
+      if (P.axes[axis].kind === "hole" && layer === 0 && !P.axes[axis].ring) continue; // (a third's ring on 3 levels: empty)
       const m = { axis, layer, q: 1 };
       assert.ok(isId(play(P, Array(P.axes[axis].order).fill(m))), `${L} levels, axis ${axis} layer ${layer}`);
       assert.ok(!isId(play(P, [m])), `${L} levels, axis ${axis} layer ${layer}: moves something`);
     }
   }
   const P = build(4);
-  assert.equal(moved(play(P, [{ axis: 0, layer: 0, q: 1 }])), 21); // (the whole's ring: its thirds, 6 ninths, 12 smallest)
-  assert.equal(moved(play(P, [{ axis: 1, layer: 0, q: 1 }])), 9); // (a third's ring)
+  assert.equal(moved(play(P, [{ axis: 0, layer: 0, q: 1 }])), 24); // (the whole's ring: the 6 ninths touching its middle, and the 18 inside them; its thirds stay)
+  assert.equal(moved(play(P, [{ axis: 1, layer: 0, q: 1 }])), 6); // (a third's ring: its 6 smallest touching its middle)
   assert.equal(moved(play(P, [{ axis: 1, layer: 1, q: 1 }])), 12); // (a third turned: all inside it)
 });
 
@@ -61,7 +62,7 @@ test("scrambles undo, and scramble, with zooms, rings and third turns in them", 
   }
 });
 
-test("a commutator: the whole's ring and the top third's, each then back, moves 11", () => {
+test("a commutator: the whole's ring and the top third's, each then back, moves 10", () => {
   const P = build(4), a = { axis: 0, layer: 0, q: 1 }, b = { axis: 1, layer: 0, q: 1 };
-  assert.equal(moved(play(P, [a, b, { ...a, q: -1 }, { ...b, q: -1 }])), 11);
+  assert.equal(moved(play(P, [a, b, { ...a, q: -1 }, { ...b, q: -1 }])), 10);
 });

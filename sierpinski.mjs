@@ -11,9 +11,10 @@
 // adds 1 to every digit below it.
 //
 // The moves:
-//   - a ring (round the middle of any triangle with thirds): every triangle inside it touching its
-//     middle (its thirds, and down each third's edge that faces the middle: p c r, r with no c),
-//     turned a third about the middle;
+//   - a ring (round the middle of the whole or a third, or any triangle two levels above the
+//     smallest): the six triangles two levels inside it that touch its middle (p c x, x not c: each
+//     third's two facing the middle), everything inside them with them, turned a third about the
+//     middle (its thirds stay);
 //   - a third, or the whole, turned as a whole (everything inside it with it);
 //   - a zoom into a third, in or out. A triangle as a column of L digits mod 3, its address then a 1
 //     then 0s (up to sign: scaled so its last nonzero digit is 1); zooming into the top third shifts
@@ -48,21 +49,24 @@ export function buildSier(spec, L = spec.levels) {
   // a turn about triangle p, a third: every digit after p + 1, on the triangles inside p `take` picks
   // (given what's after p)
   const turn = (p, take) => Int32Array.from(addr, (a, i) => (a.length > p.length && within(p, a) && take(a.slice(p.length)) ? index(a.map((x, j) => (j < p.length ? x : (x + 1) % 3))) : i));
-  const ring = (p) => turn(p, (r) => r.slice(1).every((x) => x !== r[0]));
+  const ring = (p) => turn(p, (r) => r.length >= 2 && r[1] !== r[0]);
   const whole = (p) => turn(p, () => true);
   // zooms: see the top
   const fromColumn = (w) => { let j = w.length - 1; while (!w[j]) j--; const s = w[j] === 1 ? 1 : 2; return w.slice(0, j).map((x) => (x * s) % 3); };
   const zoom0 = (a) => { const v = [...a, 1, ...Array(L - 1 - a.length).fill(0)]; return fromColumn([...v.slice(1), v[0]]); };
   const spin = (a, c) => a.map((x) => mod(x + c, 3));
   const zoomPerm = (c) => Int32Array.from(addr, (a) => index(spin(zoom0(spin(a, -c)), c)));
-  // (by level: the whole first, then the thirds, axes 1 to 3)
-  const holes = addr.filter((a) => a.length < L - 1).sort((a, b) => a.length - b.length);
+  // the middles (every triangle with thirds: a tap there zooms in on it), by level, the whole's first;
+  // and the turns' triangles: those with a ring, or the whole and the thirds (turned as a whole:
+  // axes 0 to 3; a third's ring is empty on 3 levels, ring: false)
+  const middles = addr.filter((a) => a.length < L - 1).sort((a, b) => a.length - b.length);
+  const holes = middles.filter((a) => a.length <= Math.max(1, L - 3));
   const axes = [
-    ...holes.map((p, h) => ({ kind: "hole", p, depth: p.length, order: 3, layers: p.length <= 1 ? 2 : 1, h })),
+    ...holes.map((p, h) => ({ kind: "hole", p, depth: p.length, order: 3, layers: p.length <= 1 ? 2 : 1, ring: p.length <= L - 3, h })),
     ...[0, 1, 2].map((c) => ({ kind: "zoom", c, order: L, layers: 1 })),
   ];
   const perms = axes.map((ax) => (ax.kind === "zoom" ? [zoomPerm(ax.c)] : [ring(ax.p), ...(ax.layers > 1 ? [whole(ax.p)] : [])]));
-  const P = { kind: "sierpinski", spec: { ...spec, levels: L }, L, n: L, N, addr, index, within, holes, axes, perms };
+  const P = { kind: "sierpinski", spec: { ...spec, levels: L }, L, n: L, N, addr, index, within, middles, holes, axes, perms };
   P.zoomAxes = [0, 1, 2].map((c) => axes.length - 3 + c);
   // each triangle's color (sierpinski-view.mjs's palette of 13): the whole white, the thirds 3, the
   // ninths 9, and smaller ones the color of the third they're the corner of (so each three of them
@@ -115,7 +119,7 @@ export function sierScrambleMoves(P, count = 10 + 6 * P.L, rand = Math.random) {
     let m;
     if (r < 0.2) m = { axis: P.zoomAxes[Math.floor(rand() * 3)], layer: 0, q };
     else if (r < 0.4) m = { axis: 1 + Math.floor(rand() * 3), layer: 1, q }; // (the thirds: axes 1 to 3)
-    else m = { axis: Math.floor(rand() * P.holes.length), layer: 0, q };
+    else { const rings = P.axes.filter((a) => a.ring); m = { axis: P.axes.indexOf(rings[Math.floor(rand() * rings.length)]), layer: 0, q }; }
     if (m.axis === last) continue;
     moves.push(m);
     last = m.axis;

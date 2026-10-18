@@ -251,8 +251,14 @@
     body.nx-custom #reference { display: none; }
     body.nx-custom .nx-moves, body.nx-custom .nx-side { display: none; }
     #sierZoom[hidden] { display: none; }
-    .sier-zoom { position: fixed; z-index: 4; display: flex; gap: 4px; }
-    .sier-zoom .btn { width: 34px; height: 34px; padding: 0; font: 600 1.1rem var(--font-mono); }
+    /* (floating marks, not buttons: a + and a − by each corner) */
+    .sier-zoom-btn {
+      position: fixed; z-index: 4; width: 36px; height: 36px; padding: 0; display: grid; place-items: center;
+      background: none; border: 0; border-radius: 50%; cursor: pointer;
+      font: 500 1.9rem/1 var(--font-ui); color: var(--muted); transition: color .15s, transform .15s;
+    }
+    .sier-zoom-btn:hover { color: var(--accent); transform: scale(1.15); }
+    .sier-zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .ed-hint { display: none; }
     body.nx-custom .ed-hint {
       display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 9px 14px; min-height: 40px;
@@ -512,12 +518,12 @@
   <canvas id="bg"></canvas>
   <canvas id="c"></canvas>
   <canvas id="plane" hidden></canvas>
-  <!-- the Sierpinski puzzle's zooms: + and − by each corner of its triangle, zooming in on, or out
-       from, that corner's third (placed by placeSierZoom) -->
+  <!-- the Sierpinski puzzle's zooms: by each corner of its triangle, + just past it and − further
+       out, floating, zooming in on that corner's third or back out (placed by placeSierZoom) -->
   <div id="sierZoom" hidden>
-    <div class="sier-zoom" data-c="0"><button class="btn" data-q="1" title="zoom in on the top third">+</button><button class="btn" data-q="-1" title="zoom out: the whole the top third again">−</button></div>
-    <div class="sier-zoom" data-c="1"><button class="btn" data-q="1" title="zoom in on the bottom left third">+</button><button class="btn" data-q="-1" title="zoom out: the whole the bottom left third again">−</button></div>
-    <div class="sier-zoom" data-c="2"><button class="btn" data-q="1" title="zoom in on the bottom right third">+</button><button class="btn" data-q="-1" title="zoom out: the whole the bottom right third again">−</button></div>
+    <button class="sier-zoom-btn" data-c="0" data-q="1" title="zoom in on the top third" aria-label="zoom in on the top third">+</button><button class="sier-zoom-btn" data-c="0" data-q="-1" title="zoom out: the whole the top third again" aria-label="zoom out from the top third">−</button>
+    <button class="sier-zoom-btn" data-c="1" data-q="1" title="zoom in on the bottom left third" aria-label="zoom in on the bottom left third">+</button><button class="sier-zoom-btn" data-c="1" data-q="-1" title="zoom out: the whole the bottom left third again" aria-label="zoom out from the bottom left third">−</button>
+    <button class="sier-zoom-btn" data-c="2" data-q="1" title="zoom in on the bottom right third" aria-label="zoom in on the bottom right third">+</button><button class="sier-zoom-btn" data-c="2" data-q="-1" title="zoom out: the whole the bottom right third again" aria-label="zoom out from the bottom right third">−</button>
   </div>
   <div class="tw-split" id="rearSplit" hidden><span>front</span><span>back</span></div>
   <div class="tw-nogl" id="nogl" role="alert" hidden>
@@ -1529,9 +1535,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       statusText = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
-        : scrambled ? (isSier() ? "scrambled · drag in a middle or on a third" : isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() || isSphere() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
+        : scrambled ? (isSier() ? "scrambled · drag a circle to turn it" : isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() || isSphere() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
         : isPlanar() ? "drag a row or column to slide it"
-        : isSier() ? "drag a middle to turn its ring · drag a third · ± or tap a middle to zoom"
+        : isSier() ? "drag a circle · ± or tap a middle to zoom"
         // (what each kind's own input does: a circle's middle is a tile's, a corner's or an edge's;
         // a 3D view turns by a drag off the puzzle; the hyperbolic surface's turns are on its disk)
         : isTiles() ? `drag a circle · tap a middle${view3D ? " · drag outside to rotate" : ""}`
@@ -4211,10 +4217,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointercancel", endHyperDrag);
 
     // ---------- the Sierpinski puzzle: drawing and input ----------
-    // As drawn in issue #26: drag round inside a triangle's middle to turn its ring (the triangles
-    // touching that middle); drag on a third to turn the third (on the whole's band round the outside:
-    // the whole); + and − by each corner zoom in on that corner's third, and back out; and a tap in a
-    // middle zooms in till it's the whole's (its dot shows where): a zoom into each third on the way.
+    // As the tori's: a circle per turn, and a press on its line drags it (one through the corners of
+    // a triangle's middle turns its ring, the six triangles two levels in touching that middle; one
+    // round each third turns the third); + and − by each corner zoom in on that corner's third, and back out; and a
+    // tap in a middle zooms in till it's the whole's (its dot shows where): a zoom into each third on
+    // the way.
     const refSierView = new SierView($("refPlane"));
     let sierPress = null, sierDotHover = null; // (a press not yet a drag: { id, x, y, and h (a middle) or place }; the dot under the pointer)
     // a zoom move's steps, a zoom each, from the state now: { before, after, c, dir }
@@ -4239,12 +4246,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       tdrag.last = a;
       anim.theta = tdrag.theta;
     }
-    // the triangle a drag on a place turns: the third it's in (the middles in order: the whole's,
-    // then the thirds'), or on the whole's band, the whole
-    const sierThird = (place) => (P.addr[place].length ? 1 + P.addr[place][0] : 0);
     // zoom in till middle h is the whole's: a zoom into each third on the way down to it, one undo step
     function zoomTo(h) {
-      const moves = P.holes[h].map((c) => ({ axis: P.zoomAxes[c], layer: 0, q: 1 }));
+      const moves = P.middles[h].map((c) => ({ axis: P.zoomAxes[c], layer: 0, q: 1 }));
       if (!moves.length) return;
       flush();
       record(moves);
@@ -4252,8 +4256,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       renderTape();
       renderAlgorithms();
     }
-    for (const el of document.querySelectorAll(".sier-zoom")) for (const btn of el.querySelectorAll("button"))
-      btn.onclick = () => { if (isSier()) turnTile({ axis: P.zoomAxes[+el.dataset.c], layer: 0, q: +btn.dataset.q }); };
+    for (const btn of document.querySelectorAll(".sier-zoom-btn"))
+      btn.onclick = () => { if (isSier()) turnTile({ axis: P.zoomAxes[+btn.dataset.c], layer: 0, q: +btn.dataset.q }); };
     function drawSier() {
       const reg = viewRegions();
       let turn = null, shown = state;
@@ -4274,47 +4278,37 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
       refSierView.drawSolvedCard(P, { textures: showTextures });
     }
-    // the + and − by each corner, just outside it, as drawn in the issue: the top's to its right, the
-    // bottom ones' below and out to the side
+    // the + and − by each corner, as drawn in the issue: out along the line from the middle through
+    // the corner, the + just past it and the − further out
     function placeSierZoom() {
       $("sierZoom").hidden = false;
-      for (const el of document.querySelectorAll(".sier-zoom")) {
-        const c = +el.dataset.c, p = sierView.corner(c), w = el.offsetWidth || 72, h = el.offsetHeight || 34;
-        const [x, y] = c === 0 ? [p.x + 14, p.y - h / 2] : c === 1 ? [p.x - w - 6, p.y + 8] : [p.x + 6, p.y + 8];
-        el.style.left = Math.round(Math.max(4, Math.min(innerWidth - w - 4, x))) + "px";
-        el.style.top = Math.round(y) + "px";
+      const mid = sierView.toScreen([0, Math.sqrt(3) / 6]);
+      for (const el of document.querySelectorAll(".sier-zoom-btn")) {
+        const p = sierView.corner(+el.dataset.c), d = Math.hypot(p.x - mid.x, p.y - mid.y), ux = (p.x - mid.x) / d, uy = (p.y - mid.y) / d;
+        const out = +el.dataset.q > 0 ? 24 : 62, x = p.x + ux * out - 18, y = p.y + uy * out - 18;
+        el.style.left = Math.round(Math.max(2, Math.min(innerWidth - 38, x))) + "px";
+        el.style.top = Math.round(Math.max(2, y)) + "px";
       }
     }
     plane.addEventListener("pointerdown", (e) => {
       if (!isSier() || tdrag || e.button !== 0) return;
       const x = e.clientX, y = e.clientY;
       try { plane.setPointerCapture(e.pointerId); } catch {}
-      const h = sierView.holeAt(x, y), place = h === null ? sierView.placeAt(x, y) : null;
-      if (h !== null) sierPress = { id: e.pointerId, x, y, h };
-      else if (place !== null) sierPress = { id: e.pointerId, x, y, place };
+      // (by a middle's dot: a tap zooms; a circle's line: drag it)
+      const dot = sierView.dotAt(x, y), c = dot === null ? sierView.circleAt(x, y) : null;
+      if (dot !== null) { sierPress = { id: e.pointerId, x, y, h: dot }; return; }
+      if (c) { flush(); startSierDrag(c.axis, c.layer, x, y); tdrag.id = e.pointerId; plane.style.cursor = "grabbing"; }
     });
     plane.addEventListener("pointermove", (e) => {
       if (!isSier()) return;
       const x = e.clientX, y = e.clientY;
       if (tdrag) { if (e.pointerId === tdrag.id) dragSierTo(x, y); return; }
-      if (sierPress && e.pointerId === sierPress.id) {
-        if (Math.hypot(x - sierPress.x, y - sierPress.y) < 6) return; // (a tap, so far)
-        const pr = sierPress;
-        sierPress = null;
-        flush();
-        // (in a middle: its ring; on a third: the third)
-        if (pr.h !== undefined) startSierDrag(pr.h, 0, pr.x, pr.y);
-        else startSierDrag(sierThird(pr.place), 1, pr.x, pr.y);
-        tdrag.id = e.pointerId;
-        dragSierTo(x, y);
-        plane.style.cursor = "grabbing";
-        return;
-      }
-      // (hover: a middle lights its ring and its dot, a third lights the third)
-      const h = sierView.holeAt(x, y), place = h === null ? sierView.placeAt(x, y) : null;
-      sierDotHover = h !== null && h > 0 ? h : null;
-      tileHover = h !== null ? { axis: h, layer: 0 } : place !== null ? { axis: sierThird(place), layer: 1 } : null;
-      plane.style.cursor = h !== null || place !== null ? "grab" : "";
+      if (sierPress && e.pointerId === sierPress.id) { if (Math.hypot(x - sierPress.x, y - sierPress.y) >= 6) sierPress = null; return; } // (moved off: not a tap)
+      // (hover: a circle's line lights it, as the tori's; a middle lights its dot, a tap there zooming)
+      const dot = sierView.dotAt(x, y), c = dot === null ? sierView.circleAt(x, y) : null;
+      sierDotHover = dot;
+      tileHover = c ? { axis: c.axis, layer: c.layer } : null;
+      plane.style.cursor = c ? "grab" : sierDotHover !== null ? "pointer" : "";
     });
     function endSierPress(e) {
       if (!isSier()) return;
@@ -5815,7 +5809,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           // (past the piece limit: the limit, and whether the shape uncut is standing in; see tooMany)
           overLimit: overLimit && { limit: overLimit.limit, bare: overLimit.bare },
           ...(isSier()
-            ? { sierpinski: true, levels: P.L, pieces: P.N, holes: P.holes.length, zoomAxes: P.zoomAxes, hover: tileHover && tileHover.axis, hoverLayer: tileHover && tileHover.layer }
+            ? { sierpinski: true, levels: P.L, pieces: P.N, holes: P.middles.length, rings: P.axes.filter((a) => a.ring).length, zoomAxes: P.zoomAxes, hover: tileHover && tileHover.axis, hoverLayer: tileHover && tileHover.layer }
             : isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
@@ -5867,6 +5861,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       sierPlace(i) { sierView.layout(P, viewRegions().flat); return sierView.toScreen(sierCenter(sierCorners(P.addr[i]))); },
       // (a triangle's place by its address; a point of the plane, the whole's side 1, on screen)
       sierIndex(a) { return P.index(a); },
+      // (a turn's circle on screen: { x, y, r })
+      sierCircle(axis, layer = 0) { sierView.layout(P, viewRegions().flat); return sierView.circles().find((c) => c.axis === axis && c.layer === layer); },
       sierPoint(x, y) { sierView.layout(P, viewRegions().flat); return sierView.toScreen([x, y]); },
       hyperMiddle(axis) {
         hyperView.layout(P, viewRegions().flat);

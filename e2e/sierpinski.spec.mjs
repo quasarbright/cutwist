@@ -1,7 +1,7 @@
 // The Sierpinski puzzle (issue #26): every triangle a piece, and the puzzle holds itself. Loading
-// from the shelf, the levels stepper, and real pointer input as drawn in the issue: drag round a
-// middle (its ring), drag on a third (the third; on the whole's band, the whole), + and − by each
-// corner (zoom on that third), a tap in a middle (zoom in till it's the whole's).
+// from the shelf, the levels stepper, and real pointer input: the turns' circles dragged by their
+// lines, as the tori's (one through each middle's corners, a ring; one round each third, the third),
+// + and − by each corner (zoom on that third), a tap in a middle (zoom in till it's the whole's).
 import { test, expect } from "@playwright/test";
 import { open, info, turn, noErrors, pick } from "./helpers.mjs";
 
@@ -31,8 +31,13 @@ test("it opens from the shelf: 40 triangles on 4 levels, solved, with its solved
   await expect(page.locator("#refPlane")).toBeVisible();
   await expect(page.locator("#customize")).toBeHidden();
   for (const [c, [x, y]] of [[0, [0, Math.sqrt(3) / 2]], [1, [-0.5, 0]], [2, [0.5, 0]]]) {
-    const corner = await page.evaluate(({ x, y }) => window.cutwist.sierPoint(x, y), { x, y }), box = await page.locator(`.sier-zoom[data-c="${c}"]`).boundingBox();
-    expect(Math.hypot(box.x + box.width / 2 - corner.x, box.y + box.height / 2 - corner.y), `corner ${c}'s buttons by it`).toBeLessThan(80);
+    const corner = await page.evaluate(({ x, y }) => window.cutwist.sierPoint(x, y), { x, y }), mid = await page.evaluate(() => window.cutwist.sierPoint(0, Math.sqrt(3) / 6));
+    const at = async (q) => { const b = await page.locator(`.sier-zoom-btn[data-c="${c}"][data-q="${q}"]`).boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+    const plus = await at(1), minus = await at(-1), far = (p) => Math.hypot(p.x - mid.x, p.y - mid.y), cd = far(corner);
+    // (the + just past the corner, the − further out, both along the line from the middle)
+    expect(far(plus), `corner ${c}: + past it`).toBeGreaterThan(cd);
+    expect(far(minus), `corner ${c}: − further`).toBeGreaterThan(far(plus) + 20);
+    expect(Math.hypot(plus.x - corner.x, plus.y - corner.y), `corner ${c}: + by it`).toBeLessThan(40);
   }
   await expect(page.locator("#paramControls")).not.toContainText("zoom"); // (none by the size control)
 });
@@ -43,44 +48,48 @@ test("the levels stepper: 3 or 4 levels, in the link", async ({ page }) => {
   expect(new URL(page.url()).searchParams.get("levels")).toBe("3");
 });
 
-test("dragging round the white middle turns its ring: 21 triangles; hovering lights it; and back", async ({ page }) => {
-  const c = await page.evaluate(() => window.cutwist.sierHole(0));
-  await fire(page, "pointermove", { x: c.x + 20, y: c.y + 20 });
+// (a circle's line, a little round from its right: off where circles meet at the middles' corners)
+const onLine = (c, a = 0.4) => ({ x: c.x + c.r * Math.cos(a), y: c.y - c.r * Math.sin(a) });
+
+test("dragging the white middle's circle turns its ring: the 6 ninths touching it (24 triangles with what's in them), not the thirds; hovering its line lights it; and back", async ({ page }) => {
+  const c = await page.evaluate(() => window.cutwist.sierCircle(0, 0));
+  await fire(page, "pointermove", onLine(c));
   expect(await info(page)).toMatchObject({ hover: 0, hoverLayer: 0 });
-  await dragRound(page, c, { x: c.x + 40, y: c.y }, 1 / 3);
-  expect(moved(await state(page))).toBe(21);
+  await dragRound(page, c, onLine(c), 1 / 3);
+  const s = await state(page);
+  expect(moved(s)).toBe(24);
+  for (const t of [[0], [1], [2]]) { const i = await index(page, t); expect(s[i], `third ${t} stays`).toBe(i); }
   expect(await info(page)).toMatchObject({ moves: 1, solved: false });
-  await dragRound(page, c, { x: c.x + 40, y: c.y }, -1 / 3);
+  await dragRound(page, c, onLine(c), -1 / 3);
   expect(moved(await state(page))).toBe(0);
 });
 
-test("dragging on a third turns the third; on the whole's band, the whole (still solved)", async ({ page }) => {
-  // (the top third's top triangle, round the top third's middle)
-  const p = await page.evaluate(async () => window.cutwist.sierPlace(window.cutwist.sierIndex([0, 0, 0]))), c = await page.evaluate(() => window.cutwist.sierHole(1));
-  await dragRound(page, c, p, 1 / 3);
+test("dragging a third's circle turns the third, and only the third; a drag off every circle turns nothing", async ({ page }) => {
+  const c = await page.evaluate(() => window.cutwist.sierCircle(1, 1));
+  await dragRound(page, c, onLine(c, 2.2), 1 / 3);
   const s = await state(page), inThird = await page.evaluate(() => window.cutwist.state.map((_, i) => i).filter((i) => window.cutwist.sierIndex([0]) <= i && i <= window.cutwist.sierIndex([0, 2, 2])));
   expect(moved(s)).toBe(12);
   expect(s.every((v, i) => v === i || inThird.includes(i))).toBe(true);
   await turn(page, [1, 1, -1]);
-  // (the band round the outside, near the bottom edge's middle)
-  const band = await page.evaluate(() => window.cutwist.sierPoint(0, 0.008)), mid = await page.evaluate(() => window.cutwist.sierHole(0));
-  await dragRound(page, mid, band, 1 / 3);
-  expect(moved(await state(page))).toBe(39);
-  expect((await info(page)).solved).toBe(true);
+  // (from inside the white middle, away from every line)
+  const mid = await page.evaluate(() => window.cutwist.sierHole(0));
+  await dragRound(page, mid, { x: mid.x + 8, y: mid.y + 8 }, 1 / 3);
+  expect(moved(await state(page))).toBe(0);
+  expect((await info(page)).moves).toBe(2);
 });
 
 test("+ by a corner zooms in on its third (its triangles each up a level), − back out; 4 zooms on 4 levels is where it started", async ({ page }) => {
   for (const c of [0, 1, 2]) {
-    await page.click(`.sier-zoom[data-c="${c}"] [data-q="1"]`);
+    await page.click(`.sier-zoom-btn[data-c="${c}"][data-q="1"]`);
     await idle(page);
     const s = await state(page);
     for (const t of [[], [0], [1, 2], [2, 0]]) expect(s[await index(page, t)], `third ${c}: ${t}`).toBe(await index(page, [c, ...t]));
     expect((await info(page)).solved).toBe(false);
-    await page.click(`.sier-zoom[data-c="${c}"] [data-q="-1"]`);
+    await page.click(`.sier-zoom-btn[data-c="${c}"][data-q="-1"]`);
     await idle(page);
     expect(moved(await state(page))).toBe(0);
   }
-  for (let k = 0; k < 4; k++) { await page.click('.sier-zoom[data-c="2"] [data-q="1"]'); await idle(page); }
+  for (let k = 0; k < 4; k++) { await page.click('.sier-zoom-btn[data-c="2"][data-q="1"]'); await idle(page); }
   expect(moved(await state(page))).toBe(0);
   await expect(page.locator(".nx-moves .nx-mark").first()).toContainText("+");
 });
@@ -125,9 +134,11 @@ test("on a phone: the triangle and its zoom buttons fit, under the title and ove
   expect(top.y).toBeGreaterThan(name.y + name.height);
   expect(left.y).toBeLessThan(tape.y);
   for (const c of [0, 1, 2]) {
-    const b = await page.locator(`.sier-zoom[data-c="${c}"]`).boundingBox();
-    expect(b.x).toBeGreaterThanOrEqual(0);
-    expect(b.x + b.width).toBeLessThanOrEqual(375);
-    expect(b.y + b.height).toBeLessThan(tape.y);
+    for (const q of [1, -1]) {
+      const b = await page.locator(`.sier-zoom-btn[data-c="${c}"][data-q="${q}"]`).boundingBox();
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width).toBeLessThanOrEqual(375);
+      expect(b.y + b.height).toBeLessThan(tape.y);
+    }
   }
 });

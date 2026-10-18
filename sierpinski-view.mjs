@@ -6,6 +6,9 @@
 // middle. A turn turns what shows of each piece it carries (its band and middle; the smallest, all of
 // it) about the turn's middle. A zoom is the camera into the third (its triangle onto the whole's),
 // the smallest triangles that come back in growing into their places as it goes.
+//
+// The turns are circles, as the tori's are: one through the corners of every triangle's middle (its
+// ring), and one round each third (the third); a press on a circle's line drags it.
 import { inkPattern } from "./tile-view.mjs";
 import { faceTextures } from "./puzzle.mjs";
 
@@ -56,10 +59,10 @@ export class SierView {
   toPlane(px, py) { return [(px - this.ox) / this.scale, (this.oy - py) / this.scale]; }
 
   // ---- hit testing (CSS px) ----
-  // the triangle whose middle a point is in (a ring's place: its index in P.holes), or null
+  // the triangle whose middle a point is in (its index in P.middles), or null
   holeAt(px, py) {
     const p = this.toPlane(px, py), G = this.places();
-    for (let h = 0; h < this.P.holes.length; h++) if (inTri(p, middleOf(G[this.P.index(this.P.holes[h])]))) return h;
+    for (let h = 0; h < this.P.middles.length; h++) if (inTri(p, middleOf(G[this.P.index(this.P.middles[h])]))) return h;
     return null;
   }
   // the smallest place a point is in (in its band or its middle, or all of it), or null
@@ -69,8 +72,33 @@ export class SierView {
     this.P.addr.forEach((a, i) => { if (inTri(p, G[i]) && (best === null || a.length > this.P.addr[best].length)) best = i; });
     return best;
   }
-  // a hole's middle on screen (h: its index in P.holes)
-  holeCenter(h) { return this.toScreen(centerOf(this.places()[this.P.index(this.P.holes[h])])); }
+  // every turn's circle, on screen: { axis, layer, x, y, r }. A ring's through the corners of its
+  // triangle's middle; a third's round the third (through its corners)
+  circles() {
+    const { P } = this, G = this.places(), out = [];
+    const round = (C, axis, layer) => { const m = this.toScreen(centerOf(C)), q = this.toScreen(C[0]); out.push({ axis, layer, x: m.x, y: m.y, r: Math.hypot(q.x - m.x, q.y - m.y) }); };
+    P.axes.forEach((ax, h) => { if (ax.kind !== "hole") return; const C = G[P.index(ax.p)]; if (ax.ring) round(middleOf(C), h, 0); if (ax.depth === 1) round(C, h, 1); });
+    return out;
+  }
+  // the circle whose line passes nearest a point, within tol px: { axis, layer, px (how near) }, or null
+  circleAt(px, py, tol = 10) {
+    let best = null;
+    for (const c of this.circles()) {
+      const d = Math.abs(Math.hypot(px - c.x, py - c.y) - c.r);
+      if (d < tol && (!best || d < best.px)) best = { axis: c.axis, layer: c.layer, px: d };
+    }
+    return best;
+  }
+  // the middle whose dot a point is near (a tap there zooms, winning over a circle's line, as the
+  // tori's tap zones win round a middle): within 45% of its ring's circle's radius of its middle, or null
+  dotAt(px, py) {
+    const h = this.holeAt(px, py);
+    if (h === null || h === 0) return null;
+    const M = middleOf(this.places()[this.P.index(this.P.middles[h])]), m = this.toScreen(centerOf(M)), q = this.toScreen(M[0]);
+    return Math.hypot(px - m.x, py - m.y) < 0.45 * Math.hypot(q.x - m.x, q.y - m.y) ? h : null;
+  }
+  // a middle on screen (h: its index in P.middles)
+  holeCenter(h) { return this.toScreen(centerOf(this.places()[this.P.index(this.P.middles[h])])); }
   // the whole's corners on screen (the zoom buttons go by them)
   corner(c) { return this.toScreen(ROOT[c]); }
 
@@ -87,8 +115,8 @@ export class SierView {
     this.dpr = dpr;
     if (turn && turn.zoom) { this.drawZoom(turn.zoom, look); return; }
     this.paint(state, turn && turn.places ? turn : null, look);
-    if (look.hover) this.drawHover(look.hover, turn && turn.places ? turn : null);
     if (look.dots !== false) this.drawDots(look.dotHover ?? null);
+    if (look.circles !== false) this.drawCircles(look.hover);
   }
   // the puzzle: places still, bigger first (each covered by its thirds but for its band and middle),
   // then what's turning: what shows of each, turned
@@ -121,25 +149,23 @@ export class SierView {
       ctx.restore();
     }
   }
-  // what a move takes, lit as the tori light a circle: yellow over black, round each place it takes
-  drawHover({ axis, layer }, turn) {
-    const { ctx, P } = this, ax = P.axes[axis];
-    if (!ax || ax.kind !== "hole") return;
-    const G = this.places(), path = new Path2D();
-    if (layer) this.tri(G[P.index(ax.p)], path);
-    else for (const i of P.moving(axis, 0)) this.tri(G[i], path);
+  // the turns' circles: thin dark lines, the one hovered or turning lit as the tori light theirs
+  // (yellow over black)
+  drawCircles(hover) {
+    const { ctx } = this;
     ctx.save();
-    if (turn) { const c = this.toScreen(turn.center); ctx.translate(c.x, c.y); ctx.rotate(-turn.theta); ctx.translate(-c.x, -c.y); }
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 4; ctx.strokeStyle = BODY; ctx.stroke(path);
-    ctx.lineWidth = 2; ctx.strokeStyle = HOVER; ctx.stroke(path);
+    for (const c of this.circles()) {
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 2 * Math.PI);
+      if (hover && hover.axis === c.axis && hover.layer === c.layer) { ctx.lineWidth = 5; ctx.strokeStyle = BODY; ctx.stroke(); ctx.lineWidth = 2.6; ctx.strokeStyle = HOVER; ctx.stroke(); }
+      else { ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(10, 11, 14, 0.6)"; ctx.stroke(); }
+    }
     ctx.restore();
   }
   // the zoom dots, in every middle but the whole's (a tap there zooms in till it's the whole's)
   drawDots(hover) {
     const { ctx, P } = this;
-    for (let h = 1; h < P.holes.length; h++) {
-      const c = this.holeCenter(h), r = Math.max(2.5, Math.min(5, (this.scale / 2 ** P.holes[h].length) * 0.035));
+    for (let h = 1; h < P.middles.length; h++) {
+      const c = this.holeCenter(h), r = Math.max(2.5, Math.min(5, (this.scale / 2 ** P.middles[h].length) * 0.035));
       ctx.beginPath(); ctx.arc(c.x, c.y, h === hover ? r + 1.5 : r, 0, 2 * Math.PI);
       ctx.fillStyle = h === hover ? HOVER : "rgba(10, 11, 14, 0.38)";
       ctx.fill();
@@ -172,6 +198,6 @@ export class SierView {
     const W = w - 2 * pad, H = h - top - pad;
     this.scale = Math.min(W, (H * 2) / Math.sqrt(3));
     this.ox = w / 2; this.oy = top + H / 2 + (this.scale * Math.sqrt(3)) / 4;
-    this.draw(Int32Array.from({ length: P.N }, (_, i) => i), null, { textures: look.textures, dots: false });
+    this.draw(Int32Array.from({ length: P.N }, (_, i) => i), null, { textures: look.textures, dots: false, circles: false });
   }
 }
