@@ -10,6 +10,11 @@
 // The turns are circles, as the tori's are, in the middle of the triangle they turn (as drawn in the
 // issue): the inner one its ring, the outer one the whole triangle; a press on a circle's line drags
 // it. A dot at the very middle zooms in on that triangle.
+//
+// The puzzle holds itself, so each smallest triangle shows a copy of the whole puzzle inside its band,
+// as it is now, turning as it turns (as the tori show copies round the patch); the copies hold copies,
+// down to a few pixels. A zoom brings other triangles in there than the copies show: the copies fade
+// as the camera goes in, and the triangles coming in grow into their places.
 import { inkPattern } from "./tile-view.mjs";
 import { faceTextures } from "./puzzle.mjs";
 
@@ -56,7 +61,8 @@ export class SierView {
   }
   // every place's corners (plane), once a puzzle
   places() { return (this.geo ??= this.P.addr.map((a) => cornersOf(a))); }
-  toScreen([x, y]) { return { x: this.ox + x * this.scale, y: this.oy - y * this.scale }; }
+  // (xf: while a copy's drawn, the plane map from the whole onto the copy; see copy)
+  toScreen([x, y]) { const f = this.xf; if (f) [x, y] = [f[0] * x + f[2] * y + f[4], f[1] * x + f[3] * y + f[5]]; return { x: this.ox + x * this.scale, y: this.oy - y * this.scale }; }
   toPlane(px, py) { return [(px - this.ox) / this.scale, (this.oy - py) / this.scale]; }
 
   // ---- hit testing (CSS px) ----
@@ -130,14 +136,32 @@ export class SierView {
   // then what's turning: what shows of each, turned
   paint(state, turn, look) {
     const { P, ctx } = this, G = this.places(), moving = turn ? turn.places : null;
-    const order = P.addr.map((_, i) => i).sort((i, j) => P.addr[i].length - P.addr[j].length);
-    for (const i of order) if (!moving || !moving.has(i)) this.fill(this.tri(G[i]), state[i], look, look.lit && look.lit.has(i));
+    const order = P.addr.map((_, i) => i).sort((i, j) => P.addr[i].length - P.addr[j].length), smallest = (i) => P.addr[i].length === P.L - 1;
+    for (const i of order) if (!moving || !moving.has(i)) { this.fill(this.tri(G[i]), state[i], look, look.lit && look.lit.has(i)); if (smallest(i)) this.copy(G[i], state, turn, look); }
     if (!moving) return;
     ctx.save();
     const c = this.toScreen(turn.center);
     ctx.translate(c.x, c.y); ctx.rotate(-turn.theta); ctx.translate(-c.x, -c.y);
-    for (const i of order) if (moving.has(i)) this.fill(this.shown(G[i], P.addr[i].length === P.L - 1), state[i], look, look.lit && look.lit.has(i));
+    for (const i of order) if (moving.has(i)) { this.fill(this.shown(G[i], smallest(i)), state[i], look, look.lit && look.lit.has(i)); if (smallest(i)) this.copy(G[i], state, turn, look); }
     ctx.restore();
+  }
+  // a copy of the whole puzzle in a smallest triangle's place C (plane), inside its band: the same
+  // state and turn, drawn with the plane mapped onto it; none once it's under 10 px across
+  copy(C, state, turn, look) {
+    const alpha = look.copyAlpha ?? 1, T = shrink(C, K), a = this.toScreen(T[1]), b = this.toScreen(T[2]);
+    if (alpha <= 0 || Math.hypot(b.x - a.x, b.y - a.y) < 10) return;
+    // (the map: (x, y) of the whole onto T, from the whole's corners onto T's; then the copy's own map)
+    const [p0, p1, p2] = ROOT, [q0, q1, q2] = T, det = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
+    const A = (q1[0] - q0[0]) * (p2[1] - p0[1]) - (q2[0] - q0[0]) * (p1[1] - p0[1]), B = (q2[0] - q0[0]) * (p1[0] - p0[0]) - (q1[0] - q0[0]) * (p2[0] - p0[0]);
+    const Cc = (q1[1] - q0[1]) * (p2[1] - p0[1]) - (q2[1] - q0[1]) * (p1[1] - p0[1]), Dd = (q2[1] - q0[1]) * (p1[0] - p0[0]) - (q1[1] - q0[1]) * (p2[0] - p0[0]);
+    const m = [A / det, Cc / det, B / det, Dd / det], e = q0[0] - m[0] * p0[0] - m[2] * p0[1], f = q0[1] - m[1] * p0[0] - m[3] * p0[1];
+    const outer = this.xf, cur = outer || [1, 0, 0, 1, 0, 0];
+    this.xf = [cur[0] * m[0] + cur[2] * m[1], cur[1] * m[0] + cur[3] * m[1], cur[0] * m[2] + cur[2] * m[3], cur[1] * m[2] + cur[3] * m[3], cur[0] * e + cur[2] * f + cur[4], cur[1] * e + cur[3] * f + cur[5]];
+    const ga = this.ctx.globalAlpha;
+    this.ctx.globalAlpha = ga * alpha;
+    this.paint(state, turn, { ...look, lit: null, copyAlpha: 1 });
+    this.ctx.globalAlpha = ga;
+    this.xf = outer;
   }
   // a triangle as a path (screen)
   tri(C, path = new Path2D()) { const q = C.map((p) => this.toScreen(p)); path.moveTo(q[0].x, q[0].y); path.lineTo(q[1].x, q[1].y); path.lineTo(q[2].x, q[2].y); path.closePath(); return path; }
@@ -192,9 +216,14 @@ export class SierView {
     const k = s ** v, sc = this.toScreen([fx, fy]);
     ctx.save();
     ctx.translate(sc.x, sc.y); ctx.scale(k, k); ctx.translate(-sc.x, -sc.y);
-    this.paint(from, null, look);
+    this.paint(from, null, { ...look, copyAlpha: 1 - v });
     const g = Math.min(1, v * 1.15);
-    if (g > 0) P.addr.forEach((a, i) => { if (a.length === L - 1) this.fill(this.tri(shrink(cornersOf([c, ...a]), g)), to[i], look); });
+    if (g > 0) P.addr.forEach((a, i) => {
+      if (a.length !== L - 1) return;
+      const C = shrink(cornersOf([c, ...a]), g);
+      this.fill(this.tri(C), to[i], look);
+      this.copy(C, to, null, { ...look, copyAlpha: v });
+    });
     ctx.restore();
   }
 
