@@ -137,7 +137,14 @@ export class SierView {
   paint(state, turn, look) {
     const { P, ctx } = this, G = this.places(), moving = turn ? turn.places : null;
     const order = P.addr.map((_, i) => i).sort((i, j) => P.addr[i].length - P.addr[j].length), smallest = (i) => P.addr[i].length === P.L - 1;
-    for (const i of order) if (!moving || !moving.has(i)) { this.fill(this.tri(G[i]), state[i], look, look.lit && look.lit.has(i)); if (smallest(i)) this.copy(G[i], state, turn, look); }
+    // (a zoom's fade: everything outside the third it goes into, alpha look.fade.alpha)
+    const ga = ctx.globalAlpha, outside = (i) => look.fade && P.addr[i][0] !== look.fade.c;
+    for (const i of order) if (!moving || !moving.has(i)) {
+      if (outside(i)) ctx.globalAlpha = ga * look.fade.alpha;
+      this.fill(this.tri(G[i]), state[i], look, look.lit && look.lit.has(i));
+      if (smallest(i)) this.copy(G[i], state, turn, look);
+      ctx.globalAlpha = ga;
+    }
     if (!moving) return;
     ctx.save();
     const c = this.toScreen(turn.center);
@@ -159,7 +166,7 @@ export class SierView {
     this.xf = [cur[0] * m[0] + cur[2] * m[1], cur[1] * m[0] + cur[3] * m[1], cur[0] * m[2] + cur[2] * m[3], cur[1] * m[2] + cur[3] * m[3], cur[0] * e + cur[2] * f + cur[4], cur[1] * e + cur[3] * f + cur[5]];
     const ga = this.ctx.globalAlpha;
     this.ctx.globalAlpha = ga * alpha;
-    this.paint(state, turn, { ...look, lit: null, copyAlpha: 1 });
+    this.paint(state, turn, { ...look, lit: null, copyAlpha: 1, fade: null });
     this.ctx.globalAlpha = ga;
     this.xf = outer;
   }
@@ -216,7 +223,8 @@ export class SierView {
     const k = s ** v, sc = this.toScreen([fx, fy]);
     ctx.save();
     ctx.translate(sc.x, sc.y); ctx.scale(k, k); ctx.translate(-sc.x, -sc.y);
-    this.paint(from, null, { ...look, copyAlpha: 1 - v });
+    // (the rest of the puzzle, round the third, fading out as the camera goes in: gone as it gets there)
+    this.paint(from, null, { ...look, copyAlpha: 1 - v, fade: { c, alpha: 1 - v } });
     const g = Math.min(1, v * 1.15);
     if (g > 0) P.addr.forEach((a, i) => {
       if (a.length !== L - 1) return;
