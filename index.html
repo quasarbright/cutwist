@@ -801,6 +801,8 @@
     } from "./hyper.mjs";
     import { HyperView, hyperColor, hyperTexturesByDefault } from "./hyper-view.mjs";
     import { PIECE_LIMITS, TooManyPieces } from "./budget.mjs";
+    import { SIER_PRESETS, buildSier, solvedSierState, applySierMove, inverseSierMove, isSierSolved, sierScrambleMoves } from "./sierpinski.mjs";
+    import { SierView, cornersOf as sierCorners, centerOf as sierCenter, sierColors } from "./sierpinski-view.mjs";
     import { surfaceMesh as hyperSurfaceMesh, implicitSurface, unpackShape } from "./hyper-surface.mjs";
     import { buildSphere, isSpherical, sphereGeometry, regionShape, sphereStats, sphereSnapCandidates, sphereCountBreaks, SPHERE_RADIUS_RANGE, ROUND_PRESETS, roundCuts, sphereRegularTrims } from "./sphere.mjs";
 
@@ -1364,8 +1366,10 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const isHyper = () => !!P && P.kind === "hyper";
     // (a round one, sphere.mjs: a solid as far as turning goes, with curved stickers)
     const isSphere = () => !!P && P.kind === "sphere";
-    function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles" || P.kind === "hyper"); } // (hoisted: the camera asks before this line runs)
-    const has3D = () => !isHyper() || !!hyperShape();
+    // (the Sierpinski puzzle, sierpinski.mjs: flat, drawn by sierpinski-view.mjs; no 3D view)
+    const isSier = () => !!P && P.kind === "sierpinski";
+    function isFlat() { return !!P && (P.kind === "planar" || P.kind === "tiles" || P.kind === "hyper" || P.kind === "sierpinski"); } // (hoisted: the camera asks before this line runs)
+    const has3D = () => !isSier() && (!isHyper() || !!hyperShape());
     // A hyperbolic surface's shape in space (hyper-surface.mjs: a pretzel, the tiles laid on it ahead
     // of time by data/add-shapes.mjs into regular-maps/shapes/, which index.json lists): its mesh and
     // the surface to draw, or null (none kept for it); undefined while it's still to come. load()
@@ -1392,11 +1396,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         if (shape) done();
       });
     };
-    const applyAny = (s, m) => (isPlanar() ? applyPlanarMove(P, s, m) : isTiles() ? applyTileMove(P, s, m) : isHyper() ? applyHyperMove(P, s, m) : applyMove(P, s, m));
-    const inverseAny = (m) => (isPlanar() ? inversePlanarMove(P, m) : isTiles() ? inverseTileMove(P, m) : isHyper() ? inverseHyperMove(P, m) : inverseMove(P, m));
-    const solvedAny = (s) => (isPlanar() ? isPlanarSolved(P, s) : isTiles() ? isTileSolved(P, s) : isHyper() ? isHyperSolved(P, s) : isSolved(P, s));
-    const freshState = () => (isPlanar() ? solvedPlanarState(P) : isTiles() ? solvedTileState(P) : isHyper() ? solvedHyperState(P) : solvedState(P));
-    const randomScramble = () => (isPlanar() ? planarScrambleMoves(P) : isTiles() ? tileScrambleMoves(P) : isHyper() ? hyperScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
+    const applyAny = (s, m) => (isSier() ? applySierMove(P, s, m) : isPlanar() ? applyPlanarMove(P, s, m) : isTiles() ? applyTileMove(P, s, m) : isHyper() ? applyHyperMove(P, s, m) : applyMove(P, s, m));
+    const inverseAny = (m) => (isSier() ? inverseSierMove(P, m) : isPlanar() ? inversePlanarMove(P, m) : isTiles() ? inverseTileMove(P, m) : isHyper() ? inverseHyperMove(P, m) : inverseMove(P, m));
+    const solvedAny = (s) => (isSier() ? isSierSolved(P, s) : isPlanar() ? isPlanarSolved(P, s) : isTiles() ? isTileSolved(P, s) : isHyper() ? isHyperSolved(P, s) : isSolved(P, s));
+    const freshState = () => (isSier() ? solvedSierState(P) : isPlanar() ? solvedPlanarState(P) : isTiles() ? solvedTileState(P) : isHyper() ? solvedHyperState(P) : solvedState(P));
+    const randomScramble = () => (isSier() ? sierScrambleMoves(P) : isPlanar() ? planarScrambleMoves(P) : isTiles() ? tileScrambleMoves(P) : isHyper() ? hyperScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
 
     // ---------- turning: animation queue ----------
     // anim is the layer currently turning: { axis, pieces, theta, ... }. A queued turn
@@ -1420,6 +1424,20 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const e = queue.shift(), { axis, layer } = e.move, qs = signedTurn(P, e.move.q, axis), fast = queue.length > 1 ? 0.45 : 1;
         anim = { axis, layer, move: e.move, theta: 0, from: 0, to: (qs * TAU) / P.axes[axis].order, t: 0,
                  dur: e.dur ?? (130 + 90 * Math.abs(qs)) * fast, pieces: tilePiecesInLayer(P, state, axis, layer) };
+        return;
+      }
+      if (isSier()) {
+        // a ring or a triangle round its hole: as a disk's, counterclockwise for q > 0. A zoom: theta
+        // the zooms done so far, from 0 to |q|, one at a time (see sierZoomTurn)
+        const e = queue.shift(), { axis, layer } = e.move, ax = P.axes[axis], fast = queue.length > 1 ? 0.45 : 1;
+        if (ax.kind === "zoom") {
+          const k = Math.abs(e.move.q);
+          anim = { axis, layer, move: e.move, theta: 0, from: 0, to: k, t: 0, dur: e.dur ?? Math.min(1400, 520 * k) * fast, zoom: sierZoomSteps(e.move) };
+          return;
+        }
+        const qs = signedQ(((e.move.q % 3) + 3) % 3, 3);
+        anim = { axis, layer, move: e.move, theta: 0, from: 0, to: (qs * TAU) / 3, t: 0, dur: e.dur ?? (130 + 90 * Math.abs(qs)) * fast,
+                 places: new Set(P.moving(axis, layer)), center: sierCenter(sierCorners(ax.p)) };
         return;
       }
       if (isHyper()) {
@@ -1501,8 +1519,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       statusText = solved ? `solved · ${n}`
         : history.length ? n
         : scrambled && !idle ? "scrambling…"
-        : scrambled ? (isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() || isSphere() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
+        : scrambled ? (isSier() ? "scrambled · drag round a hole or a triangle" : isPlanar() ? "scrambled · drag a row or column" : isTiles() || isHyper() || isSphere() ? "scrambled · drag a circle to turn it" : "scrambled · drag a sticker to turn")
         : isPlanar() ? "drag a row or column to slide it"
+        : isSier() ? "drag round a hole or a triangle · tap a hole · tap a dot to zoom in"
         // (what each kind's own input does: a circle's middle is a tile's, a corner's or an edge's;
         // a 3D view turns by a drag off the puzzle; the hyperbolic surface's turns are on its disk)
         : isTiles() ? `drag a circle · tap a middle${view3D ? " · drag outside to rotate" : ""}`
@@ -2040,7 +2059,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     }
 
     // the menu: the 3D presets, then the sliding ones, then the tile-turning ones
-    const MENU = [...PRESETS, ...PLANAR_PRESETS, ...TILE_PRESETS, ...HYPER_PRESETS, ...ROUND_PRESETS];
+    const MENU = [...PRESETS, ...PLANAR_PRESETS, ...TILE_PRESETS, ...HYPER_PRESETS, ...ROUND_PRESETS, ...SIER_PRESETS];
     let presetIdx = 0, size = MENU[0].size;
     // a family's own numbers (a cuboid's lengths, a prism's sides), over the preset's defaults
     let paramVals = {};
@@ -2158,6 +2177,17 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           renderParams();
         }));
       }
+      if (spec.rule === "sierpinski") host.append(zoomRow());
+    }
+    // the Sierpinski puzzle's zoom: out (−) and in (+), as moves (the dots in its holes zoom in on one)
+    function zoomRow() {
+      const row = document.createElement("div");
+      row.className = "control";
+      row.innerHTML = `<div class="control-head"><span class="name" title="zoom in on the top third, or back out: the puzzle holds itself as many levels down as it has, so zooming in that many times comes back round. A tap on a hole's dot zooms in on that hole">zoom</span></div>
+        <div class="tw-size"><button class="btn" id="zoomOut" title="zoom out a level">− out</button><button class="btn" id="zoomIn" title="zoom in on the top third">in +</button></div>`;
+      row.querySelector("#zoomOut").onclick = () => { if (isSier()) turnTile({ axis: P.zoomAxis, layer: 0, q: -1 }); };
+      row.querySelector("#zoomIn").onclick = () => { if (isSier()) turnTile({ axis: P.zoomAxis, layer: 0, q: 1 }); };
+      return row;
     }
     // A −/+ row for a number: its value now (value()), and what to do with a new one, in range and
     // different (set)
@@ -2212,7 +2242,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // (planar puzzles have no limit: their grids' sizes are capped by their steppers)
     // (a test sets smaller limits, before the page loads, to try them on small puzzles)
     if (window.cutwistLimits) Object.assign(PIECE_LIMITS, window.cutwistLimits);
-    const limitType = (spec) => (spec.rule === "planar" ? null : spec.rule === "tiles" ? "tiles" : isRound(spec) ? "sphere" : spec.rule === "hyper" ? "hyper" : "solid");
+    const limitType = (spec) => (spec.rule === "planar" || spec.rule === "sierpinski" ? null : spec.rule === "tiles" ? "tiles" : isRound(spec) ? "sphere" : spec.rule === "hyper" ? "hyper" : "solid");
     const LIMIT_WHERE = { solid: "a solid", sphere: "a ball", tiles: "a torus", hyper: "a hyperbolic surface" };
     let overLimit = null; // { limit, type }: the design showing in the editor and the link is past it
     let unlimited = false; // (build anyway: no limit till a build comes in under it again)
@@ -2221,7 +2251,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let shownShape = ""; // the shape of the puzzle up (shapeKey)
     function buildAny(spec, limit, n = size) {
       const opts = { limit };
-      return spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec, opts) : isRound(spec) ? buildSphere(roundSpec(spec), opts)
+      return spec.rule === "sierpinski" ? buildSier(spec) : spec.rule === "planar" ? buildPlanar(spec) : spec.rule === "tiles" ? buildTiles(spec, opts) : isRound(spec) ? buildSphere(roundSpec(spec), opts)
         : spec.rule === "hyper" ? buildHyper(withCuts(spec), hyperFileFor(spec), opts) : buildPuzzle(spec, n, opts);
     }
     // everything about a puzzle but its cuts, blacked-out pieces and size: its shape
@@ -2336,7 +2366,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       document.body.classList.toggle("nx-planar", isFlat()); // (the view options)
       $("refPlane").hidden = !isFlat();
       if (puzzleGroup) puzzleGroup.visible = !isFlat();
-      tileHover = null; tdrag = null; tilePointer = null; hpan = null;
+      tileHover = null; tdrag = null; tilePointer = null; hpan = null; sierPress = null; sierDotHover = null;
       if (isHyper() && resetView) hyperView.recenter();
       showViews(resetView);
       renderShapeChoice();
@@ -3402,7 +3432,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // free and draws it. Drag a cell along its row or column to slide that line; it follows
     // the pointer, wrapping across the glued edges, and snaps to whole cells on release (one
     // move). The arrows at each line's ends slide it one cell; the axes button hides them.
-    const plane = $("plane"), planeView = new PlanarView(plane), tileView = new TileView(plane), hyperView = new HyperView(plane);
+    const plane = $("plane"), planeView = new PlanarView(plane), tileView = new TileView(plane), hyperView = new HyperView(plane), sierView = new SierView(plane);
     // look: planarPicture stays loaded after switching back to colors, so picture needs no re-upload
     let showLabels = true, reflectLabels = true, planarTextures = false, planarPicture = null, usePicture = false, hoverArrow = null, pdrag = null;
     function safeRect() {
@@ -3434,7 +3464,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (w >= h && !phone.matches) { const m = r.left + w / 2; return { flat: { ...r, right: m }, surface: { ...r, left: m } }; }
       // (stacked: the grid gets the height its width calls for, up to 65%; the surface, wider
       // than it is tall, the rest)
-      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, (isHyper() ? hyperView : isTiles() ? tileView : planeView).heightFor(P, w)));
+      const m = r.top + Math.max(h / 2, Math.min(0.65 * h, (isSier() ? sierView : isHyper() ? hyperView : isTiles() ? tileView : planeView).heightFor(P, w)));
       return { flat: { ...r, bottom: m }, surface: { ...r, top: m } };
     }
     function cameraRegion() { return isFlat() && view3D && has3D() ? viewRegions().surface : null; }
@@ -3448,6 +3478,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       planeView.origin = { x: r.left, y: r.top };
       tileView.origin = { x: r.left, y: r.top };
       hyperView.origin = { x: r.left, y: r.top };
+      sierView.origin = { x: r.left, y: r.top };
     }
     function applyViews() {
       $("viewFlat").checked = viewFlat;
@@ -3994,7 +4025,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (!tdrag) return;
       if (anim && anim.live) {
         const step = TAU / P.axes[tdrag.axis].order, qs = Math.round(anim.theta / step);
-        const move = { axis: tdrag.axis, layer: tdrag.layer, q: isHyper() ? signedQ(((qs % P.axes[tdrag.axis].order) + P.axes[tdrag.axis].order) % P.axes[tdrag.axis].order, P.axes[tdrag.axis].order) : signedTurn(P, qs, tdrag.axis) };
+        const move = { axis: tdrag.axis, layer: tdrag.layer, q: isHyper() || isSier() ? signedQ(((qs % P.axes[tdrag.axis].order) + P.axes[tdrag.axis].order) % P.axes[tdrag.axis].order, P.axes[tdrag.axis].order) : signedTurn(P, qs, tdrag.axis) };
         Object.assign(anim, { live: false, move, from: anim.theta, to: qs * step, t: 0,
                               dur: 90 + 160 * Math.min(1, Math.abs(qs * step - anim.theta) / step) });
         if (move.q) record([move]);
@@ -4179,10 +4210,138 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointerup", endHyperDrag);
     plane.addEventListener("pointercancel", endHyperDrag);
 
+    // ---------- the Sierpinski puzzle: drawing and input ----------
+    // Drag round a hole to turn its ring (the small triangles touching it), or from a small triangle
+    // round the middle of a triangle it's in to turn that whole triangle (of the ones it's in, the
+    // one the drag goes round best); tap a hole to turn its ring a step clockwise (right click:
+    // counterclockwise), as a tile's middle; tap the dot in a hole to zoom in till that hole is the
+    // middle one.
+    const refSierView = new SierView($("refPlane"));
+    let sierPress = null, sierDotHover = null; // (a press not yet a drag: { id, x, y, and dot, h or place }; the dot under the pointer)
+    // a zoom move's steps, from the state now: { before, after, dir, c (the third the camera goes
+    // into, or comes out of) } each. Its layer: the hole zoomed in on, its address as a number, so
+    // the camera goes that way (a zoom by the buttons: the top third every time)
+    function sierZoomSteps(move) {
+      const k = Math.abs(move.q), dir = Math.sign(move.q), path = [];
+      for (let j = 0, l = move.layer; j < k; j++, l = Math.floor(l / 3)) path.unshift(l % 3);
+      const steps = [];
+      let s = state.slice();
+      for (let j = 0; j < k; j++) {
+        const after = applySierMove(P, s.slice(), { axis: P.zoomAxis, layer: 0, q: dir });
+        steps.push({ before: s, after, dir, c: dir > 0 ? path[j] : path[k - 1 - j] });
+        s = after;
+      }
+      return steps;
+    }
+    const aroundSier = (c, x, y) => Math.atan2(-(y - c.y), x - c.x); // (counterclockwise on screen)
+    function startSierDrag(axis, layer, x, y) {
+      const center = sierCenter(sierCorners(P.axes[axis].p)), c = sierView.toScreen(center);
+      tdrag = { axis, layer, c, last: aroundSier(c, x, y), theta: 0 };
+      anim = { live: true, axis, layer, move: null, theta: 0, places: new Set(P.moving(axis, layer)), center };
+      tileHover = { axis, layer };
+    }
+    function dragSierTo(x, y) {
+      if (!tdrag || !anim || !anim.live) return;
+      if (Math.hypot(x - tdrag.c.x, y - tdrag.c.y) < 3) return; // (right at the middle the angle jumps around)
+      const a = aroundSier(tdrag.c, x, y);
+      tdrag.theta += ((a - tdrag.last + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+      tdrag.last = a;
+      anim.theta = tdrag.theta;
+    }
+    // the triangle a drag from a small triangle turns: of those it's in (its hole's index), the one
+    // the drag so far goes round most evenly (its distance from that middle the steadiest, as a
+    // share of it): a tight arc round a small triangle, a wide one round a big triangle
+    function sierTriangleFor(place, path) {
+      const d = P.addr[place];
+      let best = null;
+      for (let k = 0; k < P.n; k++) {
+        const h = P.holes.findIndex((p) => p.length === k && p.every((v, j) => v === d[j])), c = sierView.holeCenter(h);
+        const r = path.map((q) => Math.hypot(q.x - c.x, q.y - c.y)), mean = r.reduce((a, b) => a + b) / r.length;
+        const spread = Math.sqrt(r.reduce((a, b) => a + (b - mean) ** 2, 0) / r.length) / (mean || 1);
+        if (!best || spread < best.spread) best = { h, spread };
+      }
+      return best.h;
+    }
+    // zoom in till hole h is the middle one: as many zooms as it is deep, the camera that way
+    function zoomTo(h) {
+      const p = P.holes[h];
+      if (p.length) turnTile({ axis: P.zoomAxis, layer: p.reduce((s, x) => s * 3 + x, 0), q: p.length });
+    }
+    function drawSier() {
+      const reg = viewRegions();
+      let turn = null, shown = state;
+      if (anim && anim.zoom) {
+        const j = Math.min(anim.zoom.length - 1, Math.floor(anim.theta)), step = anim.zoom[j];
+        turn = { zoom: { ...step, u: Math.min(1, anim.theta - j) } };
+        shown = step.before;
+      } else if (anim && anim.places) turn = { places: anim.places, center: anim.center, theta: anim.theta };
+      const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit: algLit, litAlpha: litPulse(), textures: showTextures, dotHover: sierDotHover };
+      plane.hidden = false;
+      canvas.hidden = true;
+      placePlane(reg.flat);
+      sierView.layout(P, reg.flat);
+      sierView.draw(shown, turn, look);
+      placeSplit();
+      const card = $("refPlane"), dpr = pixelRatio();
+      card.hidden = false;
+      if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
+      refSierView.drawSolvedCard(P, { textures: showTextures });
+    }
+    plane.addEventListener("pointerdown", (e) => {
+      if (!isSier() || tdrag) return;
+      const x = e.clientX, y = e.clientY;
+      try { plane.setPointerCapture(e.pointerId); } catch {}
+      const dot = sierView.dotAt(x, y), h = dot === null ? sierView.holeAt(x, y) : null, place = dot === null && h === null ? sierView.placeAt(x, y) : null;
+      const path = [{ x, y }];
+      if (dot !== null) sierPress = { id: e.pointerId, x, y, path, dot, button: e.button };
+      else if (h !== null) sierPress = { id: e.pointerId, x, y, path, h, button: e.button };
+      else if (place !== null && e.button === 0) sierPress = { id: e.pointerId, x, y, path, place, button: 0 };
+    });
+    plane.addEventListener("pointermove", (e) => {
+      if (!isSier()) return;
+      const x = e.clientX, y = e.clientY;
+      if (tdrag) { if (e.pointerId === tdrag.id) dragSierTo(x, y); return; }
+      if (sierPress && e.pointerId === sierPress.id) {
+        sierPress.path.push({ x, y });
+        // (a small triangle's drag goes some way first, to tell which triangle it goes round)
+        if (Math.hypot(x - sierPress.x, y - sierPress.y) < (sierPress.place === undefined ? 6 : 16)) return;
+        const pr = sierPress;
+        sierPress = null;
+        if (pr.button !== 0) return;
+        flush();
+        // (from a hole, or its dot: its ring; from a small triangle: a triangle it's in)
+        if (pr.place === undefined) startSierDrag(pr.dot ?? pr.h, 0, pr.x, pr.y);
+        else startSierDrag(sierTriangleFor(pr.place, pr.path), 1, pr.x, pr.y);
+        tdrag.id = e.pointerId;
+        dragSierTo(x, y);
+        plane.style.cursor = "grabbing";
+        return;
+      }
+      // (hover: a hole lights its ring; a dot lights itself, as a tap there zooms)
+      const dot = sierView.dotAt(x, y), h = dot === null ? sierView.holeAt(x, y) : null;
+      sierDotHover = dot;
+      tileHover = h !== null ? { axis: h, layer: 0 } : null;
+      plane.style.cursor = dot !== null ? "pointer" : h !== null || sierView.placeAt(x, y) !== null ? "grab" : "";
+    });
+    function endSierPress(e) {
+      if (!isSier()) return;
+      if (tdrag && e.pointerId === tdrag.id) { releaseTileDrag(); plane.style.cursor = "grab"; return; }
+      const pr = sierPress;
+      sierPress = null;
+      if (!pr || pr.id !== e.pointerId || e.type === "pointercancel") return;
+      if (pr.dot !== undefined && pr.button === 0) { zoomTo(pr.dot); return; }
+      // (a tap in a hole: its ring a step, clockwise; right click, counterclockwise)
+      const hole = pr.dot ?? pr.h;
+      if (hole !== undefined && (pr.button === 0 || pr.button === 2)) turnTile({ axis: hole, layer: 0, q: pr.button === 0 ? -1 : 1 });
+    }
+    plane.addEventListener("pointerup", endSierPress);
+    plane.addEventListener("pointercancel", endSierPress);
+
     const refView = new PlanarView($("refPlane"));
     function drawPlanar() {
       if (isTiles()) { drawTiles(); return; }
       if (isHyper()) { drawHyper(); return; }
+      if (isSier()) { drawSier(); return; }
       const reg = viewRegions();
       plane.hidden = !reg.flat;
       canvas.hidden = !reg.surface;
@@ -4294,7 +4453,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointercancel", endPlanarDrag);
     plane.addEventListener("pointerleave", () => {
       hoverArrow = null;
-      if (!tdrag) { tileHover = null; tilePointer = null; }
+      if (!tdrag) { tileHover = null; tilePointer = null; sierDotHover = null; }
       if (isTiles() && hoverType !== null) setHover(null);
     });
     plane.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -5196,6 +5355,25 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         el.textContent = (m.axis === 0 ? String(m.layer + 1) : String.fromCharCode(65 + m.layer)) + arrow + (n > 1 ? n : "");
         return el;
       }
+      if (isSier()) {
+        // a zoom: in (+) or out (−), and how many; a turn: the colors of the triangle it's round (a
+        // pie of them), ▲ under it for the whole triangle, and counterclockwise as the disk's is
+        const ax = P.axes[m.axis];
+        if (ax.kind === "zoom") {
+          el.classList.add("is-slide");
+          el.textContent = (m.q > 0 ? "+" : "−") + (Math.abs(m.q) > 1 ? Math.abs(m.q) : "");
+          el.title = m.q > 0 ? "zoom in" : "zoom out";
+          return el;
+        }
+        const q = -signedQ(((m.q % 3) + 3) % 3, 3), suffix = (Math.abs(q) > 1 ? String(Math.abs(q)) : "") + (q < 0 ? "′" : "");
+        const groups = [...new Set(P.addr.flatMap((d, i) => (P.within(ax.p, d) ? [P.colorOf[i]] : [])))], colors = groups.map((g) => sierColors(P).colors[g]), k = colors.length;
+        const dot = document.createElement("i");
+        dot.style.background = k === 1 ? colors[0] : `conic-gradient(${colors.map((c, j) => `${c} ${(j * 360) / k}deg ${((j + 1) * 360) / k}deg`).join(", ")})`;
+        if (m.layer) el.append(Object.assign(document.createElement("sub"), { textContent: "▲" }));
+        el.append(dot);
+        if (suffix) el.append(Object.assign(document.createElement("sup"), { textContent: suffix }));
+        return el;
+      }
       if (isTiles() || isHyper()) {
         // a tile's middle: its color; a corner or an edge: a pie of the tiles around it; a ring
         // past the first circle: its number before the dot (a hyperbolic turn: counterclockwise
@@ -5345,6 +5523,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // the shelf: every puzzle as a picture, by family; clicking one loads it
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
+      if (spec.rule === "sierpinski") return "fractals";
       if (spec.rule === "tiles") return { hex: "hexagon tilings", square: "square tilings", triangle: "triangle tilings" }[spec.tiling];
       if (spec.rule === "hyper") return isRound(spec) ? "sphere tilings" : "hyperbolic tilings";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
@@ -5364,6 +5543,11 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const Q = buildTiles(snapTiles(spec)), v = new TileView(cv);
         v.layout(Q, { left: 6, top: 6, right: S - 6, bottom: S - 6 });
         v.draw(solvedTileState(Q), null, { hover: null, lit: null });
+        return (nxThumbs[spec.id] = cv.toDataURL());
+      }
+      if (spec.rule === "sierpinski") {
+        // the triangle, solved
+        new SierView(cv).drawSolvedCard(buildSier(spec), {}, 4);
         return (nxThumbs[spec.id] = cv.toDataURL());
       }
       if (spec.rule === "hyper" && !isRound(spec)) {
@@ -5623,7 +5807,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         flush();
         // (a planar slide keeps its sign and size: q cells right/down, or left/up if negative;
         // a tile turn too: q steps clockwise, or counterclockwise if negative)
-        const move = { axis, layer, q: isPlanar() || isTiles() || isHyper() ? q : mod(q, P.axes[axis].order) };
+        const move = { axis, layer, q: isPlanar() || isTiles() || isHyper() || isSier() ? q : mod(q, P.axes[axis].order) };
         record([move]);
         play(move);
         renderTape();
@@ -5642,7 +5826,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           id: isCustom() ? "custom" : MENU[presetIdx].id, title: puzzleName, size, rear: rearOn(),
           // (past the piece limit: the limit, and whether the shape uncut is standing in; see tooMany)
           overLimit: overLimit && { limit: overLimit.limit, bare: overLimit.bare },
-          ...(isPlanar()
+          ...(isSier()
+            ? { sierpinski: true, levels: P.n, pieces: P.N, holes: P.holes.length, zoomAxis: P.zoomAxis, hover: tileHover && tileHover.axis, hoverLayer: tileHover && tileHover.layer }
+            : isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
             : isTiles()
@@ -5688,6 +5874,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const w = mobius.apply(mobius.to(copy.at), [Math.tanh(radius / 2) * Math.cos(angle), Math.tanh(radius / 2) * Math.sin(angle)]);
         return hyperView.toScreen(w);
       },
+      // the Sierpinski puzzle: where hole h's middle (and its dot) is, and small triangle place i's, on screen
+      sierHole(h) { sierView.layout(P, viewRegions().flat); return sierView.holeCenter(h); },
+      sierPlace(i) { sierView.layout(P, viewRegions().flat); return sierView.toScreen(sierCenter(sierCorners(P.addr[i]))); },
       hyperMiddle(axis) {
         hyperView.layout(P, viewRegions().flat);
         const copy = hyperView.axisCopies(P.axes[axis].kind).filter((c) => c.axis === axis).sort((a, b) => Math.hypot(...a.at) - Math.hypot(...b.at))[0];
