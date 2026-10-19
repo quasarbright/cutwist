@@ -95,10 +95,13 @@ export class PlanarView {
     roundRect(ctx, this.ox - c * 0.03, this.oy - c * 0.03, P.W * c + c * 0.06, P.H * c + c * 0.06, c * 0.1);
     ctx.fill();
     if (!P.letters) this.drawCopies(slots, look); // (none round Permutle's words)
+    ctx.save();
+    if (P.letters) { ctx.beginPath(); ctx.rect(this.ox, this.oy, P.W * c, P.H * c); ctx.clip(); }
     for (let i = 0; i < P.n; i++) {
       const at = { x: i % P.W, y: Math.floor(i / P.W) };
       this.drawSlot(slots[i], this.ox + at.x * c, this.oy + at.y * c, c, 0, look, at);
     }
+    ctx.restore();
     if (look.lit) this.drawLit(look.lit, this.ox, this.oy, c, look.litAlpha);
     if (!P.letters) this.drawCoordinates();
     if (look.arrows) this.drawArrows(look.hover);
@@ -207,7 +210,8 @@ export class PlanarView {
   // what each grid cell shows: [{ v (piece*4 + orientation), dx, dy }], offsets in cells
   slots(state, slide) {
     const P = this.P;
-    const slots = Array.from({ length: P.n }, (_, i) => [{ v: state[i], dx: 0, dy: 0 }]);
+    // (from: the cell it's in in the state, while it slides out of it)
+    const slots = Array.from({ length: P.n }, (_, i) => [{ v: state[i], dx: 0, dy: 0, from: i }]);
     if (!slide || !slide.p) return slots;
     const { cells, flips } = loop(P, slide.axis, slide.layer), L = cells.length;
     for (const i of cells) slots[i] = [];
@@ -222,7 +226,7 @@ export class PlanarView {
       const u = i + slide.p, m0 = Math.floor(u), f = u - m0, v = state[cellIdx];
       for (const [m, off] of [[m0, f], [m0 + 1, f - 1]]) {
         if (off <= -1 || off >= 1) continue;
-        const d = { v: v ^ flipsBetween(i, m), dx: 0, dy: 0 };
+        const d = { v: v ^ flipsBetween(i, m), dx: 0, dy: 0, from: cellIdx };
         if (slide.axis === 0) d.dx = off; else d.dy = off;
         slots[cells[mod(m, L)]].push(d);
       }
@@ -238,11 +242,13 @@ export class PlanarView {
     ctx.translate(x, y);
     ctx.scale(c, c);
     mirror(ctx, flip);
-    ctx.beginPath(); ctx.rect(0, 0, 1, 1); ctx.clip();
+    // (Permutle's tiles aren't cut at the cell's edge, which would show a seam across one sliding
+    // through: each half draws the whole tile, in the same place, and the grid's edge clips them)
+    if (!this.P.letters) { ctx.beginPath(); ctx.rect(0, 0, 1, 1); ctx.clip(); }
     for (const d of slot) {
       ctx.save();
       ctx.translate(d.dx, d.dy);
-      this.drawPiece(pieceOf(d.v), orientOf(d.v), look, c, at, flip);
+      this.drawPiece(pieceOf(d.v), orientOf(d.v), look, c, at, flip, Math.floor(d.from / this.P.W));
       ctx.restore();
     }
     ctx.restore();
@@ -251,11 +257,12 @@ export class PlanarView {
   // a piece in the unit square, in its own frame: mirrored by its orientation. at: the grid
   // cell it's in (null: nowhere in particular, as in the solved thumbnail). seam: the mirror
   // the wrapped copies are drawn with, so an upright label can undo it.
-  drawPiece(piece, orient, look, c, at = null, seam = 0) {
+  // row: the row it's in in the state (it may be sliding out of it), for Permutle's green
+  drawPiece(piece, orient, look, c, at = null, seam = 0, row = at ? at.y : null) {
     const { ctx, P } = this;
     const hx = piece % P.W, hy = Math.floor(piece / P.W);
     const inset = 0.03, r = 0.1; // the gap between neighbors is twice the inset
-    if (P.letters) { this.drawLetter(P.letters[piece], at, look, inset, r); return; }
+    if (P.letters) { this.drawLetter(P.letters[piece], row, look, inset, r); return; }
     mirror(ctx, orient);
     ctx.save();
     roundRect(ctx, inset, inset, 1 - 2 * inset, 1 - 2 * inset, r);
@@ -285,11 +292,12 @@ export class PlanarView {
   }
 
   // A Permutle tile in the unit square: its letter, on gray, or green as far as the row it's in
-  // (at: the grid cell) has turned green (look.rowGlow: 0 to 1 per row, eased by the page; no
-  // cell: look.glowAll). Drawn 100× larger and scaled down, as the labels are.
-  drawLetter(letter, at, look, inset, r) {
+  // has turned green (look.rowGlow: 0 to 1 per row, eased by the page; no row: look.glowAll).
+  // The tile carries its row's green while it slides out of the row. Drawn 100× larger and
+  // scaled down, as the labels are.
+  drawLetter(letter, row, look, inset, r) {
     const { ctx } = this, K = 100;
-    const g = at && look.rowGlow ? look.rowGlow[at.y] ?? 0 : look.glowAll ?? 0;
+    const g = row !== null && look.rowGlow ? look.rowGlow[row] ?? 0 : look.glowAll ?? 0;
     const mix = TILE.map((v, i) => Math.round(v + (WORD_TILE[i] - v) * g));
     roundRect(ctx, inset, inset, 1 - 2 * inset, 1 - 2 * inset, r);
     ctx.fillStyle = `rgb(${mix.join(",")})`;
