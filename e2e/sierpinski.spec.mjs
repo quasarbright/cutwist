@@ -51,7 +51,7 @@ test("it opens from the shelf on 2 levels: 4 pieces, solved, every ring a move, 
 test("the levels stepper: 2 to 4 levels, in the link", async ({ page }) => {
   const less = page.locator("#paramControls .control", { hasText: "levels" }).getByRole("button", { name: "−" });
   await less.click();
-  expect(await info(page)).toMatchObject({ levels: 3, pieces: 13, title: "3-level Sierpinski Zoom" });
+  expect(await info(page)).toMatchObject({ levels: 3, pieces: 13, title: "3-level Sierpinski" });
   expect(new URL(page.url()).searchParams.get("levels")).toBe("3");
   await less.click();
   expect(await info(page)).toMatchObject({ levels: 2, pieces: 4, rings: 4, holes: 4 });
