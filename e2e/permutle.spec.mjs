@@ -26,15 +26,19 @@ test("it opens from the shelf already dealt: no row a word, flat only, no solved
   await expect(page.locator(".nx-viewbtn")).toBeHidden();
   await expect(page.locator("#paramControls .control")).toHaveCount(0);
   await expect(page.locator("#scramble")).toHaveText("new puzzle");
-  await expect(page.locator("#shareWords")).toBeHidden();
+  await expect(page.locator("#shareWords")).toBeVisible(); // (from the start)
   await expect(page.locator(".nx-empty")).toHaveText("make every row a word · drag a row or column"); // (the empty tape)
   expect(new URL(page.url()).searchParams.get("letters")).toBe(s.letters);
+  // (no share on the other puzzles)
+  await pick(page, "sliding-torus");
+  await expect(page.locator("#shareWords")).toBeHidden();
 });
 
 test("a link's letters are the start; rows go green; solved, share gives the colors and that start", async ({ page }) => {
   await openGrid(page, DEALT);
   expect(await info(page)).toMatchObject({ rows: ["RRANE", "SLIDE", "CEVER", "SOUND", "YOLVE"], wordRows: [false, true, false, true, false], solved: false });
-  await expect(page.locator("#shareWords")).toBeHidden(); // (till it's solved)
+  // (before it's solved, the gray rows too)
+  expect(await page.evaluate(() => window.cutwist.wordsResult())).toMatch(/^Permutle\n⬛{5}\n🟩{5}\n⬛{5}\n🟩{5}\n⬛{5}\n0 moves/u);
   await turn(page, [1, 0, -2]);
   expect((await info(page)).wordRows).toEqual([true, true, false, true, true]);
   await turn(page, [0, 2, -1]);

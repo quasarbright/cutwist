@@ -636,8 +636,8 @@
     <button class="nx-act" id="redo" title="redo a turn you undid (⇧⌘Z)">redo ↷</button>
     <button class="nx-act" id="scramble" title="mix the puzzle up with random turns">scramble</button>
     <button class="nx-act" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
-    <!-- (Permutle, solved: the grid's colors as emoji, like Wordle's) -->
-    <button class="nx-act" id="shareWords" title="copy your result: the grid's colors as emoji, your moves and time, and a link to these words" hidden>share</button>
+    <!-- (Permutle: the grid's colors as emoji, like Wordle's) -->
+    <button class="nx-act" id="shareWords" title="copy your result: the grid's colors as emoji, your moves and time, and a link to this start" hidden>share</button>
   </div>
 
   <!-- the shelf: every puzzle as a picture, dropping down from the name -->
@@ -1546,7 +1546,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         : isHyper() ? (viewFlat ? `drag a circle · tap a middle · drag elsewhere to slide${view3D ? " the disk" : ""}` : "drag to rotate · turn it on the flat view")
         : "drag a sticker to turn · drag outside to rotate";
       nxRenderTape(solved);
-      $("shareWords").hidden = !(isWords() && solved);
+      $("shareWords").hidden = !isWords(); // (Permutle's share: always there)
     }
 
     // Look at the corner where face 0 meets its two nearest neighbors, with the first
