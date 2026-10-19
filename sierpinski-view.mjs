@@ -167,7 +167,7 @@ export class SierView {
     ctx.setTransform(dpr, 0, 0, dpr, -this.origin.x * dpr, -this.origin.y * dpr);
     this.dpr = dpr;
     this.drawn = { circles: [], dots: [] };
-    this.look = look; this.state = state;
+    this.look = look; this.state = state; this.ringLater = null;
     // the turn going: a piece turned, or its ring (with the states either side of where it's got to,
     // for what fades elsewhere)
     this.anim = null;
@@ -213,6 +213,10 @@ export class SierView {
     if (spinning) C = C.map(spinAbout(centerOf(C), anim.theta));
     this.fill(this.tri(C), n);
     const ringing = anim && anim.layer === 0 && anim.n === n;
+    // (what's moving drawn after what's still round it, so it passes over: a piece turning after its
+    // neighbors; a ring's corners going round after everything in the ring's piece)
+    const later = [], outerRing = this.ringLater;
+    if (ringing) this.ringLater = [];
     for (let k = 0; k < 3; k++) {
       const i = 3 * n + k, going = ring && ring.slots.has(k);
       let T = thirdOf(C, k);
@@ -223,11 +227,19 @@ export class SierView {
       // (this one's ring going: of what's in corner k, its two corners touching the middle go round)
       const theirs = ringing ? { slots: new Set([0, 1, 2].filter((x) => x !== k).map((x) => mod(x - (state[i] % 3), 3))), center: centerOf(C), theta: anim.theta } : null;
       const at = (v, alpha, rec) => { ctx.globalAlpha = alpha; this.node(Math.floor(v / 3), turned(T, v % 3), [...rel, k], rec, depth + 1, theirs); };
-      if (anim && anim.layer === 0 && !going && anim.s0[i] !== anim.s1[i]) { at(anim.s0[i], show, false); at(anim.s1[i], show * anim.a, false); }
-      else at(going || !anim || anim.layer === 1 ? state[i] : anim.s0[i], show, record && s > 40 && !spinning && !going);
-      if (look.lit && look.lit.has(i)) { ctx.globalAlpha = show; ctx.fillStyle = `rgba(255, 255, 255, ${look.litAlpha ?? 0.34})`; ctx.fill(this.tri(T)); }
-      ctx.globalAlpha = ga;
+      const fades = anim && anim.layer === 0 && !going && anim.s0[i] !== anim.s1[i], v = going || !anim || anim.layer === 1 ? state[i] : anim.s0[i];
+      const draw = () => {
+        if (fades) { at(anim.s0[i], show, false); at(anim.s1[i], show * anim.a, false); }
+        else at(v, show, record && s > 40 && !spinning && !going);
+        if (look.lit && look.lit.has(i)) { ctx.globalAlpha = show; ctx.fillStyle = `rgba(255, 255, 255, ${look.litAlpha ?? 0.34})`; ctx.fill(this.tri(T)); }
+        ctx.globalAlpha = ga;
+      };
+      if (going && this.ringLater) this.ringLater.push(draw);
+      else if (anim && anim.layer === 1 && !fades && Math.floor(v / 3) === anim.n) later.push(draw);
+      else draw();
     }
+    for (const draw of later) draw();
+    if (ringing) { const mine = this.ringLater; for (const draw of mine) draw(); this.ringLater = outerRing; }
     // its turns' circles and dot, where big enough to use (not while it's turning)
     if (!record || spinning) return;
     const M = middleOf(C), mid = centerOf(M), r = inRadius(M);
