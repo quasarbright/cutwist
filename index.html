@@ -4249,7 +4249,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const card = $("refPlane"), dpr = pixelRatio();
       card.hidden = false;
       if (card.width !== Math.round(card.clientWidth * dpr)) { card.width = Math.round(card.clientWidth * dpr); card.height = Math.round(card.clientHeight * dpr); }
-      refSierView.drawSolvedCard(P, { textures: showTextures });
+      // (the piece the view shows, solved, facing as it does in the view)
+      refSierView.drawSolvedCard(P, { textures: showTextures }, 26, { v: sierView.v, t: sierView.t });
     }
     // the + and − by each corner, as drawn in the issue: out along the line from the middle through
     // the corner, the + just past it and the − further out (a − that can't zoom out from here: dim)

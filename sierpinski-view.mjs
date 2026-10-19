@@ -304,11 +304,13 @@ export class SierView {
     }
   }
 
-  // the solved puzzle, filling this (small) canvas: the corner card
-  drawSolvedCard(P, look = {}, top = 26) {
+  // the solved puzzle, filling this (small) canvas: the corner card. view: the piece a view shows
+  // and its turn ({ v, t }: the card shows that piece solved, facing as it does there)
+  drawSolvedCard(P, look = {}, top = 26, view = { v: 0, t: 0 }) {
     const { canvas } = this, w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height, pad = 8;
     this.origin = { x: 0, y: 0 };
-    if (P !== this.P) { this.P = P; this.v = 0; this.t = 0; this.stack = []; this.zoom = null; }
+    if (P !== this.P) { this.P = P; this.stack = []; this.zoom = null; }
+    this.v = view.v; this.t = view.t;
     const W = w - 2 * pad, H = h - top - pad;
     this.scale = Math.min(W, (H * 2) / Math.sqrt(3));
     this.ox = w / 2; this.oy = top + H / 2 + (this.scale * Math.sqrt(3)) / 4;

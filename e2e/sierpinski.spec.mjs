@@ -7,7 +7,8 @@ import { test, expect } from "@playwright/test";
 import { open, info, turn, noErrors, pick } from "./helpers.mjs";
 
 let errors;
-test.beforeEach(async ({ page }) => { errors = await open(page, "?puzzle=sierpinski"); });
+// (on 4 levels, but where a test says otherwise; the puzzle starts on 2)
+test.beforeEach(async ({ page }) => { errors = await open(page, "?puzzle=sierpinski&levels=4"); });
 test.afterEach(async () => { await noErrors(errors); });
 
 const fire = (page, type, p) => page.evaluate(({ type, p }) => document.getElementById("plane").dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: p.x, clientY: p.y, pointerId: 7, isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 })), { type, p });
@@ -31,10 +32,10 @@ async function dragRound(page, c, p, turns) {
 const onLine = (c, a = 0.4) => ({ x: c.x + c.r * Math.cos(a), y: c.y - c.r * Math.sin(a) });
 const circle = (page, axis, layer) => page.evaluate(({ axis, layer }) => window.cutwist.sierCircle(axis, layer), { axis, layer });
 
-test("it opens from the shelf: 40 pieces on 4 levels, solved, every ring a move, with its solved card and a + and − by each corner", async ({ page }) => {
+test("it opens from the shelf on 2 levels: 4 pieces, solved, every ring a move, with its solved card and a + and − by each corner", async ({ page }) => {
   await open(page);
   await pick(page, "sierpinski");
-  expect(await info(page)).toMatchObject({ id: "sierpinski", sierpinski: true, levels: 4, pieces: 40, holes: 40, rings: 40, solved: true, textures: false, camera: "" });
+  expect(await info(page)).toMatchObject({ id: "sierpinski", sierpinski: true, levels: 2, pieces: 4, holes: 4, rings: 4, solved: true, textures: false, camera: "" });
   await expect(page.locator("#refPlane")).toBeVisible();
   await expect(page.locator("#customize")).toBeHidden();
   for (const [c, [x, y]] of [[0, [0, Math.sqrt(3) / 2]], [1, [-0.5, 0]], [2, [0.5, 0]]]) {
@@ -133,6 +134,24 @@ test("a zoom never turns the camera: in on a corner holding a piece turned, and 
   expect(await zoomTurn(0, -1)).toBeLessThan(1e-6);
   expect(await zoomTurn(0, -1)).toBeLessThan(1e-6);
   expect((await info(page)).camera).toBe("");
+});
+
+test("the solved card shows the piece the view does, solved: zoomed in on red, red; back out, the whole", async ({ page }) => {
+  await open(page, "?puzzle=sierpinski&levels=2");
+  const card = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(document.getElementById("refPlane").toDataURL()))));
+  const whole = await card();
+  await zoom(page, 0, 1);
+  const red = await card();
+  expect(red).not.toBe(whole);
+  // (red solved holds the whole at its top: zoomed in again, the whole)
+  await zoom(page, 0, 1);
+  expect(await card()).toBe(whole);
+  await zoom(page, 0, -1);
+  expect(await card()).toBe(red);
+  // (and a scramble doesn't change it: it's the piece solved)
+  await turn(page, [0, 0, 1]);
+  await idle(page);
+  expect(await card()).toBe(red);
 });
 
 test("a tap on a dot zooms in on that triangle; turning there turns the puzzle", async ({ page }) => {

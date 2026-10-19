@@ -30,7 +30,7 @@ const mod = (a, n) => ((a % n) + n) % n;
 // (levels: how many levels of pieces, the whole one the first)
 export const SIER_LEVELS = { min: 2, max: 4 };
 export const SIER_PRESETS = [{
-  id: "sierpinski", name: "Sierpinski Zoom", rule: "sierpinski", size: 2, fixed: true, noCustom: true, levels: 4,
+  id: "sierpinski", name: "Sierpinski Zoom", rule: "sierpinski", size: 2, fixed: true, noCustom: true, levels: 2,
   params: [{ key: "levels", label: "levels", min: SIER_LEVELS.min, max: SIER_LEVELS.max, title: "how many pieces: as many as a Sierpinski triangle that many levels deep has" }],
   title: (_, s) => `${s.levels}-level Sierpinski Zoom`,
 }];
