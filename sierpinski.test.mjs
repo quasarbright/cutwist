@@ -6,102 +6,76 @@ import { SIER_PRESETS, buildSier, solvedSierState, applySierMove, inverseSierMov
 const build = (L) => buildSier({ ...SIER_PRESETS[0], levels: L });
 const play = (P, moves, s = solvedSierState(P)) => { for (const m of moves) applySierMove(P, s, m); return s; };
 const home = (P, s) => s.every((v, i) => v === P.home[i]);
-// (pieces off their places: the corners' copies aren't counted)
-const moved = (P, s) => s.slice(0, P.N).reduce((k, v, i) => k + (Math.floor(v / 3) !== i), 0);
-const corners = (P, s) => s.slice(P.N).reduce((k, v, i) => k + (v !== P.home[P.N + i]), 0);
+const changed = (P, s) => s.reduce((k, v, i) => k + (v !== P.home[i]), 0);
+// (what's in piece a's corner k: its address, and turn)
+const inCorner = (P, s, a, k) => { const v = s[3 * P.index(a) + k]; return [P.addr[Math.floor(v / 3)], v % 3]; };
 const seeded = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
 
-test("every triangle a piece: 4 on 2 levels, 13 on 3, 40 on 4; every one turns, and all but the smallest have rings", () => {
-  for (const [L, N, rings] of [[2, 4, 1], [3, 13, 4], [4, 40, 13]]) {
+test("every piece turns and rings: 4 on 2 levels, 13 on 3, 40 on 4; every ring a move to start", () => {
+  for (const [L, N] of [[2, 4], [3, 13], [4, 40]]) {
     const P = build(L);
     assert.equal(P.N, N);
-    assert.equal(P.axes.length, N, `${L} levels: a turn each`);
-    assert.equal(P.axes.filter((a) => a.ring).length, rings, `${L} levels`);
-    assert.ok(P.axes.every((a) => a.ring === a.depth < L - 1));
+    assert.equal(P.axes.length, N);
+    assert.ok(P.nodeOf.every((n) => P.canRing(P.home, n)), `${L} levels`);
   }
 });
 
-test("on 4 levels, by the smallest: a ninth's ring moves the 6 corners touching its middle; a smallest turned, its own 3", () => {
-  const P = build(4), ninth = P.axisAt[P.index([0, 0])], small = P.axisAt[P.index([0, 0, 0])];
-  const ring = play(P, [{ axis: ninth, layer: 0, q: 1 }]);
-  assert.deepEqual([moved(P, ring), corners(P, ring)], [0, 6]);
-  const turned = play(P, [{ axis: small, layer: 1, q: 1 }]);
-  assert.deepEqual([moved(P, turned), corners(P, turned)], [0, 3]);
+test("to start, a piece's corners hold its thirds; the smallest's, their neighbors and the whole in their own corner", () => {
+  const P2 = build(2), s2 = solvedSierState(P2);
+  // (the 2 levels as the issue has it: the top third holds the whole at its top, the bottom left and right thirds at theirs; and so on)
+  for (const c of [0, 1, 2]) for (const k of [0, 1, 2]) assert.deepEqual(inCorner(P2, s2, [c], k), [k === c ? [] : [k], 0], `third ${c}, corner ${k}`);
+  const P3 = build(3), s3 = solvedSierState(P3);
+  assert.deepEqual([0, 1, 2].map((k) => inCorner(P3, s3, [], k)[0]), [[0], [1], [2]]);
+  assert.deepEqual([0, 1, 2].map((k) => inCorner(P3, s3, [2, 1], k)[0]), [[2, 0], [], [2, 2]]);
 });
 
-test("on 2 levels, solved: each third's corners the rest of the puzzle where it is, the whole in its own place", () => {
-  const P = build(2), s = solvedSierState(P), shows = (c, k) => P.addr[Math.floor(s[P.slot(P.index([c]), k)] / 3)];
-  // (the top third: the whole at its top, the bottom left and right thirds at theirs; and so on)
-  for (const c of [0, 1, 2]) for (const k of [0, 1, 2]) assert.deepEqual(shows(c, k), k === c ? [] : [k], `third ${c}, corner ${k}`);
-  assert.ok(s.slice(P.N).every((v) => v % 3 === 0), "all the right way up");
+test("a piece turned: its corners go round, each turned a third; three times is nothing", () => {
+  const P = build(3), m = { axis: P.axisAt[P.index([1])], layer: 1, q: 1 }, s = play(P, [m]);
+  assert.equal(changed(P, s), 3);
+  assert.deepEqual(inCorner(P, s, [1], 1), [[1, 0], 1]);
+  assert.ok(home(P, play(P, [m, m, m])));
+  assert.ok(home(P, play(P, [m, inverseSierMove(P, m)])));
 });
 
-test("a turn three times is nothing, once something; pieces never change level", () => {
+test("a ring: six corners of the pieces in its corners, those touching its middle, round it a third turned; three times is nothing", () => {
   for (const L of [2, 3, 4]) {
     const P = build(L);
-    for (const ax of P.axes) for (const layer of [0, 1]) {
-      if (!P.perms[ax.h][layer]) continue;
-      const m = { axis: ax.h, layer, q: 1 }, s = play(P, [m]);
-      assert.ok(home(P, play(P, [m, m, m])), `${L} levels, ${ax.p} layer ${layer}`);
-      assert.ok(!home(P, s), `${L} levels, ${ax.p} layer ${layer}: does something`);
-      s.slice(0, P.N).forEach((v, i) => assert.equal(P.addr[Math.floor(v / 3)].length, P.addr[i].length, "a piece on its own level"));
+    for (const n of P.nodeOf) {
+      const m = { axis: P.axisAt[n], layer: 0, q: 1 }, s = play(P, [m]);
+      assert.equal(changed(P, s), 6, `${L} levels, ${P.addr[n]}`);
+      assert.ok(home(P, play(P, [m, m, m])), `${L} levels, ${P.addr[n]}`);
+      assert.ok(home(P, play(P, [m, { ...m, q: -1 }])), `${L} levels, ${P.addr[n]}`);
     }
   }
+  // (2 levels, the whole's ring: the top third's bottom left corner, the bottom left third, goes to the bottom left third's bottom right, a third turned)
+  const P = build(2), s = play(P, [{ axis: 0, layer: 0, q: 1 }]);
+  assert.deepEqual(inCorner(P, s, [1], 2), [[1], 1]);
 });
 
-test("what each turn takes, on 4 levels: the whole's ring its 6 ninths touching the middle and what's in them; a third its 12", () => {
-  const P = build(4);
-  const ring = play(P, [{ axis: 0, layer: 0, q: 1 }]);
-  assert.equal(moved(P, ring), 24);
-  for (const t of [[], [0], [1], [2]]) assert.equal(Math.floor(ring[P.index(t)] / 3), P.index(t), `${t} stays`);
-  assert.equal(moved(P, play(P, [{ axis: 1, layer: 0, q: 1 }])), 6); // (a third's ring: its 6 smallest touching its middle)
-  assert.equal(moved(P, play(P, [{ axis: 1, layer: 1, q: 1 }])), 12); // (a third turned: all inside it)
-  // (a ninth turned: its 3 smallest, a third of a turn: their copies turned too)
-  const ninth = play(P, [{ axis: P.holes.findIndex((p) => p.length === 2), layer: 1, q: 1 }]);
-  assert.equal(moved(P, ninth), 3);
-  assert.equal(corners(P, ninth), 9);
+test("a ring isn't a move when its corners hold a piece twice, or itself; then it does nothing", () => {
+  const P = build(2), red = P.index([0]);
+  const twice = solvedSierState(P);
+  twice[3 * red + 1] = twice[3 * red];
+  assert.ok(!P.canRing(twice, red));
+  assert.deepEqual([...applySierMove(P, twice.slice(), { axis: 1, layer: 0, q: 1 })], [...twice]);
+  const itself = solvedSierState(P);
+  itself[3 * red + 2] = 3 * red;
+  assert.ok(!P.canRing(itself, red));
 });
 
-test("on 2 levels: the whole's ring moves the 6 corners touching its middle, turned; a third turned turns its own 3", () => {
-  const P = build(2), ring = play(P, [{ axis: 0, layer: 0, q: 1 }]);
-  assert.equal(moved(P, ring), 0);
-  assert.equal(corners(P, ring), 6);
-  // (the top third's bottom left corner, a copy of the bottom left third, now the bottom left third's bottom right, a third turned)
-  assert.equal(ring[P.slot(P.index([1]), 2)], 3 * P.index([1]) + 1);
-  const third = play(P, [{ axis: 1, layer: 1, q: 1 }]);
-  assert.equal(moved(P, third), 0);
-  assert.equal(corners(P, third), 3);
-  // (the whole, now at its bottom left, turned with it)
-  assert.equal(third[P.slot(P.index([0]), 1)], 1);
+test("solved is every corner as it started: a turn or a ring isn't, the whole turned isn't either", () => {
+  const P = build(3);
+  assert.ok(isSierSolved(P, solvedSierState(P)));
+  for (const m of [{ axis: 0, layer: 1, q: 1 }, { axis: 0, layer: 0, q: 1 }, { axis: 5, layer: 1, q: -1 }]) assert.ok(!isSierSolved(P, play(P, [m])), JSON.stringify(m));
 });
 
-test("solved: home, or the whole turned; a ring or a turn isn't; nor a corner's copy turned", () => {
-  for (const L of [2, 4]) {
-    const P = build(L);
-    for (const q of [1, -1]) {
-      const s = play(P, [{ axis: 0, layer: 1, q }]);
-      assert.ok(isSierSolved(P, s), `${L} levels`);
-      assert.deepEqual([...s.slice(P.N)], [...P.home.slice(P.N)], `${L} levels: the whole turned leaves the corners`);
-    }
-    for (const m of [{ axis: 0, layer: 0, q: 1 }, { axis: 2, layer: 1, q: -1 }]) assert.ok(!isSierSolved(P, play(P, [m])), `${L} levels, ${JSON.stringify(m)}`);
-    const s = solvedSierState(P), i = P.slot(P.index(Array(L - 1).fill(0)), 0);
-    s[i] += 1;
-    assert.ok(!isSierSolved(P, s), `${L} levels`);
-  }
-});
-
-test("scrambles undo, and scramble, with rings and turns", () => {
+test("scrambles undo, from solved and from another scramble, with rings and turns", () => {
   for (const L of [2, 3, 4]) {
-    const P = build(L), moves = sierScrambleMoves(P, undefined, seeded(L));
-    const s = play(P, moves);
+    const P = build(L), rand = seeded(L), first = play(P, sierScrambleMoves(P, undefined, rand));
+    const from = first.slice(), moves = sierScrambleMoves(P, undefined, rand, from), s = play(P, moves, from.slice());
     assert.ok(!isSierSolved(P, s), `${L} levels`);
-    play(P, moves.slice().reverse().map((m) => inverseSierMove(P, m)), s);
-    assert.ok(home(P, s), `${L} levels`);
     assert.ok(moves.some((m) => m.layer === 0) && moves.some((m) => m.layer === 1));
+    play(P, moves.slice().reverse().map((m) => inverseSierMove(P, m)), s);
+    assert.deepEqual([...s], [...from], `${L} levels`);
   }
-});
-
-test("a commutator: the whole's ring and the top third's, each then back, moves 10", () => {
-  const P = build(4), a = { axis: 0, layer: 0, q: 1 }, b = { axis: 1, layer: 0, q: 1 };
-  assert.equal(moved(P, play(P, [a, b, { ...a, q: -1 }, { ...b, q: -1 }])), 10);
 });

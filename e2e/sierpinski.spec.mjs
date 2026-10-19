@@ -1,8 +1,8 @@
-// The Sierpinski puzzle (issue #26): every triangle a piece, and the puzzle holds itself (each
-// smallest triangle's thirds are copies of the whole). Loading from the shelf, the levels stepper,
-// and real pointer input: the turns' circles in their triangles' middles dragged by their lines;
-// zooming, the camera only: + and − by each corner, and a tap on a dot. In through a copy, the view
-// is exactly where it started.
+// The Sierpinski puzzle (issue #26): a Sierpinski triangle with no bottom, each piece saying what's
+// in its corners. Loading from the shelf, the levels stepper, and real pointer input: the turns'
+// circles in their triangles' middles dragged by their lines; zooming, the camera only: + and − by
+// each corner, and a tap on a dot. In through a copy of the whole, the view is exactly where it
+// started.
 import { test, expect } from "@playwright/test";
 import { open, info, turn, noErrors, pick } from "./helpers.mjs";
 
@@ -11,9 +11,9 @@ test.beforeEach(async ({ page }) => { errors = await open(page, "?puzzle=sierpin
 test.afterEach(async () => { await noErrors(errors); });
 
 const fire = (page, type, p) => page.evaluate(({ type, p }) => document.getElementById("plane").dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: p.x, clientY: p.y, pointerId: 7, isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 })), { type, p });
-// (the pieces' part of the state: after them come the smallest ones' corners)
-const state = async (page) => (await page.evaluate(() => Array.from(window.cutwist.state))).slice(0, (await info(page)).pieces);
-const moved = (s) => s.filter((v, i) => Math.floor(v / 3) !== i).length;
+const state = (page) => page.evaluate(() => Array.from(window.cutwist.state));
+// (corners changed from a state before)
+const changed = (s, from) => s.filter((v, i) => v !== from[i]).length;
 const idle = (page) => expect.poll(async () => { const s = await info(page); return s.idle && !s.zooming; }).toBe(true);
 const index = (page, a) => page.evaluate((a) => window.cutwist.sierIndex(a), a);
 const picture = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(document.getElementById("plane").toDataURL()))));
@@ -31,10 +31,10 @@ async function dragRound(page, c, p, turns) {
 const onLine = (c, a = 0.4) => ({ x: c.x + c.r * Math.cos(a), y: c.y - c.r * Math.sin(a) });
 const circle = (page, axis, layer) => page.evaluate(({ axis, layer }) => window.cutwist.sierCircle(axis, layer), { axis, layer });
 
-test("it opens from the shelf: 40 triangles on 4 levels, solved, with its solved card and a + and − by each corner", async ({ page }) => {
+test("it opens from the shelf: 40 pieces on 4 levels, solved, every ring a move, with its solved card and a + and − by each corner", async ({ page }) => {
   await open(page);
   await pick(page, "sierpinski");
-  expect(await info(page)).toMatchObject({ id: "sierpinski", sierpinski: true, levels: 4, pieces: 40, solved: true, textures: false, camera: "" });
+  expect(await info(page)).toMatchObject({ id: "sierpinski", sierpinski: true, levels: 4, pieces: 40, holes: 40, rings: 40, solved: true, textures: false, camera: "" });
   await expect(page.locator("#refPlane")).toBeVisible();
   await expect(page.locator("#customize")).toBeHidden();
   for (const [c, [x, y]] of [[0, [0, Math.sqrt(3) / 2]], [1, [-0.5, 0]], [2, [0.5, 0]]]) {
@@ -53,7 +53,7 @@ test("the levels stepper: 2 to 4 levels, in the link", async ({ page }) => {
   expect(await info(page)).toMatchObject({ levels: 3, pieces: 13, title: "3-level Sierpinski Zoom" });
   expect(new URL(page.url()).searchParams.get("levels")).toBe("3");
   await less.click();
-  expect(await info(page)).toMatchObject({ levels: 2, pieces: 4, rings: 1, holes: 4 });
+  expect(await info(page)).toMatchObject({ levels: 2, pieces: 4, rings: 4, holes: 4 });
   await expect(less).toBeDisabled();
 });
 
@@ -62,12 +62,11 @@ test("changing levels draws the new puzzle as a fresh load does, and its circles
   for (const L of [3, 2]) {
     await less.click();
     await idle(page);
-    const changed = await picture(page);
+    const changedTo = await picture(page);
     const fresh = await page.context().newPage();
     await open(fresh, `?puzzle=sierpinski&levels=${L}`);
-    expect(await picture(fresh), `${L} levels`).toBe(changed);
+    expect(await picture(fresh), `${L} levels`).toBe(changedTo);
     await fresh.close();
-    // (a third's ring on 3 levels: the ninths' corners; a third turned on 2)
     const c = await circle(page, 1, L === 3 ? 0 : 1);
     await dragRound(page, c, onLine(c), 1 / 3);
     expect((await info(page)).solved, `${L} levels`).toBe(false);
@@ -77,6 +76,62 @@ test("changing levels draws the new puzzle as a fresh load does, and its circles
     await page.click("#reset");
     await idle(page);
   }
+});
+
+test("the whole's inner circle turns its ring: six corners of the thirds, those touching its middle; hovering lights it; and back", async ({ page }) => {
+  const start = await state(page), c = await circle(page, 0, 0);
+  await fire(page, "pointermove", onLine(c));
+  expect(await info(page)).toMatchObject({ hover: 0, hoverLayer: 0 });
+  await dragRound(page, c, onLine(c), 1 / 3);
+  const s = await state(page), thirds = await Promise.all([[0], [1], [2]].map((a) => index(page, a)));
+  expect(changed(s, start)).toBe(6);
+  expect(s.every((v, i) => v === start[i] || thirds.includes(Math.floor(i / 3))), "only the thirds' corners").toBe(true);
+  expect(await info(page)).toMatchObject({ moves: 1, solved: false });
+  await dragRound(page, c, onLine(c), -1 / 3);
+  expect(changed(await state(page), start)).toBe(0);
+});
+
+test("a third's outer circle turns it, its three corners; a drag off every circle turns nothing", async ({ page }) => {
+  const start = await state(page), c = await circle(page, 1, 1), top = await index(page, [0]);
+  await dragRound(page, c, onLine(c, 2.2), 1 / 3);
+  const s = await state(page);
+  expect(changed(s, start)).toBe(3);
+  expect(s.every((v, i) => v === start[i] || Math.floor(i / 3) === top)).toBe(true);
+  await turn(page, [1, 1, -1]);
+  const mid = await circle(page, 0, 0);
+  await dragRound(page, mid, { x: mid.x + 6, y: mid.y + 6 }, 1 / 3);
+  expect(changed(await state(page), start)).toBe(0);
+  expect((await info(page)).moves).toBe(2);
+});
+
+test("zooming is the camera: in on the top third four times, into the whole again, exactly where it started; no moves; and back out", async ({ page }) => {
+  const start = await picture(page);
+  for (let k = 0; k < 4; k++) await zoom(page, 0, 1);
+  expect(await info(page)).toMatchObject({ camera: "0000", moves: 0, solved: true });
+  expect(await picture(page)).toBe(start);
+  await zoom(page, 0, -1);
+  expect((await info(page)).camera).toBe("000");
+});
+
+test("zooming out from the top: to the far corner's smallest triangle, which holds the whole there; and back in is where it started", async ({ page }) => {
+  const start = await picture(page);
+  await zoom(page, 2, -1);
+  expect((await info(page)).camera).toBe("222");
+  expect(await picture(page)).not.toBe(start);
+  await zoom(page, 2, 1);
+  expect(await picture(page)).toBe(start);
+});
+
+test("a tap on a dot zooms in on that triangle; turning there turns the puzzle", async ({ page }) => {
+  const start = await state(page), d = await page.evaluate(() => window.cutwist.sierDot([1]));
+  await fire(page, "pointerdown", d); await fire(page, "pointerup", d);
+  await idle(page);
+  expect(await info(page)).toMatchObject({ camera: "1", moves: 0 });
+  // (the view's own inner circle: the bottom left third's ring)
+  const c = await circle(page, 2, 0);
+  await dragRound(page, c, onLine(c), 1 / 3);
+  expect(changed(await state(page), start)).toBe(6);
+  expect((await info(page)).moves).toBe(1);
 });
 
 test("on 2 levels: in on a third twice is the whole again; in on the top third then its bottom left is the bottom left third", async ({ page }) => {
@@ -97,88 +152,18 @@ test("on 2 levels: in on a third twice is the whole again; in on the top third t
   expect((await info(page)).camera).toBe("2");
 });
 
-test("on 2 levels: the whole's ring moves the copies in the thirds' corners; each third's circle turns it", async ({ page }) => {
+test("on 2 levels: after the whole's ring some rings aren't moves (a piece in their corners twice, or themselves), and show no inner circle", async ({ page }) => {
   await open(page, "?puzzle=sierpinski&levels=2");
-  const corners = async () => { const s = await page.evaluate(() => Array.from(window.cutwist.state)); return s.slice(4); };
-  const before = await corners();
-  const c = await circle(page, 0, 0);
-  await dragRound(page, c, onLine(c), 1 / 3);
-  const after = await corners();
-  expect(after.filter((v, i) => v !== before[i]).length).toBe(6);
-  expect(moved(await state(page))).toBe(0);
-  expect(await info(page)).toMatchObject({ moves: 1, solved: false });
-  const t = await circle(page, 2, 1);
-  await dragRound(page, t, onLine(t, 2.2), 1 / 3);
-  expect((await info(page)).moves).toBe(2);
-  await turn(page, [2, 1, -1], [0, 0, -1]);
-  expect((await info(page)).solved).toBe(true);
-});
-
-test("the white middle's inner circle turns its ring: the 6 ninths touching it and what's in them, not the thirds; hovering lights it; and back", async ({ page }) => {
-  const c = await circle(page, 0, 0);
-  await fire(page, "pointermove", onLine(c));
-  expect(await info(page)).toMatchObject({ hover: 0, hoverLayer: 0 });
-  await dragRound(page, c, onLine(c), 1 / 3);
-  const s = await state(page);
-  expect(moved(s)).toBe(24);
-  for (const t of [[0], [1], [2]]) { const i = await index(page, t); expect(Math.floor(s[i] / 3), `third ${t} stays`).toBe(i); }
-  expect(await info(page)).toMatchObject({ moves: 1, solved: false });
-  await dragRound(page, c, onLine(c), -1 / 3);
-  expect(moved(await state(page))).toBe(0);
-});
-
-test("a third's outer circle turns the third, and only it; a drag off every circle turns nothing", async ({ page }) => {
-  const c = await circle(page, 1, 1);
-  await dragRound(page, c, onLine(c, 2.2), 1 / 3);
-  const s = await state(page), lo = await index(page, [0]), hi = await index(page, [0, 2, 2]);
-  expect(moved(s)).toBe(12);
-  expect(s.every((v, i) => Math.floor(v / 3) === i || (i >= lo && i <= hi))).toBe(true);
-  await turn(page, [1, 1, -1]);
-  const mid = await circle(page, 0, 0);
-  await dragRound(page, mid, { x: mid.x + 6, y: mid.y + 6 }, 1 / 3);
-  expect(moved(await state(page))).toBe(0);
-  expect((await info(page)).moves).toBe(2);
-});
-
-test("zooming is the camera: in on the top third four times, through a copy, and it's exactly where it started; no moves", async ({ page }) => {
-  const start = await picture(page);
-  for (let k = 0; k < 4; k++) await zoom(page, 0, 1);
-  expect(await info(page)).toMatchObject({ camera: "0000", moves: 0, solved: true });
-  expect(await picture(page)).toBe(start);
-  // (and the − back out, only by the corner it came in at)
-  await expect(page.locator('.sier-zoom-btn[data-c="1"][data-q="-1"]')).toBeDisabled();
-  await zoom(page, 0, -1);
-  expect((await info(page)).camera).toBe("000");
-});
-
-test("zooming out from the top: into the far corner's copy that way; and back in is where it started", async ({ page }) => {
-  const start = await picture(page);
-  await zoom(page, 2, -1);
-  expect((await info(page)).camera).toBe("222");
-  expect(await picture(page)).not.toBe(start);
-  await zoom(page, 2, 1);
-  expect(await picture(page)).toBe(start);
-});
-
-test("a tap on a dot zooms in on that triangle; turning there turns the puzzle", async ({ page }) => {
-  const d = await page.evaluate(() => window.cutwist.sierDot([1]));
-  await fire(page, "pointerdown", d); await fire(page, "pointerup", d);
+  await turn(page, [0, 0, 1]);
   await idle(page);
-  expect(await info(page)).toMatchObject({ camera: "1", moves: 0 });
-  // (the view's own inner circle: the bottom left third's ring)
-  const c = await circle(page, 2, 0);
-  await dragRound(page, c, onLine(c), 1 / 3);
-  expect(moved(await state(page))).toBe(6);
-  expect((await info(page)).moves).toBe(1);
-});
-
-test("a ninth turned turns its smallest, their copies with them: not solved till they're back", async ({ page }) => {
-  // (the top third's top ninth: its axis is after the whole and the thirds)
-  await turn(page, [4, 1, 1]);
-  expect(moved(await state(page))).toBe(3);
-  expect((await info(page)).solved).toBe(false);
-  await turn(page, [4, 1, 1], [4, 1, 1]);
-  expect((await info(page)).solved).toBe(true);
+  const s = await info(page);
+  expect(s.rings).toBeLessThan(4);
+  await picture(page); // (a frame drawn since)
+  const drawn = await Promise.all([0, 1, 2, 3].map((h) => circle(page, h, 0)));
+  expect(drawn.filter(Boolean).length).toBeLessThan(4);
+  await turn(page, [0, 0, -1]);
+  await idle(page);
+  expect(await info(page)).toMatchObject({ rings: 4, solved: true });
 });
 
 test("scramble, then reset; textures; an algorithm lights what it moves", async ({ page }) => {
@@ -187,7 +172,7 @@ test("scramble, then reset; textures; an algorithm lights what it moves", async 
   expect((await info(page)).solved).toBe(false);
   await page.click("#reset");
   await idle(page);
-  expect(moved(await state(page))).toBe(0);
+  expect((await info(page)).solved).toBe(true);
   await page.click("#textures");
   expect((await info(page)).textures).toBe(true);
   await page.click(".nx-rec");
