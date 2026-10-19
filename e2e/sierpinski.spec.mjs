@@ -11,7 +11,8 @@ test.beforeEach(async ({ page }) => { errors = await open(page, "?puzzle=sierpin
 test.afterEach(async () => { await noErrors(errors); });
 
 const fire = (page, type, p) => page.evaluate(({ type, p }) => document.getElementById("plane").dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: p.x, clientY: p.y, pointerId: 7, isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 })), { type, p });
-const state = (page) => page.evaluate(() => window.cutwist.state);
+// (the pieces' part of the state: after them come the smallest ones' corners)
+const state = async (page) => (await page.evaluate(() => Array.from(window.cutwist.state))).slice(0, (await info(page)).pieces);
 const moved = (s) => s.filter((v, i) => Math.floor(v / 3) !== i).length;
 const idle = (page) => expect.poll(async () => { const s = await info(page); return s.idle && !s.zooming; }).toBe(true);
 const index = (page, a) => page.evaluate((a) => window.cutwist.sierIndex(a), a);
@@ -46,10 +47,49 @@ test("it opens from the shelf: 40 triangles on 4 levels, solved, with its solved
   await expect(page.locator("#paramControls")).not.toContainText("zoom");
 });
 
-test("the levels stepper: 3 or 4 levels, in the link", async ({ page }) => {
-  await page.locator("#paramControls .control", { hasText: "levels" }).getByRole("button", { name: "−" }).click();
+test("the levels stepper: 2 to 4 levels, in the link", async ({ page }) => {
+  const less = page.locator("#paramControls .control", { hasText: "levels" }).getByRole("button", { name: "−" });
+  await less.click();
   expect(await info(page)).toMatchObject({ levels: 3, pieces: 13, title: "3-level Sierpinski Zoom" });
   expect(new URL(page.url()).searchParams.get("levels")).toBe("3");
+  await less.click();
+  expect(await info(page)).toMatchObject({ levels: 2, pieces: 4, rings: 1, holes: 4 });
+  await expect(less).toBeDisabled();
+});
+
+test("on 2 levels: in on a third twice is the whole again; in on the top third then its bottom left is the bottom left third", async ({ page }) => {
+  await open(page, "?puzzle=sierpinski&levels=2");
+  const start = await picture(page);
+  await zoom(page, 1, 1);
+  const left = await picture(page);
+  await zoom(page, 1, -1);
+  await zoom(page, 0, 1);
+  await zoom(page, 1, 1);
+  expect(await info(page)).toMatchObject({ camera: "01", moves: 0 });
+  expect(await picture(page)).toBe(left);
+  await zoom(page, 1, 1);
+  expect(await picture(page)).toBe(start);
+  // (and out from the top: to the bottom right third, whose bottom right corner is the whole)
+  await open(page, "?puzzle=sierpinski&levels=2");
+  await zoom(page, 2, -1);
+  expect((await info(page)).camera).toBe("2");
+});
+
+test("on 2 levels: the whole's ring moves the copies in the thirds' corners; each third's circle turns it", async ({ page }) => {
+  await open(page, "?puzzle=sierpinski&levels=2");
+  const corners = async () => { const s = await page.evaluate(() => Array.from(window.cutwist.state)); return s.slice(4); };
+  const before = await corners();
+  const c = await circle(page, 0, 0);
+  await dragRound(page, c, onLine(c), 1 / 3);
+  const after = await corners();
+  expect(after.filter((v, i) => v !== before[i]).length).toBe(6);
+  expect(moved(await state(page))).toBe(0);
+  expect(await info(page)).toMatchObject({ moves: 1, solved: false });
+  const t = await circle(page, 2, 1);
+  await dragRound(page, t, onLine(t, 2.2), 1 / 3);
+  expect((await info(page)).moves).toBe(2);
+  await turn(page, [2, 1, -1], [0, 0, -1]);
+  expect((await info(page)).solved).toBe(true);
 });
 
 test("the white middle's inner circle turns its ring: the 6 ninths touching it and what's in them, not the thirds; hovering lights it; and back", async ({ page }) => {

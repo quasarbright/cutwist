@@ -4238,7 +4238,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       btn.onclick = () => { if (!isSier()) return; const c = +btn.dataset.c; if (+btn.dataset.q > 0) sierView.zoomIn(c, state); else sierView.zoomOut(c, state); };
     function drawSier() {
       const reg = viewRegions();
-      const turn = anim && anim.places ? { places: anim.places, center: anim.center, theta: anim.theta } : null;
+      const turn = anim && anim.places ? { places: anim.places, center: anim.center, theta: anim.theta, p: P.axes[anim.axis].p } : null;
       const look = { hover: tdrag ? { axis: tdrag.axis, layer: tdrag.layer } : tileHover, lit: algLit, litAlpha: litPulse(), textures: showTextures, dotHover: sierDotHover };
       plane.hidden = false;
       canvas.hidden = true;
@@ -4262,7 +4262,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const out = +el.dataset.q > 0 ? 24 : 62, x = p.x + ux * out - 18, y = p.y + uy * out - 18;
         el.style.left = Math.round(Math.max(2, Math.min(innerWidth - 38, x))) + "px";
         el.style.top = Math.round(Math.max(2, y)) + "px";
-        if (+el.dataset.q < 0) el.disabled = !sierView.canZoomOut(c);
+        if (+el.dataset.q < 0) el.disabled = !sierView.canZoomOut(c, state);
       }
     }
     plane.addEventListener("pointerdown", (e) => {

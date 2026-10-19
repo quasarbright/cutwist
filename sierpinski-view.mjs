@@ -3,14 +3,15 @@
 //
 // Every triangle is a piece, drawn with its thirds over it: the thirds together shrunk a little about
 // its middle (K), so they touch at their corners and a band of it shows round them as well as its
-// middle. The puzzle holds itself: each smallest triangle's thirds are copies of the whole, turned
-// the way that triangle faces, holding copies too, drawn down to a few pixels (fading in by size, so
-// nothing pops as they grow). A turn shows wherever its pieces do, every copy too, as the tori's
-// copies turn.
+// middle. The puzzle holds itself: each smallest triangle's thirds are copies of a triangle of it
+// (the state says which, and turned how), holding copies too, drawn down to a few pixels (fading in
+// by size, so nothing pops as they grow). A turn shows wherever its pieces do, every copy too, as
+// the tori's copies turn.
 //
 // The camera: a path of digits from the whole (a third at each step: past a smallest triangle,
-// into one of its copies, the whole again). The view shows the triangle at the end of the path, its
-// own way up, filling the screen's triangle; so zooming in through a copy is exactly where it started.
+// into one of its copies, the triangle it's of). The view shows the triangle at the end of the path,
+// its own way up, filling the screen's triangle; so zooming in through a copy of the whole is
+// exactly where it started.
 // A zoom moves the camera there smoothly, what's round the third fading out.
 //
 // The turns' circles sit in the middle of the triangle they turn (the inner its ring, the outer the
@@ -22,9 +23,10 @@ import { faceTextures } from "./puzzle.mjs";
 
 const BODY = "#0a0b0e", HOVER = "#f5c518";
 export const K = 0.93; // (a triangle's thirds, together, as a share of it)
-// the colors (as the issue settled them): the whole white; the thirds the cube's red, blue and
-// green; the ninths nine more, none like those; smaller triangles take their corner's third's
-export const SIER_COLORS = ["#f2f1ec", "#c8102e", "#0046ad", "#009b48", "#ffd500", "#ff6a13", "#5bc2e7", "#ff7eb6", "#9ad93b", "#8a4fd8", "#23b5a6", "#d6a86a", "#c9b6ff"];
+// the colors (as the issue settled them): the whole white; the thirds the cube's red, green and
+// blue (top, left, right); the ninths nine more, none like those; smaller triangles take their
+// corner's third's
+export const SIER_COLORS = ["#f2f1ec", "#c8102e", "#009b48", "#0046ad", "#ffd500", "#ff6a13", "#5bc2e7", "#ff7eb6", "#9ad93b", "#8a4fd8", "#23b5a6", "#d6a86a", "#c9b6ff"];
 const textureSet = faceTextures(SIER_COLORS);
 export const sierColor = (P, piece) => SIER_COLORS[P.colorOf[piece]];
 
@@ -85,13 +87,13 @@ export class SierView {
   }
 
   // ---- the camera ----
-  // the place a path ends at, and the way a turn it passes through copies has turned it (state: where
-  // the pieces are: a copy is turned the way its smallest triangle faces)
+  // the place a path ends at, and the way the copies it passes through have turned it (state: where
+  // the pieces are, and what each smallest one's corners show)
   walk(path, state) {
     const P = this.P;
     let i = 0, turn = 0;
     for (const d of path) {
-      if (P.smallest[i]) { turn = (turn + (state[i] % 3)) % 3; i = 0; } // (into a copy: the whole again)
+      if (P.smallest[i]) { const v = state[P.slot(i, d)]; turn = (turn + (v % 3)) % 3; i = Math.floor(v / 3); } // (into a copy)
       else i = P.index([...P.addr[i], d]);
     }
     return { i, turn };
@@ -102,22 +104,30 @@ export class SierView {
     const P = this.P;
     let i = from, m = mapTri(this.places()[i], S);
     for (const d of rel) {
-      if (P.smallest[i]) { const slot = turned(thirdOf(this.places()[i], d), state[i] % 3).map((p) => apply(m, p)); m = mapTri(ROOT, slot); i = 0; }
+      if (P.smallest[i]) { const v = state[P.slot(i, d)], slot = turned(thirdOf(this.places()[i], d), v % 3).map((p) => apply(m, p)); i = Math.floor(v / 3); m = mapTri(this.places()[i], slot); }
       else i = P.index([...P.addr[i], d]);
     }
     return this.places()[i].map((p) => apply(m, p));
   }
   busy() { return !!this.zoom; }
   // zoom in on the view's third c, or out (the view becoming the third c of what's round it: back up
-  // the path if it came in that way, or, from the top, into the far corner's copy that way)
+  // the path if it came in that way, or, from the top, out to a smallest triangle whose corner c is
+  // the whole the right way up: the far corner's if it is)
   zoomIn(c, state) { if (this.zoom) return; this.go(this.path.slice(), [c], 1); }
   zoomOut(c, state) {
     if (this.zoom) return;
     const p = this.path;
     if (p.length) { if (p.at(-1) !== c) return; this.go(p.slice(0, -1), [c], -1); }
-    else this.go(Array(this.P.L - 1).fill(c), [c], -1);
+    else { const out = this.outFrom(c, state); if (out) this.go(out, [c], -1); }
   }
-  canZoomOut(c) { return !this.path.length || this.path.at(-1) === c; }
+  canZoomOut(c, state) { return this.path.length ? this.path.at(-1) === c : !!this.outFrom(c, state); }
+  outFrom(c, state) {
+    const P = this.P, far = P.index(Array(P.L - 1).fill(c));
+    const ok = (i) => P.smallest[i] && state[P.slot(i, c)] === 0;
+    if (ok(far)) return P.addr[far].slice();
+    const i = P.addr.findIndex((_, i) => ok(i));
+    return i >= 0 ? P.addr[i].slice() : null;
+  }
   // zoom in down a path of digits from the view (a dot: to the triangle it's in)
   zoomTo(rel) { if (this.zoom || !rel.length) return; this.go(this.path.slice(), rel.slice(), 1); }
   go(outer, rel, dir) {
@@ -195,16 +205,27 @@ export class SierView {
       if (!P.smallest[j]) { this.tri(shrink(Q, K), path); this.tri(middleOfScreen(Q), path); }
       this.fill(path, state[j], look.lit && look.lit.has(j));
     }
-    // the copies in each smallest one, turned its way, while they show (fading in from 8 px to 16)
+    // the copies in each smallest one's corners, turned their ways, while they show (fading in from
+    // 8 px to 16); a corner turning on its own (the 2 levels' ring) turned as it goes
     for (const j of sub) {
       if (!P.smallest[j]) continue;
-      const C = cornersAt(j), f = state[j] % 3;
+      const C = cornersAt(j);
       for (let k = 0; k < 3; k++) {
-        const slot = px(turned(thirdOf(C, k), f)), s = size(slot);
+        const at = P.slot(j, k), v = state[at], own = moving && !moving.has(j) && moving.has(at);
+        const third = own ? thirdOf(G[j], k).map(spin) : thirdOf(C, k), slot = px(turned(third, v % 3)), s = size(slot);
         if (s < 8 || depth > 6) continue;
-        const ga = ctx.globalAlpha;
+        const ga = ctx.globalAlpha, of = Math.floor(v / 3), cm = mapTri(G[of], slot);
         ctx.globalAlpha = ga * Math.min(1, (s - 8) / 8);
-        this.node(0, mapTri(ROOT, slot), [...rel, ...P.addr[j].slice(P.addr[i].length), k], record && s > 40, depth + 1);
+        // (a copy carried by the turn, of a triangle turning whole with it: still in it, as it's
+        // already turned. A copy of a triangle part of a turn passes through, as the 2 levels' thirds
+        // are of the whole's ring: what's round it too, the turn's whole triangle, cut to it)
+        const carried = moving && (moving.has(at) || moving.has(j)) && moving.has(of);
+        const from = moving && !carried && turn.p && !P.within(P.addr[of], turn.p) ? P.index(turn.p.filter((d, n) => P.addr[of].slice(0, n + 1).every((x, u) => x === turn.p[u]))) : of;
+        if (carried) this.turn = null;
+        if (from !== of) { ctx.save(); ctx.clip(this.tri(slot)); this.node(from, cm, [], false, depth + 1); ctx.restore(); }
+        else this.node(of, cm, [...rel, ...P.addr[j].slice(P.addr[i].length), k], record && s > 40, depth + 1);
+        this.turn = turn;
+        if (look.lit && look.lit.has(at)) { ctx.fillStyle = `rgba(255, 255, 255, ${look.litAlpha ?? 0.34})`; ctx.fill(this.tri(slot)); }
         ctx.globalAlpha = ga;
       }
     }
@@ -264,7 +285,7 @@ export class SierView {
     const W = w - 2 * pad, H = h - top - pad;
     this.scale = Math.min(W, (H * 2) / Math.sqrt(3));
     this.ox = w / 2; this.oy = top + H / 2 + (this.scale * Math.sqrt(3)) / 4;
-    this.draw(Int32Array.from({ length: P.N }, (_, i) => 3 * i), null, { textures: look.textures, controls: false });
+    this.draw(P.home, null, { textures: look.textures, controls: false });
   }
 }
 // (screen-space triangle helpers)
