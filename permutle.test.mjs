@@ -6,9 +6,9 @@ import { solvedPlanarState, applyPlanarMove } from "./planar.mjs";
 const preset = PERMUTLE_PRESETS[0];
 const build = (words) => buildPermutle({ ...preset, height: words.length, words: encodeWords(words) });
 
-test("Wordle's answers are words; Scrabble-only words and plurals aren't", () => {
-  for (const w of ["crane", "SLIDE", "every"]) assert.ok(isWord(w), w);
-  for (const w of ["alate", "laddy", "cards", "aaaaa"]) assert.ok(!isWord(w), w);
+test("Wordle's answers and other common words count, plurals too; rare Scrabble words don't", () => {
+  for (const w of ["crane", "SLIDE", "every", "votes", "cards", "games"]) assert.ok(isWord(w), w);
+  for (const w of ["alate", "laddy", "aahed", "aaaaa"]) assert.ok(!isWord(w), w);
 });
 
 test("words go into a link's code and come back", () => {

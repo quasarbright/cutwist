@@ -122,12 +122,12 @@ test("scramble, then undoing it by hand, solves it", async ({ page }) => {
 
 test("the views: flat only, 3D only, both; the rear view stays off while the flat view shows", async ({ page }) => {
   await load(page);
-  await expect(page.locator("#rear")).toBeDisabled();
+  await expect(page.locator("#rear")).toBeHidden();
   await openView(page);
   await page.check("#view3D");
   await page.uncheck("#viewFlat");
   await expect(page.locator("#plane")).toBeHidden();
-  await expect(page.locator("#rear")).toBeEnabled();
+  await expect(page.locator("#rear")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("flat")).toBe("off");
   await page.check("#viewFlat");
   await page.uncheck("#view3D");

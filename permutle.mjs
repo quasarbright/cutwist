@@ -1,21 +1,22 @@
 // Permutle: a sliding torus (planar.mjs) whose cells are letters. It starts as a few
-// five-letter words from Wordle's answers, one per row, slid apart; it's solved when every row spells a word, any
-// word, not just the ones it started as. The moves, history and drawing are the torus's; this
-// adds the letters and the words.
+// five-letter words from Wordle's answers, one per row, slid apart; it's solved when every row
+// spells a word: any common word (plurals too), not just the ones it started as. The moves,
+// history and drawing are the torus's; this adds the letters and the words.
 //
-// A puzzle's words travel in its link as `words`: each word's place in the full list, 3 base-36
+// A puzzle's words travel in its link as `words`: each word's place in Wordle's answers, 3 base-36
 // digits apiece (so a link doesn't spell out the answer).
 import { buildPlanar, planarScrambleMoves, applyPlanarMove, pieceOf } from "./planar.mjs";
-import { WORDS } from "./permutle-words.mjs"; // (Wordle's answers: what counts, and what it starts from)
+// (Wordle's answers, which it starts from; and other common words, which count as words too)
+import { WORDS, ALSO } from "./permutle-words.mjs";
 
 export const WORD = 5; // letters per word: a row
 const split = (s) => Array.from({ length: s.length / WORD }, (_, i) => s.slice(i * WORD, (i + 1) * WORD));
-let valid = null, place = null;
+let valid = null, place = null, known = null;
 const words = () => {
-  if (!valid) { valid = split(WORDS); place = new Map(valid.map((w, i) => [w, i])); }
-  return { valid, place };
+  if (!valid) { valid = split(WORDS); place = new Map(valid.map((w, i) => [w, i])); known = new Set([...valid, ...split(ALSO)]); }
+  return { valid, place, known };
 };
-export const isWord = (w) => words().place.has(w.toLowerCase());
+export const isWord = (w) => words().known.has(w.toLowerCase());
 
 export const PERMUTLE_PRESETS = [{
   id: "permutle", name: "Permutle", rule: "planar", permutle: true, size: 2, fixed: true, noCustom: true,

@@ -57,14 +57,14 @@ test("rear view: on by default on a wide screen; the button toggles it, goes in 
   expect(rearParam()).toBeNull();
   // a planar puzzle with its flat grid on screen: no rear view
   await page.evaluate(() => window.cutwist.load("sliding-klein"));
-  await expect(page.locator("#rear")).toBeDisabled();
+  await expect(page.locator("#rear")).toBeHidden();
   expect((await info(page)).rear).toBe(false);
   await expect(page.locator("#rearSplit")).toBeHidden();
   // only the 3D surface: back on
   await openView(page);
   await page.check("#view3D");
   await page.uncheck("#viewFlat");
-  await expect(page.locator("#rear")).toBeEnabled();
+  await expect(page.locator("#rear")).toBeVisible();
   expect((await info(page)).rear).toBe(true);
   await page.click("#rear");
   expect((await info(page)).rear).toBe(false);

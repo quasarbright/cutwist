@@ -62,6 +62,7 @@
     /* rear view: the line between the two views, named at its foot */
     #surfaceShape[hidden] { display: none; } /* (the bar's own display would override hidden) */
     #rear { white-space: nowrap; }
+    #rear[hidden] { display: none; }
     /* not applicable (a flat grid on screen): grayed out, flat, and it won't press */
     #rear:disabled { color: var(--faint); background: transparent; border-color: var(--border); opacity: .6; cursor: not-allowed; }
     .tw-split { position: fixed; width: 1px; background: var(--border); z-index: 2; pointer-events: none; }
@@ -789,8 +790,8 @@
 
       <div class="section-label">Permutle</div>
       <p>Permutle is the sliding torus with a letter on each cell. It starts as common five-letter
-        words, one per row, then gets slid apart. A row turns green when it spells a word, and the puzzle
-        is solved when every row does. Any words count, so there's usually more than one way to
+        words, one per row, then gets slid apart. A row turns green when it spells a common word, plurals
+        included, and the puzzle is solved when every row does. Any words count, so there's usually more than one way to
         finish. Sliding a row only rotates its letters, so the work is in the columns, which trade
         letters between rows.</p>
     </about-modal>
@@ -2486,6 +2487,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function renderRearButton() {
       const ok = rearAllowed();
       $("rear").disabled = !ok;
+      $("rear").hidden = !ok; // (only there when it can be used: the 3D view alone on screen)
       $("rear").classList.toggle("is-active", rearOn());
       $("rear").setAttribute("aria-pressed", String(rearOn()));
       $("rear").title = ok ? "show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same"
