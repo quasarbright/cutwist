@@ -30,12 +30,18 @@ test("a row goes green when it's a word, and every row a word is solved", async 
   await page.evaluate(() => window.cutwist.deal([{ axis: 0, layer: 2, q: 1 }, { axis: 1, layer: 0, q: 2 }]));
   // (EVERY one right, then the first column two down; SOUND happens to be a word too)
   expect(await info(page)).toMatchObject({ rows: ["RRANE", "SLIDE", "CEVER", "SOUND", "YOLVE"], wordRows: [false, true, false, true, false], solved: false });
+  await expect(page.locator("#shareWords")).toBeHidden(); // (till it's solved)
   await turn(page, [1, 0, -2]);
   expect((await info(page)).wordRows).toEqual([true, true, false, true, true]);
   await turn(page, [0, 2, -1]);
   const s = await info(page);
   expect(s.solved).toBe(true);
   await expect(page.locator("#tapeStatus")).toHaveText("solved · 2 moves");
+  // (solved: share, the grid's colors and no letters)
+  await expect(page.locator("#shareWords")).toBeVisible();
+  const result = await page.evaluate(() => window.cutwist.wordsResult());
+  expect(result).toMatch(/^Permutle · 5 words\n(🟩{5}\n){5}2 moves · [\d.:]+\nhttp\S+words=0cq1dl0ix18w1f2/u);
+  expect(result).not.toMatch(/CRANE|crane/);
   // (reset goes back to the deal, never to the words)
   await page.click("#reset");
   expect((await info(page)).solved).toBe(false);

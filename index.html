@@ -636,6 +636,8 @@
     <button class="nx-act" id="redo" title="redo a turn you undid (⇧⌘Z)">redo ↷</button>
     <button class="nx-act" id="scramble" title="mix the puzzle up with random turns">scramble</button>
     <button class="nx-act" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
+    <!-- (Permutle, solved: the grid's colors as emoji, like Wordle's) -->
+    <button class="nx-act" id="shareWords" title="copy your result: the grid's colors as emoji, your moves and time, and a link to these words" hidden>share</button>
   </div>
 
   <!-- the shelf: every puzzle as a picture, dropping down from the name -->
@@ -1551,6 +1553,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         : isHyper() ? (viewFlat ? `drag a circle · tap a middle · drag elsewhere to slide${view3D ? " the disk" : ""}` : "drag to rotate · turn it on the flat view")
         : "drag a sticker to turn · drag outside to rotate";
       nxRenderTape(solved);
+      $("shareWords").hidden = !(isWords() && solved);
     }
 
     // Look at the corner where face 0 meets its two nearest neighbors, with the first
@@ -2611,6 +2614,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       wordGlow = wordRows(P, state).map(Number);
       timer.arm(); renderTimer();
     }
+    // Permutle's result, as Wordle shares one: the grid's colors (no letters), the moves and time,
+    // and the link to the same words
+    function wordsResult() {
+      const grid = wordRows(P, state).map((w) => (w ? "🟩" : "⬛").repeat(P.W)).join("\n");
+      const n = history.movesDone, time = timer.t ? ` · ${formatTime(timer.ms)}` : "";
+      return `Permutle · ${P.H} words\n${grid}\n${n === 1 ? "1 move" : `${n} moves`}${time}\n${location.href}`;
+    }
+    $("shareWords").onclick = async () => {
+      const text = wordsResult(), b = $("shareWords");
+      try { await navigator.clipboard.writeText(text); b.textContent = "copied"; }
+      catch { try { await navigator.share({ text }); } catch { b.textContent = "couldn't copy"; } }
+      clearTimeout(b.reset); b.reset = setTimeout(() => { b.textContent = "share"; }, 1500);
+    };
     $("scramble").onclick = () => {
       if (!isWords()) { scramble(); return; }
       paramVals.words = newPermutleWords(currentSpec().height);
@@ -5832,6 +5848,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       invert(moves) { return history.inverseOf(moves); },
       // Permutle: deal these moves from its words, in place of a random deal
       deal(moves) { dealWords(moves); renderTape(); return this.info(); },
+      // (and the result its share button copies)
+      wordsResult() { return wordsResult(); },
       shareLink() { return shareLink(); },
       get state() { return Array.from(state); },
       info() {
