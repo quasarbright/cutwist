@@ -4334,12 +4334,15 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointercancel", endSierPress);
 
     const refView = new PlanarView($("refPlane"));
-    // Permutle: how green each row is, 0 to 1, easing toward whether it spells a word now
+    // Permutle: how green each row is, 0 to 1, easing toward whether it spells a word now. A row
+    // a slide is taking letters out of isn't one while it moves: a column takes one from every
+    // row, a row slides its own (fading in again if it lands on a word).
     let wordGlow = [], glowAt = 0;
     function easeWordGlow() {
       const now = performance.now(), k = Math.min(1, (now - glowAt) / 180);
       glowAt = now;
-      const on = wordRows(P, state);
+      const moving = anim && Math.abs(anim.theta) > 0.02 ? anim : null;
+      const on = wordRows(P, state).map((w, y) => w && !(moving && (moving.axis === 1 || moving.layer === y)));
       wordGlow = on.map((w, y) => { const g = wordGlow[y] ?? 0, to = w ? 1 : 0; return Math.abs(to - g) <= k ? to : g + Math.sign(to - g) * k; });
     }
     function drawPlanar() {
