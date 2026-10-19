@@ -1,20 +1,22 @@
 // Drawing and hit-testing for the Sierpinski puzzle (sierpinski.mjs) on a 2D canvas, as
-// tile-view.mjs does for the tori. The page owns the state, the animation queue and input.
+// tile-view.mjs does for the tori. The page owns the state and the turns; this owns the camera.
 //
 // Every triangle is a piece, drawn with its thirds over it: the thirds together shrunk a little about
 // its middle (K), so they touch at their corners and a band of it shows round them as well as its
-// middle. A turn turns what shows of each piece it carries (its band and middle; the smallest, all of
-// it) about the turn's middle. A zoom is the camera into the third (its triangle onto the whole's),
-// the smallest triangles that come back in fading in, in their places, as it goes.
+// middle. The puzzle holds itself: each smallest triangle's thirds are copies of the whole, turned
+// the way that triangle faces, holding copies too, drawn down to a few pixels (fading in by size, so
+// nothing pops as they grow). A turn shows wherever its pieces do, every copy too, as the tori's
+// copies turn.
 //
-// The turns are circles, as the tori's are, in the middle of the triangle they turn (as drawn in the
-// issue): the inner one its ring, the outer one the whole triangle; a press on a circle's line drags
-// it. A dot at the very middle zooms in on that triangle.
+// The camera: a path of digits from the whole (a third at each step: past a smallest triangle,
+// into one of its copies, the whole again). The view shows the triangle at the end of the path, its
+// own way up, filling the screen's triangle; so zooming in through a copy is exactly where it started.
+// A zoom moves the camera there smoothly, what's round the third fading out.
 //
-// The puzzle holds itself, so each smallest triangle shows a copy of the whole puzzle inside its band,
-// as it is now, turning as it turns (as the tori show copies round the patch); the copies hold copies,
-// down to a few pixels. A zoom brings other triangles in there than the copies show: the copies fade
-// as the camera goes in, and the triangles coming in fade in, in their places.
+// The turns' circles sit in the middle of the triangle they turn (the inner its ring, the outer the
+// whole triangle), and a dot at the very middle zooms in on it: wherever the triangle shows big
+// enough, copies too (a copy's are the same pieces' turns). Each frame records what it drew, for
+// hit-testing.
 import { inkPattern } from "./tile-view.mjs";
 import { faceTextures } from "./puzzle.mjs";
 
@@ -32,13 +34,25 @@ const shrink = (C, k, m = centerOf(C)) => C.map((q) => [m[0] + k * (q[0] - m[0])
 // a triangle's thirds, laid out inside it (corner j of each toward corner j of it), and its middle
 const thirdOf = (C, c) => { const m = centerOf(C); return shrink(C.map((_, j) => [(C[c][0] + C[j][0]) / 2, (C[c][1] + C[j][1]) / 2]), K, m); };
 export const middleOf = (C) => { const I = shrink(C, K); return [[1, 2], [2, 0], [0, 1]].map(([u, v]) => [(I[u][0] + I[v][0]) / 2, (I[u][1] + I[v][1]) / 2]); };
-// the corners of the triangle at an address (any length: a zoom draws a level past the smallest)
+// the corners of the triangle at an address
 export function cornersOf(a) { let C = ROOT; for (const c of a) C = thirdOf(C, c); return C; }
 const inTri = ([x, y], C) => {
   const s = (a, b) => (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
   const d1 = s(C[0], C[1]), d2 = s(C[1], C[2]), d3 = s(C[2], C[0]);
   return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 };
+// affine maps [a, b, c, d, e, f]: (x, y) → (a x + c y + e, b x + d y + f)
+const apply = (m, [x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+// the map taking triangle p's corners onto q's
+function mapTri(p, q) {
+  const [p0, p1, p2] = p, [q0, q1, q2] = q, det = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
+  const a = ((q1[0] - q0[0]) * (p2[1] - p0[1]) - (q2[0] - q0[0]) * (p1[1] - p0[1])) / det, c = ((q2[0] - q0[0]) * (p1[0] - p0[0]) - (q1[0] - q0[0]) * (p2[0] - p0[0])) / det;
+  const b = ((q1[1] - q0[1]) * (p2[1] - p0[1]) - (q2[1] - q0[1]) * (p1[1] - p0[1])) / det, d = ((q2[1] - q0[1]) * (p1[0] - p0[0]) - (q1[1] - q0[1]) * (p2[0] - p0[0])) / det;
+  return [a, b, c, d, q0[0] - a * p0[0] - c * p0[1], q0[1] - b * p0[0] - d * p0[1]];
+}
+const rotAbout = ([cx, cy], t) => { const c = Math.cos(t), s = Math.sin(t); return (p) => [cx + c * (p[0] - cx) - s * (p[1] - cy), cy + s * (p[0] - cx) + c * (p[1] - cy)]; };
+// (a turned triangle's corners in its own order: corner j where corner j − f was)
+const turned = (C, f) => [0, 1, 2].map((j) => C[(j + f) % 3]);
 
 export class SierView {
   constructor(canvas) {
@@ -47,136 +61,189 @@ export class SierView {
     this.P = null;
     this.scale = 300; this.ox = 0; this.oy = 0; // CSS px per unit (the whole's side), and where (0, 0) is
     this.origin = { x: 0, y: 0 };
+    this.path = []; // the camera (see the top)
+    this.zoom = null; // a zoom going: { outer (path), rel (digits in from it), dir, t0, dur }
+    this.drawn = { circles: [], dots: [] }; // what the last frame drew (hit-testing)
   }
-  // the triangle fits a width w with this height (and room round it for the zoom buttons)
   heightFor(P, w) { return (w * Math.sqrt(3)) / 2 + 90; }
   layout(P, safe) {
-    if (P !== this.P) this.geo = null;
-    this.P = P;
-    // (room round it: the zoom buttons at its corners)
+    if (P !== this.P) { this.P = P; this.path = []; this.zoom = null; this.subtrees = null; }
+    // (room round it: the zoom marks by its corners)
     const w = Math.max(40, safe.right - safe.left - 110), h = Math.max(40, safe.bottom - safe.top - 100);
     this.scale = Math.min(w, (h * 2) / Math.sqrt(3));
     this.ox = (safe.left + safe.right) / 2;
     this.oy = (safe.top + safe.bottom) / 2 + (this.scale * Math.sqrt(3)) / 4;
   }
-  // every place's corners (plane), once a puzzle
+  toScreen([x, y]) { return { x: this.ox + x * this.scale, y: this.oy - y * this.scale }; }
+  screenRoot() { return ROOT.map((p) => { const s = this.toScreen(p); return [s.x, s.y]; }); }
+  corner(c) { const s = this.screenRoot()[c]; return { x: s[0], y: s[1] }; }
+  // each place's corners (plane), and the places in each place's triangle, its own first, by level
   places() { return (this.geo ??= this.P.addr.map((a) => cornersOf(a))); }
-  // (xf: while a copy's drawn, the plane map from the whole onto the copy; see copy)
-  toScreen([x, y]) { const f = this.xf; if (f) [x, y] = [f[0] * x + f[2] * y + f[4], f[1] * x + f[3] * y + f[5]]; return { x: this.ox + x * this.scale, y: this.oy - y * this.scale }; }
-  toPlane(px, py) { return [(px - this.ox) / this.scale, (this.oy - py) / this.scale]; }
+  under(i) {
+    if (!this.subtrees) { const P = this.P; this.subtrees = P.addr.map((p) => P.addr.map((_, j) => j).filter((j) => P.within(p, P.addr[j])).sort((x, y) => P.addr[x].length - P.addr[y].length)); }
+    return this.subtrees[i];
+  }
 
-  // ---- hit testing (CSS px) ----
-  // the triangle whose middle a point is in (its index in P.middles), or null
-  holeAt(px, py) {
-    const p = this.toPlane(px, py), G = this.places();
-    for (let h = 0; h < this.P.middles.length; h++) if (inTri(p, middleOf(G[this.P.index(this.P.middles[h])]))) return h;
-    return null;
-  }
-  // the smallest place a point is in (in its band or its middle, or all of it), or null
-  placeAt(px, py) {
-    const p = this.toPlane(px, py), G = this.places();
-    let best = null;
-    this.P.addr.forEach((a, i) => { if (inTri(p, G[i]) && (best === null || a.length > this.P.addr[best].length)) best = i; });
-    return best;
-  }
-  // a middle's inner circle's radius on screen (the inverted triangle's: it touches its sides)
-  inRadius(C) { const M = middleOf(C), m = this.toScreen(centerOf(M)), a = this.toScreen(M[1]), b = this.toScreen(M[2]); return Math.abs((b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x)) / Math.hypot(b.x - a.x, b.y - a.y); }
-  // every turn's circle, on screen: { axis, layer, x, y, r }: in its triangle's middle, the ring's
-  // inside the whole triangle's
-  circles() {
-    const { P } = this, G = this.places(), out = [];
-    P.axes.forEach((ax, h) => {
-      if (ax.kind !== "hole") return;
-      const C = G[P.index(ax.p)], m = this.toScreen(centerOf(C)), r = this.inRadius(C);
-      if (ax.ring) out.push({ axis: h, layer: 0, x: m.x, y: m.y, r: (ax.layers > 1 ? 0.48 : 0.7) * r });
-      if (ax.layers > 1) out.push({ axis: h, layer: 1, x: m.x, y: m.y, r: 0.8 * r });
-    });
-    return out;
-  }
-  // the circle whose line passes nearest a point, within tol px: { axis, layer, px (how near) }, or null
-  circleAt(px, py, tol = 10) {
-    let best = null;
-    for (const c of this.circles()) {
-      const d = Math.abs(Math.hypot(px - c.x, py - c.y) - c.r);
-      if (d < tol && (!best || d < best.px)) best = { axis: c.axis, layer: c.layer, px: d };
+  // ---- the camera ----
+  // the place a path ends at, and the way a turn it passes through copies has turned it (state: where
+  // the pieces are: a copy is turned the way its smallest triangle faces)
+  walk(path, state) {
+    const P = this.P;
+    let i = 0, turn = 0;
+    for (const d of path) {
+      if (P.smallest[i]) { turn = (turn + (state[i] % 3)) % 3; i = 0; } // (into a copy: the whole again)
+      else i = P.index([...P.addr[i], d]);
     }
+    return { i, turn };
+  }
+  // where the triangle a path's digits lead to from the view's top shows (screen corners, its own
+  // order), the view's top at screen corners S
+  nodeCorners(rel, state, S = this.screenRoot(), from = this.walk(this.path, state).i) {
+    const P = this.P;
+    let i = from, m = mapTri(this.places()[i], S);
+    for (const d of rel) {
+      if (P.smallest[i]) { const slot = turned(thirdOf(this.places()[i], d), state[i] % 3).map((p) => apply(m, p)); m = mapTri(ROOT, slot); i = 0; }
+      else i = P.index([...P.addr[i], d]);
+    }
+    return this.places()[i].map((p) => apply(m, p));
+  }
+  busy() { return !!this.zoom; }
+  // zoom in on the view's third c, or out (the view becoming the third c of what's round it: back up
+  // the path if it came in that way, or, from the top, into the far corner's copy that way)
+  zoomIn(c, state) { if (this.zoom) return; this.go(this.path.slice(), [c], 1); }
+  zoomOut(c, state) {
+    if (this.zoom) return;
+    const p = this.path;
+    if (p.length) { if (p.at(-1) !== c) return; this.go(p.slice(0, -1), [c], -1); }
+    else this.go(Array(this.P.L - 1).fill(c), [c], -1);
+  }
+  canZoomOut(c) { return !this.path.length || this.path.at(-1) === c; }
+  // zoom in down a path of digits from the view (a dot: to the triangle it's in)
+  zoomTo(rel) { if (this.zoom || !rel.length) return; this.go(this.path.slice(), rel.slice(), 1); }
+  go(outer, rel, dir) {
+    const dur = 700 * Math.min(2.4, Math.max(1, Math.log2(1 + rel.length)));
+    this.zoom = { outer, rel, dir, t0: performance.now(), dur };
+    this.path = dir > 0 ? [...outer, ...rel] : outer.slice();
+  }
+
+  // ---- hit testing (CSS px), against what the last frame drew ----
+  // the circle whose line passes nearest a point, within tol px: { axis, layer, x, y, r, center (plane), px }, or null
+  circleAt(px, py, tol = 10) {
+    if (this.zoom) return null;
+    let best = null;
+    for (const c of this.drawn.circles) { const d = Math.abs(Math.hypot(px - c.x, py - c.y) - c.r); if (d < tol && (!best || d < best.px)) best = { ...c, px: d }; }
     return best;
   }
-  // the middle whose dot a point is near (a tap there zooms, winning over a circle's line, as the
-  // tori's tap zones win round a middle): within 45% of its ring's circle's radius of its middle, or null
+  // the dot a point is on (its zone: inside the inner circle, or most of a middle with none), or null: { rel (digits in from the view), x, y }
   dotAt(px, py) {
-    const h = this.holeAt(px, py);
-    if (h === null || h === 0) return null;
-    // (the dot's own zone: inside the inner circle, if any, or most of the middle)
-    const C = this.places()[this.P.index(this.P.middles[h])], m = this.toScreen(centerOf(C)), r = this.inRadius(C), inner = this.circles().find((q) => q.x === m.x && q.y === m.y);
-    return Math.hypot(px - m.x, py - m.y) < (inner ? 0.25 * r : 0.6 * r) ? h : null;
+    if (this.zoom) return null;
+    let best = null;
+    for (const d of this.drawn.dots) { const r = Math.hypot(px - d.x, py - d.y); if (r < d.zone && (!best || r < best.r)) best = { ...d, r }; }
+    return best;
   }
-  // a middle on screen (h: its index in P.middles)
-  holeCenter(h) { return this.toScreen(centerOf(this.places()[this.P.index(this.P.middles[h])])); }
-  // the whole's corners on screen (the zoom buttons go by them)
-  corner(c) { return this.toScreen(ROOT[c]); }
-
+  // a turn's circle as drawn (the biggest: the view's own), or undefined; a place's middle on screen
+  circle(axis, layer) { return this.drawn.circles.filter((c) => c.axis === axis && c.layer === layer).sort((a, b) => b.r - a.r)[0]; }
   // ---- drawing ----
-  // state: place → the triangle there. turn: { places (a Set: what's turning), center (plane),
-  // theta (radians, counterclockwise) }, or { zoom: { before, after, c, dir (+1 in, −1 out), u (0 to
-  // 1) } }, or null. look: { hover ({ axis, layer }), lit (a Set of places), litAlpha, textures,
-  // dots (the zoom dots in the middles; dotHover the one lit) }.
-  draw(state, turn, look = {}) {
+  // state: place → piece * 3 + facing. turn: { places (a Set: what's turning), center (plane), theta
+  // (radians, counterclockwise) } or null. look: { hover ({ axis, layer }), lit (a Set of places),
+  // litAlpha, textures, dotHover (a dot's rel, joined), controls (false: none) }.
+  draw(state, turn, look = {}, now = performance.now()) {
     const { ctx, canvas } = this, dpr = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, -this.origin.x * dpr, -this.origin.y * dpr);
     this.dpr = dpr;
-    if (turn && turn.zoom) { this.drawZoom(turn.zoom, look); return; }
-    this.paint(state, turn && turn.places ? turn : null, look);
-    if (look.dots !== false) this.drawDots(look.dotHover ?? null);
-    if (look.circles !== false) this.drawCircles(look.hover);
-  }
-  // the puzzle: places still, bigger first (each covered by its thirds but for its band and middle),
-  // then what's turning: what shows of each, turned
-  paint(state, turn, look) {
-    const { P, ctx } = this, G = this.places(), moving = turn ? turn.places : null;
-    const order = P.addr.map((_, i) => i).sort((i, j) => P.addr[i].length - P.addr[j].length), smallest = (i) => P.addr[i].length === P.L - 1;
-    // (a zoom's fade: everything outside the third it goes into, alpha look.fade.alpha)
-    const ga = ctx.globalAlpha, outside = (i) => look.fade && P.addr[i][0] !== look.fade.c;
-    for (const i of order) if (!moving || !moving.has(i)) {
-      if (outside(i)) ctx.globalAlpha = ga * look.fade.alpha;
-      this.fill(this.tri(G[i]), state[i], look, look.lit && look.lit.has(i));
-      if (smallest(i)) this.copy(G[i], state, turn, look);
-      ctx.globalAlpha = ga;
+    this.drawn = { circles: [], dots: [] };
+    this.look = look; this.state = state; this.turn = turn;
+    const S = this.screenRoot();
+    if (this.zoom) {
+      // the camera: from the outer view onto the inner triangle (in) or back (out), eased, about the
+      // point the map holds still (a similarity: its complex number's power)
+      const z = this.zoom, u0 = Math.min(1, (now - z.t0) / z.dur), u = u0 < 0.5 ? 4 * u0 ** 3 : 1 - (-2 * u0 + 2) ** 3 / 2, v = z.dir > 0 ? u : 1 - u;
+      const outerTop = this.walk(z.outer, state).i, inner = this.nodeCorners(z.rel, state, S, outerTop);
+      const M = mapTri(inner, S), cam = power(M, v);
+      ctx.save();
+      ctx.transform(cam[0], cam[1], cam[2], cam[3], cam[4], cam[5]);
+      this.camScale = Math.hypot(cam[0], cam[1]);
+      // (what's round the inner triangle fading out as the camera goes in; the inner one whole)
+      ctx.globalAlpha = 1 - v;
+      this.node(outerTop, mapTri(this.places()[outerTop], S), [], false);
+      ctx.globalAlpha = 1;
+      const end = this.walk([...z.outer, ...z.rel], state).i;
+      this.node(end, mapTri(this.places()[end], inner), [], false);
+      ctx.restore();
+      this.camScale = 1;
+      if (u0 >= 1) this.zoom = null;
+      return;
     }
-    if (!moving) return;
+    this.camScale = 1;
+    const top = this.walk(this.path, state).i;
+    this.node(top, mapTri(this.places()[top], S), [], look.controls !== false);
+    if (look.controls !== false) this.drawControls();
+  }
+  // Place i's triangle (and everything in it) drawn by plane map m onto the screen; rel: the digits
+  // in from the view (for its dots); record: its turns' circles and dots too
+  node(i, m, rel, record, depth = 0) {
+    const { P, ctx, state, turn, look } = this, G = this.places(), sub = this.under(i);
+    const moving = turn && turn.places, spin = moving ? rotAbout(turn.center, turn.theta) : null;
+    const px = (C) => C.map((p) => apply(m, p)), size = (Q) => Math.hypot(Q[2][0] - Q[1][0], Q[2][1] - Q[1][1]) * this.camScale;
+    const cornersAt = (j) => (moving && moving.has(j) ? G[j].map(spin) : G[j]);
+    // (still ones, bigger first; then what's turning: its band and middle, the smallest all of it)
+    for (const j of sub) if (!moving || !moving.has(j)) this.fill(this.tri(px(G[j])), state[j], look.lit && look.lit.has(j));
+    if (moving) for (const j of sub) if (moving.has(j)) {
+      const Q = px(cornersAt(j)), path = this.tri(Q);
+      if (!P.smallest[j]) { this.tri(shrink(Q, K), path); this.tri(middleOfScreen(Q), path); }
+      this.fill(path, state[j], look.lit && look.lit.has(j));
+    }
+    // the copies in each smallest one, turned its way, while they show (fading in from 8 px to 16)
+    for (const j of sub) {
+      if (!P.smallest[j]) continue;
+      const C = cornersAt(j), f = state[j] % 3;
+      for (let k = 0; k < 3; k++) {
+        const slot = px(turned(thirdOf(C, k), f)), s = size(slot);
+        if (s < 8 || depth > 6) continue;
+        const ga = ctx.globalAlpha;
+        ctx.globalAlpha = ga * Math.min(1, (s - 8) / 8);
+        this.node(0, mapTri(ROOT, slot), [...rel, ...P.addr[j].slice(P.addr[i].length), k], record && s > 40, depth + 1);
+        ctx.globalAlpha = ga;
+      }
+    }
+    if (!record) return;
+    // its turns' circles and dots, where big enough to use (not on what's turning)
+    for (const j of sub) {
+      if (moving && moving.has(j)) continue;
+      const Q = px(G[j]), M = middleOfScreen(Q), mid = centerOfS(M), r = inRadiusS(M);
+      if (r < 9) continue;
+      const h = P.holes.findIndex((p) => p.length === P.addr[j].length && P.within(p, P.addr[j])), ax = h >= 0 ? P.axes[h] : null;
+      const there = { x: mid[0], y: mid[1], center: centerOf(G[j]) };
+      if (ax && ax.ring) this.drawn.circles.push({ axis: h, layer: 0, ...there, r: 0.48 * r });
+      if (ax) this.drawn.circles.push({ axis: h, layer: 1, ...there, r: (ax.ring ? 0.8 : 0.7) * r });
+      const relHere = [...rel, ...P.addr[j].slice(P.addr[i].length)];
+      if (relHere.length) this.drawn.dots.push({ rel: relHere, x: mid[0], y: mid[1], r: Math.max(2.5, Math.min(6, r * 0.12)), zone: (ax ? 0.25 : 0.55) * r });
+    }
+  }
+  // the controls recorded: circles black (the one hovered or turning lit yellow over black), dots black
+  drawControls() {
+    const { ctx, look } = this, hover = look.hover;
     ctx.save();
-    const c = this.toScreen(turn.center);
-    ctx.translate(c.x, c.y); ctx.rotate(-turn.theta); ctx.translate(-c.x, -c.y);
-    for (const i of order) if (moving.has(i)) { this.fill(this.shown(G[i], smallest(i)), state[i], look, look.lit && look.lit.has(i)); if (smallest(i)) this.copy(G[i], state, turn, look); }
+    for (const c of this.drawn.circles) {
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 2 * Math.PI);
+      const w = Math.max(1.5, Math.min(3.5, c.r * 0.09));
+      if (hover && hover.axis === c.axis && hover.layer === c.layer) { ctx.lineWidth = w + 2.4; ctx.strokeStyle = BODY; ctx.stroke(); ctx.lineWidth = w; ctx.strokeStyle = HOVER; ctx.stroke(); }
+      else { ctx.lineWidth = w; ctx.strokeStyle = BODY; ctx.stroke(); }
+    }
+    for (const d of this.drawn.dots) {
+      const lit = look.dotHover && look.dotHover === d.rel.join("");
+      ctx.beginPath(); ctx.arc(d.x, d.y, lit ? d.r + 1.5 : d.r, 0, 2 * Math.PI);
+      ctx.fillStyle = lit ? HOVER : BODY;
+      ctx.fill();
+    }
     ctx.restore();
   }
-  // a copy of the whole puzzle in a smallest triangle's place C (plane), inside its band: the same
-  // state and turn, drawn with the plane mapped onto it; none once it's under 10 px across
-  copy(C, state, turn, look) {
-    const alpha = look.copyAlpha ?? 1, T = shrink(C, K), a = this.toScreen(T[1]), b = this.toScreen(T[2]);
-    if (alpha <= 0 || Math.hypot(b.x - a.x, b.y - a.y) < 10) return;
-    // (the map: (x, y) of the whole onto T, from the whole's corners onto T's; then the copy's own map)
-    const [p0, p1, p2] = ROOT, [q0, q1, q2] = T, det = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
-    const A = (q1[0] - q0[0]) * (p2[1] - p0[1]) - (q2[0] - q0[0]) * (p1[1] - p0[1]), B = (q2[0] - q0[0]) * (p1[0] - p0[0]) - (q1[0] - q0[0]) * (p2[0] - p0[0]);
-    const Cc = (q1[1] - q0[1]) * (p2[1] - p0[1]) - (q2[1] - q0[1]) * (p1[1] - p0[1]), Dd = (q2[1] - q0[1]) * (p1[0] - p0[0]) - (q1[1] - q0[1]) * (p2[0] - p0[0]);
-    const m = [A / det, Cc / det, B / det, Dd / det], e = q0[0] - m[0] * p0[0] - m[2] * p0[1], f = q0[1] - m[1] * p0[0] - m[3] * p0[1];
-    const outer = this.xf, cur = outer || [1, 0, 0, 1, 0, 0];
-    this.xf = [cur[0] * m[0] + cur[2] * m[1], cur[1] * m[0] + cur[3] * m[1], cur[0] * m[2] + cur[2] * m[3], cur[1] * m[2] + cur[3] * m[3], cur[0] * e + cur[2] * f + cur[4], cur[1] * e + cur[3] * f + cur[5]];
-    const ga = this.ctx.globalAlpha;
-    this.ctx.globalAlpha = ga * alpha;
-    this.paint(state, turn, { ...look, lit: null, copyAlpha: 1, fade: null });
-    this.ctx.globalAlpha = ga;
-    this.xf = outer;
-  }
-  // a triangle as a path (screen)
-  tri(C, path = new Path2D()) { const q = C.map((p) => this.toScreen(p)); path.moveTo(q[0].x, q[0].y); path.lineTo(q[1].x, q[1].y); path.lineTo(q[2].x, q[2].y); path.closePath(); return path; }
-  // what shows of a triangle: its band and its middle (even-odd), or, the smallest, all of it
-  shown(C, smallest) { const path = this.tri(C); if (!smallest) { this.tri(shrink(C, K), path); this.tri(middleOf(C), path); } return path; }
-  // a path filled as piece `piece` shows (lit: lightened)
-  fill(path, piece, look, lit = false) {
-    const { ctx, P } = this, color = SIER_COLORS[P.colorOf[piece]], tex = look.textures ? textureSet[P.colorOf[piece]] : 0;
+  tri(Q, path = new Path2D()) { path.moveTo(Q[0][0], Q[0][1]); path.lineTo(Q[1][0], Q[1][1]); path.lineTo(Q[2][0], Q[2][1]); path.closePath(); return path; }
+  // a path filled as piece v (piece * 3 + facing) shows (lit: lightened)
+  fill(path, v, lit = false) {
+    const { ctx, P, look } = this, piece = Math.floor(v / 3), color = SIER_COLORS[P.colorOf[piece]], tex = look.textures ? textureSet[P.colorOf[piece]] : 0;
     ctx.fillStyle = color;
     ctx.fill(path, "evenodd");
     if (tex || lit) {
@@ -188,67 +255,30 @@ export class SierView {
       ctx.restore();
     }
   }
-  // the turns' circles: black, as drawn in the issue, the one hovered or turning lit as the tori
-  // light theirs (yellow over black)
-  drawCircles(hover) {
-    const { ctx } = this;
-    ctx.save();
-    for (const c of this.circles()) {
-      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 2 * Math.PI);
-      const w = Math.max(1.5, Math.min(3.5, c.r * 0.09));
-      if (hover && hover.axis === c.axis && hover.layer === c.layer) { ctx.lineWidth = w + 2.4; ctx.strokeStyle = BODY; ctx.stroke(); ctx.lineWidth = w; ctx.strokeStyle = HOVER; ctx.stroke(); }
-      else { ctx.lineWidth = w; ctx.strokeStyle = BODY; ctx.stroke(); }
-    }
-    ctx.restore();
-  }
-  // the zoom dots, in every middle but the whole's (a tap there zooms in till it's the whole's)
-  drawDots(hover) {
-    const { ctx, P } = this;
-    for (let h = 1; h < P.middles.length; h++) {
-      const c = this.holeCenter(h), r = Math.max(2.5, Math.min(6, this.inRadius(this.places()[P.index(P.middles[h])]) * 0.12));
-      ctx.beginPath(); ctx.arc(c.x, c.y, h === hover ? r + 1.5 : r, 0, 2 * Math.PI);
-      ctx.fillStyle = h === hover ? HOVER : BODY;
-      ctx.fill();
-    }
-  }
-  // A zoom into third c, part way (u): the camera from the whole onto the third (a scaling about the
-  // point it holds still), the puzzle as it was under it, and the smallest triangles that come back in
-  // growing into their places, a level past the smallest. Zooming out: the same, backwards.
-  drawZoom({ before, after, c, dir, u }, look) {
-    const { ctx, P } = this, L = P.L;
-    const [from, to, v] = dir > 0 ? [before, after, u] : [after, before, 1 - u];
-    // (the camera: the third's triangle onto the whole's, ×s about the point (fx, fy) it holds still)
-    const T = cornersOf([c]), s = (ROOT[2][0] - ROOT[1][0]) / (T[2][0] - T[1][0]);
-    const fx = (ROOT[1][0] - s * T[1][0]) / (1 - s), fy = (ROOT[1][1] - s * T[1][1]) / (1 - s);
-    const k = s ** v, sc = this.toScreen([fx, fy]);
-    ctx.save();
-    ctx.translate(sc.x, sc.y); ctx.scale(k, k); ctx.translate(-sc.x, -sc.y);
-    // (the rest of the puzzle, round the third, fading out as the camera goes in: gone as it gets there)
-    this.paint(from, null, { ...look, copyAlpha: 1 - v, fade: { c, alpha: 1 - v } });
-    // (the triangles coming in, in their places, fading in over the copies as those fade out: nothing
-    // but the camera moves)
-    if (v > 0) {
-      ctx.globalAlpha = v;
-      P.addr.forEach((a, i) => {
-        if (a.length !== L - 1) return;
-        const C = cornersOf([c, ...a]);
-        this.fill(this.tri(C), to[i], look);
-        this.copy(C, to, null, { ...look, copyAlpha: 1 });
-      });
-      ctx.globalAlpha = 1;
-    }
-    ctx.restore();
-  }
 
   // the solved puzzle, filling this (small) canvas: the corner card
   drawSolvedCard(P, look = {}, top = 26) {
     const { canvas } = this, w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height, pad = 8;
     this.origin = { x: 0, y: 0 };
-    if (P !== this.P) this.geo = null;
-    this.P = P;
+    if (P !== this.P) { this.P = P; this.geo = null; this.subtrees = null; this.path = []; }
     const W = w - 2 * pad, H = h - top - pad;
     this.scale = Math.min(W, (H * 2) / Math.sqrt(3));
     this.ox = w / 2; this.oy = top + H / 2 + (this.scale * Math.sqrt(3)) / 4;
-    this.draw(Int32Array.from({ length: P.N }, (_, i) => i), null, { textures: look.textures, dots: false, circles: false });
+    this.draw(Int32Array.from({ length: P.N }, (_, i) => 3 * i), null, { textures: look.textures, controls: false });
   }
+}
+// (screen-space triangle helpers)
+const centerOfS = centerOf;
+const middleOfScreen = (Q) => middleOf(Q);
+const inRadiusS = (M) => { const m = centerOf(M), [a, b] = [M[1], M[2]]; return Math.abs((b[0] - a[0]) * (m[1] - a[1]) - (b[1] - a[1]) * (m[0] - a[0])) / Math.hypot(b[0] - a[0], b[1] - a[1]); };
+// a similarity map (as a complex z ↦ αz + β) to the power v: α^v about its still point
+function power(m, v) {
+  const ar = m[0], ai = m[1], s = Math.hypot(ar, ai), th = Math.atan2(ai, ar);
+  const sv = s ** v, tv = th * v, br = Math.cos(tv) * sv, bi = Math.sin(tv) * sv;
+  // still point z* = β / (1 − α)
+  const dr = 1 - ar, di = -ai, den = dr * dr + di * di;
+  if (den < 1e-12) return [1, 0, 0, 1, m[4] * v, m[5] * v];
+  const zr = (m[4] * dr + m[5] * di) / den, zi = (m[5] * dr - m[4] * di) / den;
+  // z ↦ z* + α^v (z − z*): as an affine map
+  return [br, bi, -bi, br, zr - (br * zr - bi * zi), zi - (bi * zr + br * zi)];
 }
