@@ -211,7 +211,14 @@ export class SierView {
     const { P, ctx, state, look, anim } = this;
     const spinning = anim && anim.layer === 1 && anim.n === n;
     if (spinning) C = C.map(spinAbout(centerOf(C), anim.theta));
-    this.fill(this.tri(C), n);
+    const outline = this.tri(C);
+    this.fill(outline, n);
+    // (a thin black line round it, thinner as it's smaller)
+    const px = side(C) * this.camScale;
+    ctx.lineWidth = Math.max(0.5, Math.min(2, px * 0.006)) / this.camScale;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = BODY;
+    ctx.stroke(outline);
     const ringing = anim && anim.layer === 0 && anim.n === n;
     // (what's moving drawn after what's still round it, so it passes over: a piece turning after its
     // neighbors; a ring's corners going round after everything in the ring's piece)
