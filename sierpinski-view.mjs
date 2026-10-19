@@ -6,7 +6,8 @@
 // them as well as its middle. Following the corners, the picture goes down to a few pixels (fading
 // in by size, so nothing pops as it grows). A piece shows in many places, and a turn of it shows
 // in every one: it turned, or its ring going round. A ring changes the pieces in its corners too,
-// which show elsewhere: there, what changes fades from before to after as the ring goes round.
+// which show elsewhere: there, the ring goes round where the ringing piece would be round them, cut
+// to their triangle, so their corners leave and their neighbors' arrive.
 //
 // The camera: the piece the view shows, filling the screen's triangle, the way it faced when the
 // camera got there (a zoom never turns the camera, only scales and moves it), and the way it came
@@ -20,9 +21,8 @@
 // piece shows big enough. Each frame records what it drew, for hit-testing.
 import { inkPattern } from "./tile-view.mjs";
 import { faceTextures } from "./puzzle.mjs";
-import { applySierMove } from "./sierpinski.mjs";
 
-const BODY = "#0a0b0e", HOVER = "#f5c518", TAU = 2 * Math.PI;
+const BODY = "#0a0b0e", HOVER = "#f5c518";
 export const K = 0.93; // (a triangle's thirds, together, as a share of it)
 // the colors (as the issue settled them): the whole white; the thirds the cube's red, green and
 // blue (top, left, right); the ninths nine more, none like those; smaller triangles take their
@@ -181,18 +181,12 @@ export class SierView {
     this.dpr = dpr;
     this.drawn = { circles: [], dots: [] };
     this.look = look; this.state = state; this.ringLater = null;
-    // the turn going: a piece turned, or its ring (with the states either side of where it's got to,
-    // for what fades elsewhere)
+    // the turn going: a piece turned, or its ring (with what's in its corners, and how turned)
     this.anim = null;
     if (turn) {
       const n = P.nodeOf[turn.axis];
       if (turn.layer) this.anim = { n, layer: 1, theta: turn.theta };
-      else if (P.canRing(state, n)) {
-        const k = turn.theta / (TAU / 3), f = Math.floor(k), s0 = state.slice();
-        applySierMove(P, s0, { axis: turn.axis, layer: 0, q: f });
-        const s1 = applySierMove(P, s0.slice(), { axis: turn.axis, layer: 0, q: 1 });
-        this.anim = { n, layer: 0, theta: turn.theta, s0, s1, a: k - f };
-      }
+      else if (P.canRing(state, n)) this.anim = { n, layer: 0, theta: turn.theta, kids: [0, 1, 2].map((k) => Math.floor(state[3 * n + k] / 3)), turns: [0, 1, 2].map((k) => state[3 * n + k] % 3) };
     }
     const S = this.screenRoot();
     this.camScale = 1;
@@ -235,33 +229,37 @@ export class SierView {
     ctx.strokeStyle = BODY;
     ctx.stroke(outline);
     const ringing = anim && anim.layer === 0 && anim.n === n;
+    // (a piece in the ringing one's corner k, shown somewhere else: the ring goes round there too,
+    // about where the ringing one's middle would be, cut to this triangle; its two corners touching
+    // that middle are drawn with it, so not here)
+    const elsewhere = anim && anim.layer === 0 && !ring ? anim.kids.indexOf(n) : -1, still = elsewhere >= 0 ? mod(elsewhere - anim.turns[elsewhere], 3) : -1;
     // (what's moving drawn after what's still round it, so it passes over: a piece turning after its
     // neighbors; a ring's corners going round after everything in the ring's piece)
     const later = [], outerRing = this.ringLater;
     if (ringing) this.ringLater = [];
     for (let k = 0; k < 3; k++) {
+      if (elsewhere >= 0 && k !== still) continue;
       const i = 3 * n + k, going = ring && ring.slots.has(k);
       let T = thirdOf(C, k);
       if (going) T = T.map(spinAbout(ring.center, ring.theta));
       const s = side(T) * this.camScale;
       if (s < 8 || depth > 10) continue;
-      const ga = ctx.globalAlpha, show = ga * Math.min(1, (s - 8) / 8);
+      const ga = ctx.globalAlpha, show = ga * Math.min(1, (s - 8) / 8), v = state[i];
       // (this one's ring going: of what's in corner k, its two corners touching the middle go round)
-      const theirs = ringing ? { slots: new Set([0, 1, 2].filter((x) => x !== k).map((x) => mod(x - (state[i] % 3), 3))), center: centerOf(C), theta: anim.theta } : null;
-      const at = (v, alpha, rec) => { ctx.globalAlpha = alpha; this.node(Math.floor(v / 3), turned(T, v % 3), [...rel, k], rec, depth + 1, theirs); };
-      const fades = anim && anim.layer === 0 && !going && anim.s0[i] !== anim.s1[i], v = going || !anim || anim.layer === 1 ? state[i] : anim.s0[i];
+      const theirs = ringing ? { slots: new Set([0, 1, 2].filter((x) => x !== k).map((x) => mod(x - (v % 3), 3))), center: centerOf(C), theta: anim.theta } : null;
       const draw = () => {
-        if (fades) { at(anim.s0[i], show, false); at(anim.s1[i], show * anim.a, false); }
-        else at(v, show, record && s > 40 && !spinning && !going);
-        if (look.lit && look.lit.has(i)) { ctx.globalAlpha = show; ctx.fillStyle = `rgba(255, 255, 255, ${look.litAlpha ?? 0.34})`; ctx.fill(this.tri(T)); }
+        ctx.globalAlpha = show;
+        this.node(Math.floor(v / 3), turned(T, v % 3), [...rel, k], record && s > 40 && !spinning && !going && elsewhere < 0, depth + 1, theirs);
+        if (look.lit && look.lit.has(i)) { ctx.fillStyle = `rgba(255, 255, 255, ${look.litAlpha ?? 0.34})`; ctx.fill(this.tri(T)); }
         ctx.globalAlpha = ga;
       };
       if (going && this.ringLater) this.ringLater.push(draw);
-      else if (anim && anim.layer === 1 && !fades && Math.floor(v / 3) === anim.n) later.push(draw);
+      else if (anim && anim.layer === 1 && Math.floor(v / 3) === anim.n) later.push(draw);
       else draw();
     }
     for (const draw of later) draw();
     if (ringing) { const mine = this.ringLater; for (const draw of mine) draw(); this.ringLater = outerRing; }
+    if (elsewhere >= 0) this.ringElsewhere(C, elsewhere, depth);
     // its turns' circles and dot, where big enough to use (not while it's turning)
     if (!record || spinning) return;
     const M = middleOf(C), mid = centerOf(M), r = inRadius(M);
@@ -270,6 +268,28 @@ export class SierView {
     if (rings) this.drawn.circles.push({ axis: h, layer: 0, ...there, r: 0.48 * r });
     this.drawn.circles.push({ axis: h, layer: 1, ...there, r: (rings ? 0.8 : 0.7) * r });
     if (rel.length) this.drawn.dots.push({ rel, x: mid[0], y: mid[1], r: Math.max(2.5, Math.min(6, r * 0.12)), zone: 0.25 * r });
+  }
+  // the ring going, seen from a piece in the ringing one's corner k that's drawn elsewhere, at screen
+  // corners C: where the ringing one would be round it, and the six corners going round its middle,
+  // cut to C (so what shows is what passes through this piece: two corners leaving, two arriving)
+  ringElsewhere(C, k, depth) {
+    const { ctx, state, anim } = this;
+    const ref = turned(thirdOf(ROOT, k), anim.turns[k]), m = mapTri(ref, C), Q = ROOT.map((p) => apply(m, p)), spin = spinAbout(centerOf(Q), anim.theta);
+    ctx.save();
+    ctx.clip(this.tri(C));
+    for (let j = 0; j < 3; j++) {
+      const Cj = turned(thirdOf(Q, j), anim.turns[j]);
+      for (let x = 0; x < 3; x++) {
+        if (x === j) continue;
+        const sl = mod(x - anim.turns[j], 3), T = thirdOf(Cj, sl).map(spin), s = side(T) * this.camScale;
+        if (s < 8 || depth > 10) continue;
+        const ga = ctx.globalAlpha, v = state[3 * anim.kids[j] + sl];
+        ctx.globalAlpha = ga * Math.min(1, (s - 8) / 8);
+        this.node(Math.floor(v / 3), turned(T, v % 3), [], false, depth + 1);
+        ctx.globalAlpha = ga;
+      }
+    }
+    ctx.restore();
   }
   // the controls recorded: circles black (the one hovered or turning lit yellow over black), dots black
   drawControls() {
