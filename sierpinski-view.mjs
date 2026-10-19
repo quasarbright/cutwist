@@ -69,7 +69,7 @@ export class SierView {
   }
   heightFor(P, w) { return (w * Math.sqrt(3)) / 2 + 90; }
   layout(P, safe) {
-    if (P !== this.P) { this.P = P; this.path = []; this.zoom = null; this.subtrees = null; }
+    if (P !== this.P) { this.P = P; this.path = []; this.zoom = null; this.geo = null; this.subtrees = null; }
     // (room round it: the zoom marks by its corners)
     const w = Math.max(40, safe.right - safe.left - 110), h = Math.max(40, safe.bottom - safe.top - 100);
     this.scale = Math.min(w, (h * 2) / Math.sqrt(3));
@@ -235,7 +235,7 @@ export class SierView {
       if (moving && moving.has(j)) continue;
       const Q = px(G[j]), M = middleOfScreen(Q), mid = centerOfS(M), r = inRadiusS(M);
       if (r < 9) continue;
-      const h = P.holes.findIndex((p) => p.length === P.addr[j].length && P.within(p, P.addr[j])), ax = h >= 0 ? P.axes[h] : null;
+      const h = P.axisAt[j], ax = h >= 0 ? P.axes[h] : null;
       const there = { x: mid[0], y: mid[1], center: centerOf(G[j]) };
       if (ax && ax.ring) this.drawn.circles.push({ axis: h, layer: 0, ...there, r: 0.48 * r });
       if (ax) this.drawn.circles.push({ axis: h, layer: 1, ...there, r: (ax.ring ? 0.8 : 0.7) * r });

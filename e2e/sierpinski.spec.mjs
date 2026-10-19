@@ -57,6 +57,28 @@ test("the levels stepper: 2 to 4 levels, in the link", async ({ page }) => {
   await expect(less).toBeDisabled();
 });
 
+test("changing levels draws the new puzzle as a fresh load does, and its circles and zooms work", async ({ page }) => {
+  const less = page.locator("#paramControls .control", { hasText: "levels" }).getByRole("button", { name: "−" });
+  for (const L of [3, 2]) {
+    await less.click();
+    await idle(page);
+    const changed = await picture(page);
+    const fresh = await page.context().newPage();
+    await open(fresh, `?puzzle=sierpinski&levels=${L}`);
+    expect(await picture(fresh), `${L} levels`).toBe(changed);
+    await fresh.close();
+    // (a third's ring on 3 levels: the ninths' corners; a third turned on 2)
+    const c = await circle(page, 1, L === 3 ? 0 : 1);
+    await dragRound(page, c, onLine(c), 1 / 3);
+    expect((await info(page)).solved, `${L} levels`).toBe(false);
+    await zoom(page, 0, 1);
+    expect((await info(page)).camera).toBe("0");
+    await zoom(page, 0, -1);
+    await page.click("#reset");
+    await idle(page);
+  }
+});
+
 test("on 2 levels: in on a third twice is the whole again; in on the top third then its bottom left is the bottom left third", async ({ page }) => {
   await open(page, "?puzzle=sierpinski&levels=2");
   const start = await picture(page);

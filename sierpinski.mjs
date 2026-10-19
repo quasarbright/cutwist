@@ -17,10 +17,10 @@
 //
 // The turns, each about a triangle p's middle, a third of a turn, carrying everything inside what
 // it takes with it (so a piece never changes level):
-//   - p's ring (the whole's, a third's: any triangle three or more levels above the smallest, whose
-//     ring is pieces; and on 2 levels the whole's, whose ring is the corners touching its middle):
-//     the six triangles two levels in touching its middle (p c x, x not c); its thirds stay;
-//   - p turned whole (any triangle with thirds, and on 2 levels the thirds too): everything in it.
+//   - p's ring (any triangle but the smallest): the six triangles two levels in touching its middle
+//     (p c x, x not c; one level above the smallest, those are the smallest ones' corners); its
+//     thirds stay;
+//   - p turned whole (any triangle): everything in it (the smallest: its corners).
 // A corner carried along keeps showing what it showed, turned with it; unless what it shows is
 // inside what turned (the whole, when the whole turns), which turned with it too.
 //
@@ -61,14 +61,15 @@ export function buildSier(spec, L = spec.levels) {
     const turns = Uint8Array.from(all, (a, i) => (to[i] !== i || (self && a.length === p.length && within(p, a)) ? 1 : 0));
     return { to, turns, list: all.map((_, i) => i).filter((i) => turns[i]) };
   };
-  // (by level: the whole first, then the thirds, axes 1 to 3; on 2 levels, which would have only the
-  // whole turned otherwise, the thirds turn too and the whole's ring takes their corners)
-  const holes = addr.filter((a) => a.length < L - 1 || L === 2).sort((a, b) => a.length - b.length);
-  const ringAt = (p) => p.length <= Math.max(0, L - 3);
+  // (every triangle, by level: the whole first, then the thirds, axes 1 to 3; a ring on each but the
+  // smallest, the rings one level above them taking the smallest ones' corners)
+  const holes = addr.slice().sort((a, b) => a.length - b.length);
+  const ringAt = (p) => p.length <= L - 2;
   const axes = holes.map((p, h) => ({ kind: "hole", p, depth: p.length, order: 3, layers: 2, ring: ringAt(p), h }));
   const perms = holes.map((p) => [ringAt(p) ? turn(p, (r) => r.length >= 2 && r[1] !== r[0]) : null, turn(p, () => true, true)]);
   const P = { kind: "sierpinski", spec: { ...spec, levels: L }, L, n: L, N, addr, index, within, slot, holes, axes, perms };
   P.middles = holes;
+  P.axisAt = Int32Array.from(addr, (a) => holes.findIndex((p) => key(p) === key(a)));
   P.smallest = Uint8Array.from(addr, (a) => (a.length === L - 1 ? 1 : 0));
   // the solved state: each piece home; each corner the whole, or on 2 levels the rest of the puzzle
   P.home = new Int32Array(all.length);

@@ -11,11 +11,22 @@ const moved = (P, s) => s.slice(0, P.N).reduce((k, v, i) => k + (Math.floor(v / 
 const corners = (P, s) => s.slice(P.N).reduce((k, v, i) => k + (v !== P.home[P.N + i]), 0);
 const seeded = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
 
-test("every triangle a piece: 4 on 2 levels, 13 on 3, 40 on 4; a ring only where it's pieces, or on 2 levels the whole's", () => {
-  assert.deepEqual([2, 3, 4].map((L) => build(L).N), [4, 13, 40]);
-  assert.deepEqual(build(4).axes.filter((a) => a.ring).map((a) => a.depth), [0, 1, 1, 1]);
-  assert.deepEqual(build(3).axes.filter((a) => a.ring).map((a) => a.depth), [0]);
-  assert.deepEqual(build(2).axes.map((a) => [a.depth, a.ring]), [[0, true], [1, false], [1, false], [1, false]]);
+test("every triangle a piece: 4 on 2 levels, 13 on 3, 40 on 4; every one turns, and all but the smallest have rings", () => {
+  for (const [L, N, rings] of [[2, 4, 1], [3, 13, 4], [4, 40, 13]]) {
+    const P = build(L);
+    assert.equal(P.N, N);
+    assert.equal(P.axes.length, N, `${L} levels: a turn each`);
+    assert.equal(P.axes.filter((a) => a.ring).length, rings, `${L} levels`);
+    assert.ok(P.axes.every((a) => a.ring === a.depth < L - 1));
+  }
+});
+
+test("on 4 levels, by the smallest: a ninth's ring moves the 6 corners touching its middle; a smallest turned, its own 3", () => {
+  const P = build(4), ninth = P.axisAt[P.index([0, 0])], small = P.axisAt[P.index([0, 0, 0])];
+  const ring = play(P, [{ axis: ninth, layer: 0, q: 1 }]);
+  assert.deepEqual([moved(P, ring), corners(P, ring)], [0, 6]);
+  const turned = play(P, [{ axis: small, layer: 1, q: 1 }]);
+  assert.deepEqual([moved(P, turned), corners(P, turned)], [0, 3]);
 });
 
 test("on 2 levels, solved: each third's corners the rest of the puzzle where it is, the whole in its own place", () => {
