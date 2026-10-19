@@ -3,7 +3,7 @@
 import { test, expect } from "@playwright/test";
 import { open, info, noErrors, pick } from "./helpers.mjs";
 
-test("every puzzle on the shelf loads solved, with no errors", async ({ page }) => {
+test("every puzzle on the shelf loads solved (Permutle dealt), with no errors", async ({ page }) => {
   test.setTimeout(90_000); // (one by one, every puzzle there is: slow when the other tests are running too)
   const errors = await open(page);
   await page.click(".nx-pick");
@@ -15,7 +15,7 @@ test("every puzzle on the shelf loads solved, with no errors", async ({ page }) 
     const s = await info(page);
     expect(s.id, id).toBe(id);
     expect(s.pieces, id).toBeGreaterThan(0);
-    expect(s.solved, id).toBe(true);
+    expect(s.solved, id).toBe(id !== "permutle"); // (Permutle comes up dealt: solved, it would show its words)
     expect(s.moves, id).toBe(0);
   }
   await noErrors(errors);

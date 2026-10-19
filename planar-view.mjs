@@ -12,6 +12,9 @@ import { MX, MY, loop, wrap, pieceOf, orientOf } from "./planar.mjs";
 const GHOST = 0.5; // how far the wrapped-around copies reach past each edge, in cells
 const COORD = 0.45; // the band past that for the board's coordinates (row letters, column numbers)
 const ARROW = 0.75; // the band past that for the arrow buttons
+const LETTER_GAP = 0.15; // (Permutle: the grid to its arrows)
+// Permutle's tiles, as Wordle's: gray, and green in a row that spells a word
+const TILE = [58, 58, 60], WORD_TILE = [83, 141, 78];
 const TEXTURES = ["plain", "stripes", "grid", "dots", "checker", "wavy", "honeycomb"];
 
 export class PlanarView {
@@ -24,12 +27,14 @@ export class PlanarView {
     this.showArrows = true; // the arrow buttons around the grid (off: no band for them, so a bigger grid)
   }
 
-  // how far past each edge the grid's surroundings reach, in cells
-  band() { return GHOST + COORD + (this.showArrows ? ARROW : 0); }
+  // how far past each edge the grid's surroundings reach, in cells (Permutle's letters: no
+  // wrapped copies or coordinates, just a little room before the arrows)
+  inner(P = this.P) { return P && P.letters ? LETTER_GAP : GHOST + COORD; }
+  band(P = this.P) { return this.inner(P) + (this.showArrows ? ARROW : 0); }
 
   // the height the grid, its wrapped copies and arrows take up at width w (when width is what limits it)
   heightFor(P, w) {
-    const band = this.band();
+    const band = this.band(P);
     return (w * (P.H + 2 * band)) / (P.W + 2 * band);
   }
 
@@ -52,7 +57,7 @@ export class PlanarView {
   // every arrow button: the move it makes and where it is
   arrows() {
     if (!this.showArrows) return [];
-    const { W, H } = this.P, c = this.cell, d = GHOST + COORD + ARROW / 2, out = [];
+    const { W, H } = this.P, c = this.cell, d = this.inner() + ARROW / 2, out = [];
     for (let r = 0; r < H; r++) {
       out.push({ axis: 0, layer: r, q: -1, x: this.ox - d * c, y: this.oy + (r + 0.5) * c, dir: [-1, 0] });
       out.push({ axis: 0, layer: r, q: 1, x: this.ox + (W + d) * c, y: this.oy + (r + 0.5) * c, dir: [1, 0] });
@@ -80,7 +85,7 @@ export class PlanarView {
   // of cells to lighten, or null) }.
   draw(state, slide, look) {
     const { ctx, canvas, P } = this, o = this.origin;
-    const dpr = canvas.width / canvas.clientWidth || 1;
+    const dpr = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1; // (a canvas off the page: 1)
     ctx.setTransform(dpr, 0, 0, dpr, -o.x * dpr, -o.y * dpr); // page coordinates, like the layout
     ctx.clearRect(o.x, o.y, canvas.clientWidth, canvas.clientHeight);
     const slots = this.slots(state, slide);
@@ -89,7 +94,19 @@ export class PlanarView {
     ctx.fillStyle = "#0a0b0e";
     roundRect(ctx, this.ox - c * 0.03, this.oy - c * 0.03, P.W * c + c * 0.06, P.H * c + c * 0.06, c * 0.1);
     ctx.fill();
-    // wrapped-around copies, faint, clipped to a band around the grid
+    if (!P.letters) this.drawCopies(slots, look); // (none round Permutle's words)
+    for (let i = 0; i < P.n; i++) {
+      const at = { x: i % P.W, y: Math.floor(i / P.W) };
+      this.drawSlot(slots[i], this.ox + at.x * c, this.oy + at.y * c, c, 0, look, at);
+    }
+    if (look.lit) this.drawLit(look.lit, this.ox, this.oy, c, look.litAlpha);
+    if (!P.letters) this.drawCoordinates();
+    if (look.arrows) this.drawArrows(look.hover);
+  }
+
+  // the wrapped-around copies, faint, clipped to a band around the grid
+  drawCopies(slots, look) {
+    const { ctx, P } = this, c = this.cell;
     ctx.save();
     ctx.beginPath();
     ctx.rect(this.ox - GHOST * c, this.oy - GHOST * c, (P.W + 2 * GHOST) * c, (P.H + 2 * GHOST) * c);
@@ -103,13 +120,6 @@ export class PlanarView {
         this.drawSlot(slots[w.y * P.W + w.x], this.ox + x * c, this.oy + y * c, c, w.flip, look, w);
       }
     ctx.restore();
-    for (let i = 0; i < P.n; i++) {
-      const at = { x: i % P.W, y: Math.floor(i / P.W) };
-      this.drawSlot(slots[i], this.ox + at.x * c, this.oy + at.y * c, c, 0, look, at);
-    }
-    if (look.lit) this.drawLit(look.lit, this.ox, this.oy, c, look.litAlpha);
-    this.drawCoordinates();
-    if (look.arrows) this.drawArrows(look.hover);
   }
 
   // Just the cells, edge to edge, filling the canvas: the picture wrapped around the 3D
@@ -245,6 +255,7 @@ export class PlanarView {
     const { ctx, P } = this;
     const hx = piece % P.W, hy = Math.floor(piece / P.W);
     const inset = 0.03, r = 0.1; // the gap between neighbors is twice the inset
+    if (P.letters) { this.drawLetter(P.letters[piece], at, look, inset, r); return; }
     mirror(ctx, orient);
     ctx.save();
     roundRect(ctx, inset, inset, 1 - 2 * inset, 1 - 2 * inset, r);
@@ -271,6 +282,25 @@ export class PlanarView {
       if (!look.reflectLabels) mirror(ctx, orient ^ seam);
       this.drawLabel(hx, hy, at, orient !== 0);
     }
+  }
+
+  // A Permutle tile in the unit square: its letter, on gray, or green as far as the row it's in
+  // (at: the grid cell) has turned green (look.rowGlow: 0 to 1 per row, eased by the page; no
+  // cell: look.glowAll). Drawn 100× larger and scaled down, as the labels are.
+  drawLetter(letter, at, look, inset, r) {
+    const { ctx } = this, K = 100;
+    const g = at && look.rowGlow ? look.rowGlow[at.y] ?? 0 : look.glowAll ?? 0;
+    const mix = TILE.map((v, i) => Math.round(v + (WORD_TILE[i] - v) * g));
+    roundRect(ctx, inset, inset, 1 - 2 * inset, 1 - 2 * inset, r);
+    ctx.fillStyle = `rgb(${mix.join(",")})`;
+    ctx.fill();
+    ctx.save();
+    ctx.scale(1 / K, 1 / K);
+    ctx.font = `700 ${K * 0.56}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#f8f8f8";
+    ctx.fillText(letter, K * 0.5, K * 0.54);
+    ctx.restore();
   }
 
   // Column letter and row number, like a chess square (A1 is the top-left), white with a black
