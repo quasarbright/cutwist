@@ -7,78 +7,70 @@ let errors;
 test.beforeEach(async ({ page }) => { errors = await open(page); });
 test.afterEach(async () => { await noErrors(errors); });
 
-const row = (page, label) => page.locator("#paramControls .control").filter({ has: page.locator(".name", { hasText: new RegExp(`^${label}$`) }) });
+// a start: CRANE SLIDE EVERY ROUND SOLVE with EVERY slid one right, then the first column two down
+const DEALT = "RRANESLIDECEVERSOUNDYOLVE";
+async function openGrid(page, letters) {
+  await page.goto(`/index.html?puzzle=permutle&letters=${letters}`);
+  await page.waitForFunction(() => !!window.cutwist);
+}
 
-test("it opens from the shelf already dealt: no row a word, flat only, no solved card", async ({ page }) => {
+test("it opens from the shelf already dealt: no row a word, flat only, no solved card, no steppers", async ({ page }) => {
   await pick(page, "permutle");
   const s = await info(page);
-  expect(s).toMatchObject({ permutle: true, title: "5-word Permutle", width: 5, height: 5, pieces: 25, solved: false, scrambled: true, moves: 0, surface3D: false });
-  expect(s.words).toHaveLength(5);
+  expect(s).toMatchObject({ permutle: true, title: "Permutle", width: 5, height: 5, pieces: 25, solved: false, scrambled: true, moves: 0, surface3D: false });
+  expect(s.letters).toMatch(/^[A-Z]{25}$/);
+  expect(s.rows.join("")).toBe(s.letters);
   expect(s.wordRows).toEqual([false, false, false, false, false]);
-  expect(s.rows.join("").split("").sort()).toEqual(s.words.join("").toUpperCase().split("").sort()); // (the same letters)
   await expect(page.locator("#plane")).toBeVisible();
   await expect(page.locator("#reference")).toBeHidden();
   await expect(page.locator(".nx-viewbtn")).toBeHidden();
+  await expect(page.locator("#paramControls .control")).toHaveCount(0);
   await expect(page.locator("#scramble")).toHaveText("new puzzle");
+  await expect(page.locator("#shareWords")).toBeHidden();
   await expect(page.locator(".nx-empty")).toHaveText("make every row a word · drag a row or column"); // (the empty tape)
+  expect(new URL(page.url()).searchParams.get("letters")).toBe(s.letters);
 });
 
-test("a row goes green when it's a word, and every row a word is solved", async ({ page }) => {
-  await page.goto("/index.html?puzzle=permutle&words=0cq1dl0ix18w1f2"); // CRANE SLIDE EVERY ROUND SOLVE
-  await page.waitForFunction(() => !!window.cutwist);
-  expect((await info(page)).words).toEqual(["crane", "slide", "every", "round", "solve"]);
-  await page.evaluate(() => window.cutwist.deal([{ axis: 0, layer: 2, q: 1 }, { axis: 1, layer: 0, q: 2 }]));
-  // (EVERY one right, then the first column two down; SOUND happens to be a word too)
+test("a link's letters are the start; rows go green; solved, share gives the colors and that start", async ({ page }) => {
+  await openGrid(page, DEALT);
   expect(await info(page)).toMatchObject({ rows: ["RRANE", "SLIDE", "CEVER", "SOUND", "YOLVE"], wordRows: [false, true, false, true, false], solved: false });
   await expect(page.locator("#shareWords")).toBeHidden(); // (till it's solved)
   await turn(page, [1, 0, -2]);
   expect((await info(page)).wordRows).toEqual([true, true, false, true, true]);
   await turn(page, [0, 2, -1]);
   const s = await info(page);
+  expect(s.rows).toEqual(["CRANE", "SLIDE", "EVERY", "ROUND", "SOLVE"]);
   expect(s.solved).toBe(true);
   await expect(page.locator("#tapeStatus")).toHaveText("solved · 2 moves");
-  // (solved: share, the grid's colors and no letters)
   await expect(page.locator("#shareWords")).toBeVisible();
   const result = await page.evaluate(() => window.cutwist.wordsResult());
-  expect(result).toMatch(/^Permutle · 5 words\n(🟩{5}\n){5}2 moves · [\d.:]+\nhttp\S+words=0cq1dl0ix18w1f2/u);
-  expect(result).not.toMatch(/CRANE|crane/);
-  // (reset goes back to the deal, never to the words)
+  expect(result).toMatch(new RegExp(`^Permutle\\n(🟩{5}\\n){5}2 moves · [\\d.:]+\\nhttp\\S+/index\\.html\\?puzzle=permutle&letters=${DEALT}$`, "u"));
+  // (reset goes back to the start, never anywhere else)
   await page.click("#reset");
-  expect((await info(page)).solved).toBe(false);
+  expect((await info(page)).rows.join("")).toBe(DEALT);
   await page.click("#reset");
-  expect((await info(page)).solved).toBe(false);
+  expect((await info(page)).rows.join("")).toBe(DEALT);
 });
 
-test("new puzzle: new words, dealt; the link carries them, coded", async ({ page }) => {
+test("new puzzle: new letters, dealt, in the link; the link opens the same start", async ({ page }) => {
   await pick(page, "permutle");
   const before = await info(page);
   await page.click("#scramble");
   const after = await info(page);
-  expect(after.words).not.toEqual(before.words);
+  expect(after.letters).not.toBe(before.letters);
   expect(after.solved).toBe(false);
   const url = new URL(page.url());
-  const code = url.searchParams.get("words");
-  expect(code).toMatch(/^[0-9a-z]{15}$/);
-  for (const w of after.words) expect(page.url()).not.toContain(w);
+  expect(url.searchParams.get("letters")).toBe(after.letters);
   await page.goto(`/index.html${url.search}`);
   await page.waitForFunction(() => !!window.cutwist);
-  expect((await info(page)).words).toEqual(after.words);
-});
-
-test("the words stepper sets how many rows, with new words for them", async ({ page }) => {
-  await pick(page, "permutle");
-  await row(page, "words").getByRole("button", { name: "+" }).click();
-  const s = await info(page);
-  expect(s).toMatchObject({ title: "6-word Permutle", height: 6, pieces: 30, solved: false });
-  expect(s.words).toHaveLength(6);
-  // (a bad code in a link: new words instead)
-  await page.goto("/index.html?puzzle=permutle&height=3&words=zzzzzz");
-  await page.waitForFunction(() => !!window.cutwist);
-  expect((await info(page)).words).toHaveLength(3);
+  expect((await info(page)).rows.join("")).toBe(after.letters);
+  // (not a grid of letters: a new puzzle instead)
+  await openGrid(page, "CRANE");
+  expect((await info(page)).letters).toMatch(/^[A-Z]{25}$/);
 });
 
 test("dragging a cell slides its column", async ({ page }) => {
-  await pick(page, "permutle");
+  await openGrid(page, DEALT);
   const before = (await info(page)).rows;
   const a = await page.evaluate(() => window.cutwist.cellCenter(2, 1));
   const b = await page.evaluate(() => window.cutwist.cellCenter(2, 2));

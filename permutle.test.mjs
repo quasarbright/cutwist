@@ -1,50 +1,37 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PERMUTLE_PRESETS, buildPermutle, encodeWords, decodeWords, newPermutleWords, isWord, rowText, wordRows, isPermutleSolved, permutleScrambleMoves } from "./permutle.mjs";
+import { buildPermutle, isGrid, newPermutleGrid, isWord, rowText, wordRows, isPermutleSolved } from "./permutle.mjs";
 import { solvedPlanarState, applyPlanarMove } from "./planar.mjs";
 
-const preset = PERMUTLE_PRESETS[0];
-const build = (words) => buildPermutle({ ...preset, height: words.length, words: encodeWords(words) });
+const build = (letters) => buildPermutle({ letters });
+const rows = (P, s) => [0, 1, 2, 3, 4].map((y) => rowText(P, s, y));
 
 test("Wordle's answers and other common words count, plurals too; rare Scrabble words don't", () => {
   for (const w of ["crane", "SLIDE", "every", "votes", "cards", "games"]) assert.ok(isWord(w), w);
   for (const w of ["alate", "laddy", "aahed", "aaaaa"]) assert.ok(!isWord(w), w);
 });
 
-test("words go into a link's code and come back", () => {
-  const words = ["crane", "slide", "every", "round", "solve"], code = encodeWords(words);
-  assert.equal(code.length, 15);
-  assert.ok(!words.some((w) => code.includes(w)));
-  assert.deepEqual(decodeWords(code, 5), words);
-  assert.equal(decodeWords(code, 4), null);
-  assert.equal(decodeWords("!!!", 1), null);
-  assert.equal(decodeWords("zzz", 1), null); // (past the end of the list)
-  const fresh = decodeWords(newPermutleWords(8), 8);
-  assert.equal(new Set(fresh).size, 8);
+test("a grid is 25 letters", () => {
+  assert.ok(isGrid("CRANESLIDEEVERYROUNDSOLVE"));
+  assert.ok(isGrid("cranesLIDEEVERYROUNDSOLVE"));
+  for (const g of ["CRANE", "CRANESLIDEEVERYROUNDSOLV3", "CRANESLIDEEVERYROUNDSOLVEX", null]) assert.ok(!isGrid(g), String(g));
 });
 
-test("it starts as its words, every row green; a slide can break one", () => {
-  const P = build(["crane", "slide", "every", "round", "solve"]), s = solvedPlanarState(P);
-  assert.equal(P.W, 5);
-  assert.deepEqual([0, 1, 2, 3, 4].map((y) => rowText(P, s, y)), ["CRANE", "SLIDE", "EVERY", "ROUND", "SOLVE"]);
+test("it starts as its letters, row by row; a row is green when it spells a word", () => {
+  const P = build("CRANESLIDEEVERYROUNDSOLVE"), s = solvedPlanarState(P);
+  assert.deepEqual(rows(P, s), ["CRANE", "SLIDE", "EVERY", "ROUND", "SOLVE"]);
   assert.ok(isPermutleSolved(P, s));
   applyPlanarMove(P, s, { axis: 0, layer: 1, q: 1 }); // SLIDE → ESLID
   assert.deepEqual(wordRows(P, s), [true, false, true, true, true]);
   assert.ok(!isPermutleSolved(P, s));
 });
 
-test("any words solve it, not just the ones it started as", () => {
-  // SHARE and STONE trade their second letters: STARE and SHONE
-  const P = build(["share", "stone"]), s = solvedPlanarState(P);
-  applyPlanarMove(P, s, { axis: 1, layer: 1, q: 1 });
-  assert.deepEqual([rowText(P, s, 0), rowText(P, s, 1)], ["STARE", "SHONE"]);
-  assert.ok(isPermutleSolved(P, s));
-});
-
-test("a deal leaves no row a word", () => {
+test("a new puzzle is five words' letters, slid apart so no row is a word", () => {
+  const g = newPermutleGrid(Math.random, ["crane", "slide", "every", "round", "solve"]);
+  assert.ok(isGrid(g));
+  assert.deepEqual([...g].sort(), [..."CRANESLIDEEVERYROUNDSOLVE"].sort());
   for (let k = 0; k < 20; k++) {
-    const P = buildPermutle({ ...preset, words: newPermutleWords(5) }), s = solvedPlanarState(P);
-    for (const m of permutleScrambleMoves(P)) applyPlanarMove(P, s, m);
-    assert.ok(!wordRows(P, s).some(Boolean));
+    const P = build(newPermutleGrid());
+    assert.ok(!wordRows(P, solvedPlanarState(P)).some(Boolean));
   }
 });

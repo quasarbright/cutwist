@@ -794,7 +794,8 @@
       <p>Permutle is the sliding torus with a letter on each cell. It starts as common five-letter
         words, one per row, then gets slid apart. A row turns green when it spells a common word, plurals
         included, and the puzzle is solved when every row does. Any words count, so there's usually more than one way to
-        finish. Sliding a row only rotates its letters, so the work is in the columns, which trade
+        finish, and the puzzle is just its 25 letters as dealt: that's all its link carries, so
+        a shared result opens the same start. Sliding a row only rotates its letters, so the work is in the columns, which trade
         letters between rows.</p>
     </about-modal>
   </div>
@@ -816,7 +817,7 @@
     import {
       PLANAR_PRESETS, buildPlanar, solvedPlanarState, isPlanarSolved, applyPlanarMove, inversePlanarMove, planarScrambleMoves,
     } from "./planar.mjs";
-    import { PERMUTLE_PRESETS, buildPermutle, encodeWords, decodeWords, newPermutleWords, wordRows, rowText, isPermutleSolved, permutleScrambleMoves } from "./permutle.mjs";
+    import { PERMUTLE_PRESETS, buildPermutle, isGrid, newPermutleGrid, wordRows, rowText, isPermutleSolved } from "./permutle.mjs";
     import { PlanarView } from "./planar-view.mjs";
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
     import {
@@ -1431,7 +1432,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     const inverseAny = (m) => (isSier() ? inverseSierMove(P, m) : isPlanar() ? inversePlanarMove(P, m) : isTiles() ? inverseTileMove(P, m) : isHyper() ? inverseHyperMove(P, m) : inverseMove(P, m));
     const solvedAny = (s) => (isSier() ? isSierSolved(P, s) : isWords() ? isPermutleSolved(P, s) : isPlanar() ? isPlanarSolved(P, s) : isTiles() ? isTileSolved(P, s) : isHyper() ? isHyperSolved(P, s) : isSolved(P, s));
     const freshState = () => (isSier() ? solvedSierState(P) : isPlanar() ? solvedPlanarState(P) : isTiles() ? solvedTileState(P) : isHyper() ? solvedHyperState(P) : solvedState(P));
-    const randomScramble = () => (isSier() ? sierScrambleMoves(P, undefined, Math.random, state) : isWords() ? permutleScrambleMoves(P) : isPlanar() ? planarScrambleMoves(P) : isTiles() ? tileScrambleMoves(P) : isHyper() ? hyperScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
+    const randomScramble = () => (isSier() ? sierScrambleMoves(P, undefined, Math.random, state) : isPlanar() ? planarScrambleMoves(P) : isTiles() ? tileScrambleMoves(P) : isHyper() ? hyperScrambleMoves(P) : scrambleMoves(P, 10 + 3 * P.axes.reduce((s, a) => s + a.layers, 0)));
 
     // ---------- turning: animation queue ----------
     // anim is the layer currently turning: { axis, pieces, theta, ... }. A queued turn
@@ -2341,8 +2342,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (fit.a !== spec.a) { paramVals.a = fit.a; spec = currentSpec(); renderParams(); }
         }
       }
-      // (Permutle without words for its rows, or a number of rows other than its words': new words)
-      if (spec.permutle && !decodeWords(spec.words, spec.height)) { paramVals.words = newPermutleWords(spec.height); spec = currentSpec(); }
+      // (Permutle without letters, or not a grid of them: a new puzzle)
+      if (spec.permutle && !isGrid(spec.letters)) { paramVals.letters = newPermutleGrid(); spec = currentSpec(); }
       if (spec.rule === "hyper" && !isRound(spec) && !hyperFileFor(spec)) {
         // (its surfaces aren't in yet: fetch them, then come back; the puzzle showing stays till then)
         fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); if (isCustom()) computeSnaps(); }).catch((err) => console.error(err));
@@ -2387,6 +2388,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("scramble").textContent = isWords() ? "new puzzle" : "scramble";
       $("scramble").title = isWords() ? "new words, slid apart" : "mix the puzzle up with random turns";
       wordGlow = isWords() ? wordRows(P, state).map(Number) : [];
+      if (isWords()) { scrambled = true; scrambledState = state.slice(); timer.arm(); renderTimer(); } // (its start is its deal: see permutle.mjs)
       if (puzzleGroup) puzzleGroup.visible = !isFlat();
       tileHover = null; tdrag = null; tilePointer = null; hpan = null; sierPress = null; sierDotHover = null;
       if (isHyper() && resetView) hyperView.recenter();
@@ -2418,7 +2420,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (hoverType !== null && !isFlat()) setHover(hoverType); // meshes were rebuilt
       algLit = null; algsShown.clear(); // (an algorithm's highlight belonged to the old puzzle)
       renderRearButton();
-      if (isWords()) dealWords();
       renderTape();
       writeURL();
     }
@@ -2602,24 +2603,13 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       renderTape();
       return moves;
     }
-    // Permutle comes up slid apart already (solved, it would show its words), at once, not
-    // played out; its button makes a new puzzle: new words, dealt the same way
-    // (moves: a given deal, from the words; the tests use this)
-    function dealWords(moves = permutleScrambleMoves(P)) {
-      anim = null; queue = [];
-      history.clear(); scrambled = true;
-      state = freshState();
-      for (const m of moves) applyAny(state, m);
-      scrambledState = state.slice();
-      wordGlow = wordRows(P, state).map(Number);
-      timer.arm(); renderTimer();
-    }
     // Permutle's result, as Wordle shares one: the grid's colors (no letters), the moves and time,
-    // and the link to the same words
+    // and a link to the same puzzle, from the same start (its letters as dealt: nothing else)
+    const wordsLink = () => `${location.origin}${location.pathname}?puzzle=permutle&letters=${P.letters.join("")}`;
     function wordsResult() {
       const grid = wordRows(P, state).map((w) => (w ? "🟩" : "⬛").repeat(P.W)).join("\n");
       const n = history.movesDone, time = timer.t ? ` · ${formatTime(timer.ms)}` : "";
-      return `Permutle · ${P.H} words\n${grid}\n${n === 1 ? "1 move" : `${n} moves`}${time}\n${location.href}`;
+      return `Permutle\n${grid}\n${n === 1 ? "1 move" : `${n} moves`}${time}\n${wordsLink()}`;
     }
     $("shareWords").onclick = async () => {
       const text = wordsResult(), b = $("shareWords");
@@ -2629,7 +2619,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     };
     $("scramble").onclick = () => {
       if (!isWords()) { scramble(); return; }
-      paramVals.words = newPermutleWords(currentSpec().height);
+      paramVals.letters = newPermutleGrid();
       load(false);
     };
     // Reset goes back one level: after turning a scrambled puzzle, back to the scramble;
@@ -4628,7 +4618,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (!showAxes) q.set("axes", "off");
       if (rearView !== rearDefault()) q.set("rear", rearView ? "on" : "off");
-      if (isWords()) q.set("words", spec.words); // (its words, coded)
+      if (isWords()) q.set("letters", spec.letters.toUpperCase()); // (its letters as dealt: the whole puzzle)
       else if (isPlanar()) {
         if (planarTextures) q.set("textures", "on");
         if (shapeId() !== P.topology) q.set("shape", shapeId());
@@ -4666,7 +4656,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           }
           const n = Math.round(Number(q.get("size")));
           if (!spec.fixed && q.has("size") && Number.isFinite(n)) size = snapSize(spec, n, 1);
-          if (spec.permutle && q.has("words")) paramVals.words = q.get("words"); // (load checks they're words)
+          if (spec.permutle && q.has("letters")) paramVals.letters = q.get("letters"); // (load checks they're a grid)
         }
       }
       const off = (k) => q.get(k) === "off", on = (k) => q.get(k) === "on";
@@ -5566,7 +5556,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       }
       if (spec.permutle) {
         // a grid of words, every row green
-        const Q = buildPermutle({ ...spec, height: 5, words: encodeWords(["slide", "every", "round", "again", "solve"]) }), v = new PlanarView(cv);
+        const Q = buildPermutle({ ...spec, letters: "SLIDEEVERYROUNDAGAINSOLVE" }), v = new PlanarView(cv);
         v.showArrows = false;
         v.layout(Q, { left: 6, top: 6, right: S - 6, bottom: S - 6 });
         v.draw(solvedPlanarState(Q), null, { glowAll: 1 });
@@ -5847,8 +5837,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       // the moves that undo `moves`
       invert(moves) { return history.inverseOf(moves); },
       // Permutle: deal these moves from its words, in place of a random deal
-      deal(moves) { dealWords(moves); renderTape(); return this.info(); },
-      // (and the result its share button copies)
+      // Permutle: the result its share button copies
       wordsResult() { return wordsResult(); },
       shareLink() { return shareLink(); },
       get state() { return Array.from(state); },
@@ -5860,7 +5849,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           ...(isSier()
             ? { sierpinski: true, levels: P.L, pieces: P.N, holes: P.middles.length, rings: P.nodeOf.filter((n) => P.canRing(state, n)).length, camera: sierView.path.join(""), zooming: sierView.busy(), hover: tileHover && tileHover.axis, hoverLayer: tileHover && tileHover.layer }
             : isWords()
-            ? { permutle: true, width: P.W, height: P.H, pieces: P.n, words: P.words.slice(), rows: Array.from({ length: P.H }, (_, y) => rowText(P, state, y)), wordRows: wordRows(P, state), surface3D: has3D() }
+            ? { permutle: true, width: P.W, height: P.H, pieces: P.n, letters: P.letters.join(""), rows: Array.from({ length: P.H }, (_, y) => rowText(P, state, y)), wordRows: wordRows(P, state), surface3D: has3D() }
             : isPlanar()
             ? { planar: true, width: P.W, height: P.H, topology: P.topology, pieces: P.n, labels: showLabels, reflectLabels, planarTextures, picture: usePicture && !!planarPicture,
                 views: { flat: viewFlat, surface: view3D }, shape: shapeId() }
