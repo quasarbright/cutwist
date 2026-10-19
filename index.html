@@ -5473,7 +5473,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     // the shelf: every puzzle as a picture, by family; clicking one loads it
     function nxFamily(spec) {
       if (spec.rule === "planar") return "sliding surfaces";
-      if (spec.rule === "sierpinski") return "fractals";
+      if (spec.rule === "sierpinski") return "fractals (experimental)";
       if (spec.rule === "tiles") return { hex: "hexagon tilings", square: "square tilings", triangle: "triangle tilings" }[spec.tiling];
       if (spec.rule === "hyper") return isRound(spec) ? "sphere tilings" : "hyperbolic tilings";
       if (spec.rule === "prism" || spec.rule === "cuboid") return "prisms and cuboids";
