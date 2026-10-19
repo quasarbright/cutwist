@@ -8,10 +8,12 @@
 // in every one: it turned, or its ring going round. A ring changes the pieces in its corners too,
 // which show elsewhere: there, what changes fades from before to after as the ring goes round.
 //
-// The camera: the piece the view shows, its own way up, filling the screen's triangle, and the way
-// it came (each piece it zoomed in from and the corner, for zooming back out). Zooming in goes into
-// one of its corners; out, to a piece that has it in that corner (the one it came from, if it still
-// does). A zoom moves the camera there smoothly, what's round the corner fading out.
+// The camera: the piece the view shows, filling the screen's triangle, the way it faced when the
+// camera got there (a zoom never turns the camera, only scales and moves it), and the way it came
+// (each piece it zoomed in from and the corner, for zooming back out). Zooming in goes into the
+// third at a corner of the screen; out, to a piece that has the view there, facing as it does (the
+// one it came from, if it still does). A zoom moves the camera smoothly, what's round the third
+// fading out.
 //
 // The turns' circles sit in the middle of the triangle they turn (the inner its ring, when that's
 // a move, the outer the whole triangle), and a dot at the very middle zooms in on it: wherever the
@@ -60,7 +62,9 @@ export class SierView {
     this.P = null;
     this.scale = 300; this.ox = 0; this.oy = 0; // CSS px per unit (the whole's side), and where (0, 0) is
     this.origin = { x: 0, y: 0 };
-    this.v = 0; this.stack = []; // the camera (see the top): the piece shown, and [{ node, d }] the way in
+    // the camera (see the top): the piece shown, how far it's turned on the screen (thirds,
+    // counterclockwise), and [{ node, d, t }] the way in
+    this.v = 0; this.t = 0; this.stack = [];
     this.zoom = null; // a zoom going: { outer (the piece it's from), rel (corners in from it), dir, t0, dur }
     this.drawn = { circles: [], dots: [] }; // what the last frame drew (hit-testing)
   }
@@ -68,7 +72,7 @@ export class SierView {
   get path() { return this.stack.map((e) => e.d); }
   heightFor(P, w) { return (w * Math.sqrt(3)) / 2 + 90; }
   layout(P, safe) {
-    if (P !== this.P) { this.P = P; this.v = 0; this.stack = []; this.zoom = null; }
+    if (P !== this.P) { this.P = P; this.v = 0; this.t = 0; this.stack = []; this.zoom = null; }
     // (room round it: the zoom marks by its corners)
     const w = Math.max(40, safe.right - safe.left - 110), h = Math.max(40, safe.bottom - safe.top - 100);
     this.scale = Math.min(w, (h * 2) / Math.sqrt(3));
@@ -89,39 +93,46 @@ export class SierView {
     return C;
   }
   busy() { return !!this.zoom; }
-  zoomIn(c, state) { this.zoomTo([c], state); }
-  // zoom in down corners from the view (a dot: to the triangle it's in)
+  // zoom in on the third at the screen's corner c (the view's own corner c − t)
+  zoomIn(c, state) { this.zoomTo([mod(c - this.t, 3)], state); }
+  // zoom in down corners from the view (a dot: to the triangle it's in), keeping it the way it faces
   zoomTo(rel, state) {
     if (this.zoom || !rel.length) return;
-    const outer = this.v;
-    let n = outer;
-    for (const d of rel) { this.stack.push({ node: n, d }); n = Math.floor(state[3 * n + d] / 3); }
-    this.v = n;
-    this.go(outer, rel.slice(), 1);
+    const outer = this.v, outerT = this.t;
+    let n = outer, t = outerT;
+    for (const d of rel) { this.stack.push({ node: n, d, t }); const v = state[3 * n + d]; t = (t + (v % 3)) % 3; n = Math.floor(v / 3); }
+    this.v = n; this.t = t;
+    this.go({ outer, outerT, rel: rel.slice(), innerT: t, dir: 1 });
   }
-  // zoom out, the view becoming corner c of a piece that has it there (see outTo)
+  // zoom out, the view becoming the third at the screen's corner c of a piece that has it there,
+  // the way it faces now (see outTo)
   zoomOut(c, state) {
     if (this.zoom) return;
-    const j = this.outTo(c, state);
-    if (j == null) return;
+    const o = this.outTo(c, state);
+    if (!o) return;
     const top = this.stack.at(-1);
-    if (top && top.node === j && top.d === c) this.stack.pop();
-    else this.stack = this.wayTo(j, state);
-    this.go(j, [c], -1);
-    this.v = j;
+    if (top && top.node === o.node && top.d === o.d && top.t === o.t) this.stack.pop();
+    else this.stack = this.wayTo(o.node, state);
+    this.go({ outer: o.node, outerT: o.t, rel: [o.d], innerT: this.t, dir: -1 });
+    this.v = o.node; this.t = o.t;
   }
-  canZoomOut(c, state) { return this.outTo(c, state) != null; }
-  // the piece to zoom out to by corner c: the one the view came from if it's still there; else the
-  // smallest triangle at that corner's far end, as it started, if it has it; else any that does
+  canZoomOut(c, state) { return !!this.outTo(c, state); }
+  // where to zoom out to by the screen's corner c: { node, d (its corner the view's in), t (its turn
+  // on screen) }, a piece whose corner d holds the view, turned so that corner is the screen's c and
+  // the view faces as it does: the one the view came from if it's still that; else the smallest
+  // triangle at that corner's far end, as it started, if it does; else any that does
   outTo(c, state) {
-    const P = this.P, has = (n) => Math.floor(state[3 * n + c] / 3) === this.v, top = this.stack.at(-1);
-    if (top && top.d === c && has(top.node)) return top.node;
+    const P = this.P, fits = (n, d) => {
+      const v = state[3 * n + d], t = mod(this.t - (v % 3), 3);
+      return Math.floor(v / 3) === this.v && mod(d + t, 3) === c ? { node: n, d, t } : null;
+    };
+    const top = this.stack.at(-1), back = top && fits(top.node, top.d);
+    if (back) return back;
     const far = P.index(Array(P.L - 1).fill(c));
-    if (has(far)) return far;
-    for (let n = 0; n < P.N; n++) if (has(n)) return n;
+    for (const n of [far, ...P.addr.keys()]) for (let d = 0; d < 3; d++) { const o = fits(n, d); if (o) return o; }
     return null;
   }
-  // the shortest way in from the whole to piece j: [{ node, d }]
+  // the shortest way in from the whole to piece j: [{ node, d, t }]
   wayTo(j, state) {
     const from = new Map([[0, null]]), queue = [0];
     while (queue.length) {
@@ -131,11 +142,13 @@ export class SierView {
     }
     const way = [];
     for (let n = j; from.get(n); n = from.get(n).node) way.unshift(from.get(n));
+    let t = 0;
+    for (const e of way) { e.t = t; t = (t + (state[3 * e.node + e.d] % 3)) % 3; }
     return way;
   }
-  go(outer, rel, dir) {
-    const dur = 700 * Math.min(2.4, Math.max(1, Math.log2(1 + rel.length)));
-    this.zoom = { outer, rel, dir, t0: performance.now(), dur };
+  go(z) {
+    const dur = 700 * Math.min(2.4, Math.max(1, Math.log2(1 + z.rel.length)));
+    this.zoom = { ...z, t0: performance.now(), dur };
   }
 
   // ---- hit testing (CSS px), against what the last frame drew ----
@@ -187,13 +200,15 @@ export class SierView {
       // the camera: from the outer view onto the inner triangle (in) or back (out), eased, about the
       // point the map holds still (a similarity: its complex number's power)
       const z = this.zoom, u0 = Math.min(1, (now - z.t0) / z.dur), u = u0 < 0.5 ? 4 * u0 ** 3 : 1 - (-2 * u0 + 2) ** 3 / 2, v = z.dir > 0 ? u : 1 - u;
-      const inner = this.nodeCorners(z.rel, state, S, z.outer), M = mapTri(inner, S), cam = power(M, v);
+      // (the inner triangle onto the screen's the way it faces: no turning, only scaling and moving)
+      const So = turned(S, z.outerT), inner = this.nodeCorners(z.rel, state, So, z.outer), M = mapTri(inner, turned(S, z.innerT)), cam = power(M, v);
       ctx.save();
       ctx.transform(cam[0], cam[1], cam[2], cam[3], cam[4], cam[5]);
       this.camScale = Math.hypot(cam[0], cam[1]);
+      this.camTurn = Math.atan2(cam[1], cam[0]); // (none: for tests)
       // (what's round the inner triangle fading out as the camera goes in; the inner one whole)
       ctx.globalAlpha = 1 - v;
-      this.node(z.outer, S, [], false);
+      this.node(z.outer, So, [], false);
       ctx.globalAlpha = 1;
       this.node(this.walkFrom(z.outer, z.rel, state), inner, [], false);
       ctx.restore();
@@ -201,7 +216,7 @@ export class SierView {
       if (u0 >= 1) this.zoom = null;
       return;
     }
-    this.node(this.v, S, [], look.controls !== false);
+    this.node(this.v, turned(S, this.t), [], look.controls !== false);
     if (look.controls !== false) this.drawControls();
   }
   // piece n drawn at screen corners C (its own order), and what's in its corners; rel: the corners in
@@ -293,7 +308,7 @@ export class SierView {
   drawSolvedCard(P, look = {}, top = 26) {
     const { canvas } = this, w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height, pad = 8;
     this.origin = { x: 0, y: 0 };
-    if (P !== this.P) { this.P = P; this.v = 0; this.stack = []; this.zoom = null; }
+    if (P !== this.P) { this.P = P; this.v = 0; this.t = 0; this.stack = []; this.zoom = null; }
     const W = w - 2 * pad, H = h - top - pad;
     this.scale = Math.min(W, (H * 2) / Math.sqrt(3));
     this.ox = w / 2; this.oy = top + H / 2 + (this.scale * Math.sqrt(3)) / 4;

@@ -5833,6 +5833,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       sierIndex(a) { return P.index(a); },
       sierPoint(x, y) { sierView.layout(P, viewRegions().flat); return sierView.toScreen([x, y]); },
       sierDot(rel) { const d = sierView.drawn.dots.find((q) => q.rel.join("") === rel.join("")); return d && { x: d.x, y: d.y }; },
+      // (the most the camera turned, frame by frame, over the zoom going: radians)
+      async sierZoomTurn() { let most = 0; while (sierView.busy()) { await new Promise((r) => requestAnimationFrame(r)); most = Math.max(most, Math.abs(sierView.camTurn ?? 0)); } return most; },
       hyperMiddle(axis) {
         hyperView.layout(P, viewRegions().flat);
         const copy = hyperView.axisCopies(P.axes[axis].kind).filter((c) => c.axis === axis).sort((a, b) => Math.hypot(...a.at) - Math.hypot(...b.at))[0];

@@ -122,6 +122,19 @@ test("zooming out from the top: to the far corner's smallest triangle, which hol
   expect(await picture(page)).toBe(start);
 });
 
+test("a zoom never turns the camera: in on a corner holding a piece turned, and out again, it only scales; the view keeps facing that way", async ({ page }) => {
+  // (the top third turned: its corners all hold pieces turned a third)
+  await turn(page, [1, 1, 1]);
+  await idle(page);
+  const zoomTurn = async (c, q) => { await page.click(`.sier-zoom-btn[data-c="${c}"][data-q="${q}"]`); return page.evaluate(() => window.cutwist.sierZoomTurn()); };
+  expect(await zoomTurn(0, 1)).toBeLessThan(1e-6);
+  expect(await zoomTurn(0, 1)).toBeLessThan(1e-6);
+  expect((await info(page)).camera).toBe("00");
+  expect(await zoomTurn(0, -1)).toBeLessThan(1e-6);
+  expect(await zoomTurn(0, -1)).toBeLessThan(1e-6);
+  expect((await info(page)).camera).toBe("");
+});
+
 test("a tap on a dot zooms in on that triangle; turning there turns the puzzle", async ({ page }) => {
   const start = await state(page), d = await page.evaluate(() => window.cutwist.sierDot([1]));
   await fire(page, "pointerdown", d); await fire(page, "pointerup", d);
