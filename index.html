@@ -109,7 +109,7 @@
     .nx-sizes .tw-select { height: 28px; font-size: .8rem; padding-block: 0; } /* (the height centers it: padding too would clip the text) */
     #nx-toggles { position: fixed; top: 16px; right: 16px; z-index: 5; display: flex; gap: 6px; align-items: center; font-family: var(--font-mono); }
     #nx-toggles .btn { padding: 6px 10px; }
-    body:not(.nx-planar) .nx-viewbtn, body.nx-noview .nx-viewbtn { display: none; }
+    .nx-viewbtn[hidden] { display: none; } /* (shown only with something in its dropdown: see watchViewButton) */
     /* (a sliding puzzle's arrows are always on: no axes button for them) */
     body.nx-planar #axes { display: none; }
     .nx-pop {
@@ -250,6 +250,14 @@
     .ed-only, body:not(.nx-custom) .ed-only { display: none; }
     body.nx-custom .ed-only { display: inline-block; }
     body.nx-custom #reference { display: none; }
+    /* Permutle's share: a pill in its tiles' green, centered under the grid (left/top set by drawPlanar) */
+    .pm-share { position: fixed; z-index: 4; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 7px;
+      height: 38px; padding: 0 18px 0 14px; border: 0; border-radius: 19px; background: #538d4e; color: #fff;
+      font: 600 .95rem var(--font-sans, system-ui), sans-serif; letter-spacing: .02em; cursor: pointer; touch-action: manipulation; }
+    .pm-share:hover { background: #5f9e59; }
+    .pm-share:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .pm-share svg { width: 18px; height: 18px; margin-top: -2px; }
+    .pm-share[hidden] { display: none; }
     body.nx-words #reference { display: none; } /* (Permutle's solved card would give its words away) */
     body.nx-custom .nx-moves, body.nx-custom .nx-side { display: none; }
     #sierZoom[hidden] { display: none; }
@@ -506,7 +514,6 @@
     @media (max-width: 700px) {
       #nx-toggles { top: 12px; right: 12px; gap: 4px; }
       #nx-toggles .btn { height: 30px; padding: 0 9px; font-size: .8rem; }
-      .nx-viewbtn { display: inline-block !important; } /* (it holds the toggles here) */
       .tw-title { top: 12px; left: 12px; }
       .tw-title h1 { line-height: 30px; }
       /* (the tools: a row along the bottom, over the hint line) */
@@ -636,9 +643,11 @@
     <button class="nx-act" id="redo" title="redo a turn you undid (⇧⌘Z)">redo ↷</button>
     <button class="nx-act" id="scramble" title="mix the puzzle up with random turns">scramble</button>
     <button class="nx-act" id="reset" title="back to the scramble if you've turned it since, otherwise back to solved">reset</button>
-    <!-- (Permutle: the grid's colors as emoji, like Wordle's) -->
-    <button class="nx-act" id="shareWords" title="copy your result: the grid's colors as emoji, your moves and time, and a link to this start" hidden>share</button>
   </div>
+  <!-- Permutle: share your result, the grid's colors as emoji like Wordle's, centered under the
+       grid (placed by drawPlanar) -->
+  <button class="pm-share" id="shareWords" title="share your result: the grid's colors as emoji, your moves and time, and a link to this start" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5L12 3l4.5 4.5M8 10.5H6.5A1.5 1.5 0 0 0 5 12v7.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V12a1.5 1.5 0 0 0-1.5-1.5H16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><span>share</span></button>
 
   <!-- the shelf: every puzzle as a picture, dropping down from the name -->
   <div id="nx-shelf" hidden>
@@ -2229,8 +2238,6 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("c").hidden = isFlat() && (!view3D || !has3D());
       $("plane").hidden = !isFlat() || (!viewFlat && has3D());
       $("planarViews").hidden = !isFlat() || !has3D(); // (most hyperbolic surfaces have no 3D view to switch to)
-      // (no view button with nothing in its dropdown: on a phone it holds the toggles too)
-      document.body.classList.toggle("nx-noview", isFlat() && !has3D() && (!isPlanar() || isWords()));
       surfaceGroup.visible = isFlat() && has3D();
       if (isFlat() && has3D()) {
         edgeHints = null;
@@ -2603,11 +2610,18 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const n = history.movesDone, time = timer.t ? ` · ${formatTime(timer.ms)}` : "";
       return `Permutle\n${grid}\n${n === 1 ? "1 move" : `${n} moves`}${time}\n${wordsLink()}`;
     }
+    // The system's share sheet where there is one (phones, Safari, Chrome on a Mac or Windows):
+    // the link goes in the text, as Wordle's does, so every app it's sent to keeps it. Elsewhere,
+    // or if the sheet can't open, the clipboard.
     $("shareWords").onclick = async () => {
-      const text = wordsResult(), b = $("shareWords");
-      try { await navigator.clipboard.writeText(text); b.textContent = "copied"; }
-      catch { try { await navigator.share({ text }); } catch { b.textContent = "couldn't copy"; } }
-      clearTimeout(b.reset); b.reset = setTimeout(() => { b.textContent = "share"; }, 1500);
+      const text = wordsResult(), b = $("shareWords"), label = b.querySelector("span");
+      const say = (s) => { label.textContent = s; clearTimeout(b.reset); b.reset = setTimeout(() => { label.textContent = "share"; }, 1500); };
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ text }))) {
+        try { await navigator.share({ text }); return; } // (text alone: a title too is a second item to some sheets)
+        catch (e) { if (e.name === "AbortError") return; } // (closed the sheet: nothing to do)
+      }
+      try { await navigator.clipboard.writeText(text); say("copied"); }
+      catch { say("couldn't copy"); }
     };
     $("scramble").onclick = () => {
       if (!isWords()) { scramble(); return; }
@@ -4332,6 +4346,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     plane.addEventListener("pointercancel", endSierPress);
 
     const refView = new PlanarView($("refPlane"));
+    const SHARE_ROOM = 58; // (px under Permutle's grid for its share button)
     // Permutle: how green each row is, 0 to 1, easing toward whether it spells a word now. A row
     // a slide is taking letters out of isn't one while it moves: a column takes one from every
     // row, a row slides its own (fading in again if it lands on a word).
@@ -4355,8 +4370,14 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       const look = { labels: showLabels, reflectLabels, textures: planarTextures, picture: pictureLook(), arrows: planeView.showArrows, hover: hoverArrow, lit: algLit, litAlpha: litPulse(), rowGlow: wordGlow };
       if (reg.flat) {
         placePlane(reg.flat);
-        planeView.layout(P, reg.flat);
+        // (Permutle: room under the grid for its share button, centered just below its arrows)
+        planeView.layout(P, isWords() ? { ...reg.flat, bottom: reg.flat.bottom - SHARE_ROOM } : reg.flat);
         planeView.draw(state, slide, look);
+        if (isWords()) {
+          const c = planeView.cell, b = $("shareWords").style;
+          const left = `${Math.round(planeView.ox + (P.W * c) / 2)}px`, top = `${Math.round(planeView.oy + (P.H + planeView.band()) * c + 10)}px`;
+          if (b.left !== left || b.top !== top) Object.assign(b, { left, top });
+        }
       }
       if (reg.surface && surfaceMesh) renderSurface(reg.surface, slide, look); // (the card too: the solved surface)
       placeSplit();
@@ -5733,8 +5754,30 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (phone.matches) $("popToggles").append(...toggles);
       else document.querySelector("#nx-toggles about-modal").before(...toggles);
     }
+    // The view button shows only when its dropdown has a control in it that would show: worked
+    // out from the dropdown itself (whatever's moved into it, whatever hides what), never from
+    // which puzzle is up, so a new puzzle or option can't leave an empty dropdown behind. Checked
+    // again whenever the dropdown's contents change or the page's classes do (the CSS that hides
+    // things keys off them). An emptied dropdown that's open closes.
+    function watchViewButton() {
+      const pop = $("viewPop"), btn = $("view");
+      const shown = (el) => { for (; el && el !== pop; el = el.parentElement) if (el.hidden || getComputedStyle(el).display === "none") return false; return true; };
+      let queued = false;
+      const check = () => {
+        queued = false;
+        const any = [...pop.querySelectorAll("button, input, select, [role=radio]")].some(shown);
+        if (btn.hidden !== !any) btn.hidden = !any;
+        if (!any && !pop.hidden) pop.hidden = true;
+      };
+      const soon = () => { if (!queued) { queued = true; requestAnimationFrame(check); } };
+      new MutationObserver(soon).observe(pop, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class", "style"] });
+      new MutationObserver(soon).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+      phone.addEventListener("change", soon);
+      check();
+    }
     phone.addEventListener("change", placeToggles);
     placeToggles();
+    watchViewButton();
     // (a phone stacks the algorithms and solved card on the tape, whose hint can wrap)
     new ResizeObserver(() => {
       document.body.style.setProperty("--nx-tape-h", nx.tape.offsetHeight + "px");

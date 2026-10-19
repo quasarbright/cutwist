@@ -73,6 +73,20 @@ test("new puzzle: new letters, dealt, in the link; the link opens the same start
   expect((await info(page)).letters).toMatch(/^[A-Z]{25}$/);
 });
 
+test("on a phone: no view button (nothing in it), the share button under the grid", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openGrid(page, DEALT);
+  await expect(page.locator("#view")).toBeHidden();
+  const grid = await page.locator("#plane").boundingBox(), share = await page.locator("#shareWords").boundingBox();
+  const cell = await page.evaluate(() => [window.cutwist.cellCenter(0, 4), window.cutwist.cellCenter(4, 4)]);
+  expect(share.y).toBeGreaterThan(cell[0].y);
+  expect(share.y + share.height).toBeLessThanOrEqual(grid.y + grid.height);
+  expect(Math.abs(share.x + share.width / 2 - (cell[0].x + cell[1].x) / 2)).toBeLessThan(2); // (centered)
+  // (a sliding torus still has its view button, with its toggles)
+  await page.evaluate(() => window.cutwist.load("sliding-torus"));
+  await expect(page.locator("#view")).toBeVisible();
+});
+
 test("dragging a cell slides its column", async ({ page }) => {
   await openGrid(page, DEALT);
   const before = (await info(page)).rows;
