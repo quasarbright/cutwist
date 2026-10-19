@@ -5,7 +5,7 @@
 // its middle (K), so they touch at their corners and a band of it shows round them as well as its
 // middle. A turn turns what shows of each piece it carries (its band and middle; the smallest, all of
 // it) about the turn's middle. A zoom is the camera into the third (its triangle onto the whole's),
-// the smallest triangles that come back in growing into their places as it goes.
+// the smallest triangles that come back in fading in, in their places, as it goes.
 //
 // The turns are circles, as the tori's are, in the middle of the triangle they turn (as drawn in the
 // issue): the inner one its ring, the outer one the whole triangle; a press on a circle's line drags
@@ -14,7 +14,7 @@
 // The puzzle holds itself, so each smallest triangle shows a copy of the whole puzzle inside its band,
 // as it is now, turning as it turns (as the tori show copies round the patch); the copies hold copies,
 // down to a few pixels. A zoom brings other triangles in there than the copies show: the copies fade
-// as the camera goes in, and the triangles coming in grow into their places.
+// as the camera goes in, and the triangles coming in fade in, in their places.
 import { inkPattern } from "./tile-view.mjs";
 import { faceTextures } from "./puzzle.mjs";
 
@@ -225,13 +225,18 @@ export class SierView {
     ctx.translate(sc.x, sc.y); ctx.scale(k, k); ctx.translate(-sc.x, -sc.y);
     // (the rest of the puzzle, round the third, fading out as the camera goes in: gone as it gets there)
     this.paint(from, null, { ...look, copyAlpha: 1 - v, fade: { c, alpha: 1 - v } });
-    const g = Math.min(1, v * 1.15);
-    if (g > 0) P.addr.forEach((a, i) => {
-      if (a.length !== L - 1) return;
-      const C = shrink(cornersOf([c, ...a]), g);
-      this.fill(this.tri(C), to[i], look);
-      this.copy(C, to, null, { ...look, copyAlpha: v });
-    });
+    // (the triangles coming in, in their places, fading in over the copies as those fade out: nothing
+    // but the camera moves)
+    if (v > 0) {
+      ctx.globalAlpha = v;
+      P.addr.forEach((a, i) => {
+        if (a.length !== L - 1) return;
+        const C = cornersOf([c, ...a]);
+        this.fill(this.tri(C), to[i], look);
+        this.copy(C, to, null, { ...look, copyAlpha: 1 });
+      });
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
   }
 

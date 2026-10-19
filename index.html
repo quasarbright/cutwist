@@ -1424,6 +1424,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     let anim = null, queue = [];
     const signedQ = (q, n) => (q > n / 2 ? q - n : q);
     const ease = (u) => 1 - Math.pow(1 - u, 3);
+    const easeInOut = (u) => (u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2);
 
     function startNext() {
       if (anim || !queue.length) return;
@@ -1448,7 +1449,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
         const e = queue.shift(), { axis, layer } = e.move, ax = P.axes[axis], fast = queue.length > 1 ? 0.45 : 1;
         if (ax.kind === "zoom") {
           const k = Math.abs(e.move.q);
-          anim = { axis, layer, move: e.move, theta: 0, from: 0, to: k, t: 0, dur: e.dur ?? Math.min(1400, 520 * k) * fast, zoom: sierZoomSteps(e.move) };
+          anim = { axis, layer, move: e.move, theta: 0, from: 0, to: k, t: 0, dur: e.dur ?? Math.min(1800, 700 * k) * fast, zoom: sierZoomSteps(e.move) };
           return;
         }
         const qs = signedQ(((e.move.q % 3) + 3) % 3, 3);
@@ -4483,7 +4484,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (anim && !anim.live) {
         anim.t += dt;
         const u = Math.min(1, anim.t / anim.dur);
-        anim.theta = anim.from + (anim.to - anim.from) * ease(u);
+        // (a zoom eases in and out, as a camera does; a turn snaps in)
+        anim.theta = anim.from + (anim.to - anim.from) * (anim.zoom ? easeInOut(u) : ease(u));
         if (u >= 1) finishAnim();
       }
       if (isFlat()) { drawPlanar(); drawEdit(now); requestAnimationFrame(frame); return; }
