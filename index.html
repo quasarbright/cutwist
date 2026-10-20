@@ -818,7 +818,7 @@
     import {
       PLANAR_PRESETS, buildPlanar, solvedPlanarState, isPlanarSolved, applyPlanarMove, inversePlanarMove, planarScrambleMoves,
     } from "./planar.mjs";
-    import { PERMUTLE_PRESETS, buildPermutle, isGrid, newPermutleGrid, wordRows, rowText, isPermutleSolved } from "./permutle.mjs";
+    import { PERMUTLE_PRESETS, buildPermutle, isGrid, gridSize, newPermutleGrid, wordRows, rowText, isPermutleSolved } from "./permutle.mjs";
     import { PlanarView } from "./planar-view.mjs";
     import { surfacePoint, SURFACE_SHAPES } from "./surfaces.mjs";
     import {
@@ -2341,8 +2341,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           if (fit.a !== spec.a) { paramVals.a = fit.a; spec = currentSpec(); renderParams(); }
         }
       }
-      // (Permutle without letters, or not a grid of them: a new puzzle)
-      if (spec.permutle && !isGrid(spec.letters)) { paramVals.letters = newPermutleGrid(); spec = currentSpec(); }
+      // (Permutle without letters, or not a grid of them its size: a new puzzle)
+      if (spec.permutle && !isGrid(spec.letters, spec.n)) { paramVals.letters = newPermutleGrid(spec.n); spec = currentSpec(); }
       if (spec.rule === "hyper" && !isRound(spec) && !hyperFileFor(spec)) {
         // (its surfaces aren't in yet: fetch them, then come back; the puzzle showing stays till then)
         fetchHyper(spec.N, spec.M).then(() => { load(resetView); renderParams(); if (isCustom()) computeSnaps(); }).catch((err) => console.error(err));
@@ -2608,7 +2608,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     function wordsResult() {
       const grid = wordRows(P, state).map((w) => (w ? "🟩" : "⬛").repeat(P.W)).join("\n");
       const n = history.movesDone, time = timer.t ? ` · ${formatTime(timer.ms)}` : "";
-      return `Permutle\n${grid}\n${n === 1 ? "1 move" : `${n} moves`}${time}\n${wordsLink()}`;
+      return `Permutle ${P.W}×${P.H}\n${grid}\n${n === 1 ? "1 move" : `${n} moves`}${time}\n${wordsLink()}`;
     }
     // The system's share sheet where there is one (phones, Safari, Chrome on a Mac or Windows):
     // the link goes in the text, as Wordle's does, so every app it's sent to keeps it. Elsewhere,
@@ -2625,7 +2625,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
     };
     $("scramble").onclick = () => {
       if (!isWords()) { scramble(); return; }
-      paramVals.letters = newPermutleGrid();
+      paramVals.letters = newPermutleGrid(currentSpec().n);
       load(false);
     };
     // Reset goes back one level: after turning a scrambled puzzle, back to the scramble;
@@ -4669,7 +4669,8 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
           }
           const n = Math.round(Number(q.get("size")));
           if (!spec.fixed && q.has("size") && Number.isFinite(n)) size = snapSize(spec, n, 1);
-          if (spec.permutle && q.has("letters")) paramVals.letters = q.get("letters"); // (load checks they're a grid)
+          // (a grid of letters says its own size; load checks they're a grid)
+          if (spec.permutle && q.has("letters")) { paramVals.letters = q.get("letters"); const n = gridSize(paramVals.letters); if (n) paramVals.n = n; }
         }
       }
       const off = (k) => q.get(k) === "off", on = (k) => q.get(k) === "on";
