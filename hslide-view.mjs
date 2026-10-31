@@ -177,8 +177,11 @@ export class HSlideView extends HyperView {
     for (let i = 0; i < P.n; i++) pieceOn[P.face[state[i]]] = i;
     // each visible square: its piece's frame there (and, sliding, the row's frame to slide it in)
     const shown = [], keys = new Set(), centerKey = (m) => Mb.apply(m, [0, 0]).map((v) => Math.round(v * 1e7)).join(",");
+    // (a square's size on screen: middle to corner, averaged over its four corners, so it's the same
+    // whichever way a piece on it is turned; f: where a point of it is drawn)
+    const sizeOf = (f) => { const c = f([0, 0]); return (P.G.corners.reduce((s, k) => { const q = f(k); return s + abs([q[0] - c[0], q[1] - c[1]]); }, 0) / 4) * this.R; };
     const add = (d, min) => {
-      const c = Mb.apply(d.m, [0, 0]), size = abs([Mb.apply(d.m, P.G.corners[0])[0] - c[0], Mb.apply(d.m, P.G.corners[0])[1] - c[1]]) * this.R;
+      const size = sizeOf((z) => Mb.apply(d.m, z));
       if (size < min) return;
       keys.add(centerKey(d.m));
       const f = P.face[d.e], i = pieceOn[f], g = state[i];
@@ -194,8 +197,8 @@ export class HSlideView extends HyperView {
       }
       // (a sliding square's size where it is now, not where it started: one sliding in from the rim
       // grows, and its mesh, outline and label go with what it looks like)
-      const now = warp ? (() => { const a = warp(Mb.apply(m, [0, 0])), b = warp(Mb.apply(m, P.G.corners[0])); return abs([b[0] - a[0], b[1] - a[1]]) * this.R; })() : size;
-      shown.push({ d, m, i, size: now, warp, along });
+      const now = warp ? sizeOf((z) => warp(Mb.apply(m, z))) : size;
+      shown.push({ d, m, i, size: now, rest: size, warp, along });
     };
     for (const d of tiles) add(d, 0.6);
     // (sliding: the row's squares just past what's listed, as many as the slide reaches, either way:
@@ -278,7 +281,9 @@ export class HSlideView extends HyperView {
     }
     const edgeK = P.G.edge;
     ctx.strokeStyle = "rgba(255,255,255,.6)";
-    for (const { d, size } of shown) {
+    // (the domain's edge is where the squares are, so it's sized by them at rest: a piece sliding
+    // over doesn't change it)
+    for (const { d, rest: size } of shown) {
       if (size < 4) continue;
       let x = d.e, m = d.m;
       for (let k = 0; k < 4; k++, x = H.right[0][x], m = Mb.mul(m, P.G.A)) {
