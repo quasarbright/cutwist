@@ -304,11 +304,17 @@ export class HSlideView extends HyperView {
     // (as the sliding grids' labels: a part of the piece, sized with its square wherever it is, so it
     // grows and shrinks with it as it slides or the view moves; too small to read, it fades out)
     if (look.labels) {
-      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-      for (const { m, i, size, warp } of shown) {
-        const f = P.face[P.reps[i]], text = P.ring[f] === 0 ? "0" : `${P.ring[f]}·${P.degrees[f]}°`;
+      // Each part underlined when the piece has it right, as the sliding grids' labels are: the ring
+      // when it's in its home ring, the angle when it's in its home direction (any ring); both, it's in
+      // its home square (maybe turned). Which square it's in: where it is, or sliding, where it's from.
+      ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      for (const { d, m, i, size, warp } of shown) {
+        const f = P.face[P.reps[i]], here = P.face[d.e];
+        const parts = P.ring[f] === 0 ? [{ text: "0", home: P.ring[here] === 0 }]
+          : [{ text: String(P.ring[f]), home: P.ring[here] === P.ring[f] }, { text: "·", home: false }, { text: `${P.degrees[f]}°`, home: P.ring[here] > 0 && P.degrees[here] === P.degrees[f] }]; // (the middle has no direction)
+        const len = parts.reduce((s, p) => s + p.text.length, 0);
         // (size: middle to corner; a long label spans most of the square's width, a short one is as tall)
-        const fs = size * Math.min(0.3, 1.9 / text.length);
+        const fs = size * Math.min(0.3, 1.9 / len);
         if (fs < 2.5) continue;
         let a = Mb.apply(m, [0, 0]), b = Mb.apply(m, this.labelUp(i));
         if (warp) { a = warp(a); b = warp(b); }
@@ -316,8 +322,13 @@ export class HSlideView extends HyperView {
         ctx.save(); ctx.globalAlpha = Math.min(1, (fs - 2.5) / 3.5);
         ctx.translate(ax, ay); ctx.rotate(Math.atan2(by - ay, bx - ax) + Math.PI / 2);
         ctx.font = `700 ${fs}px ui-monospace, "IBM Plex Mono", monospace`;
-        ctx.lineWidth = fs * 0.2; ctx.strokeStyle = BODY; ctx.strokeText(text, 0, 0);
-        ctx.fillStyle = "#fff"; ctx.fillText(text, 0, 0);
+        ctx.lineWidth = fs * 0.2; ctx.strokeStyle = BODY; ctx.fillStyle = "#fff";
+        const widths = parts.map((p) => ctx.measureText(p.text).width), xs = [];
+        for (let k = 0, x = -widths.reduce((s, w) => s + w, 0) / 2; k < parts.length; x += widths[k], k++) xs.push(x);
+        const bar = { dy: fs * 0.62, h: fs * 0.13 };
+        // (outlines first, then fills, so one part's outline never covers another's letters)
+        parts.forEach((p, k) => { ctx.strokeText(p.text, xs[k], 0); if (p.home) ctx.strokeRect(xs[k], bar.dy, widths[k], bar.h); });
+        parts.forEach((p, k) => { ctx.fillText(p.text, xs[k], 0); if (p.home) ctx.fillRect(xs[k], bar.dy, widths[k], bar.h); });
         ctx.restore();
       }
     }
