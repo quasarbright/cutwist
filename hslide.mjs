@@ -206,7 +206,9 @@ function band(P) {
   // the row's half width along it: the square's sides (the two edges the row doesn't cross), as
   // |y| against x in the band model, over one step
   const along = [0, 1, 2, 3].map((k) => Math.abs(Math.cos(Math.atan2(P.G.mids[k][1], P.G.mids[k][0]) - Math.atan2(dir[1], dir[0])))), sideK = along.indexOf(Math.min(...along));
-  const side = [...P.G.poly.slice(sideK * 24, sideK * 24 + 24), P.G.corners[(sideK + 1) % 4]].map(toBand).map(([x, y]) => [x, Math.abs(y)]).sort((a, b) => a[0] - b[0]);
+  // (finely: the side is a straight line of the hyperbolic plane, from corner to corner)
+  const p = P.G.corners[sideK], q = P.G.corners[(sideK + 1) % 4], w = Mb.apply(Mb.inv(Mb.to(p)), q);
+  const side = Array.from({ length: 401 }, (_, i) => Mb.apply(Mb.to(p), [(w[0] * i) / 400, (w[1] * i) / 400])).map(toBand).map(([x, y]) => [x, Math.abs(y)]).sort((a, b) => a[0] - b[0]);
   const halfWidth = (x) => {
     x = mod(x + X / 2, X) - X / 2;
     for (let i = 1; i < side.length; i++) if (side[i][0] >= x) { const a = side[i - 1], b = side[i], f = (x - a[0]) / (b[0] - a[0] || 1); return a[1] + f * (b[1] - a[1]); }

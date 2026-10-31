@@ -174,21 +174,38 @@ export class HSlideView extends HyperView {
     const pieceOn = new Int32Array(P.n);
     for (let i = 0; i < P.n; i++) pieceOn[P.face[state[i]]] = i;
     // each visible square: its piece's frame there (and, sliding, the row's frame to slide it in)
-    const shown = [];
-    for (const d of tiles) {
+    const shown = [], keys = new Set(), centerKey = (m) => Mb.apply(m, [0, 0]).map((v) => Math.round(v * 1e7)).join(",");
+    const add = (d, min) => {
       const c = Mb.apply(d.m, [0, 0]), size = abs([Mb.apply(d.m, P.G.corners[0])[0] - c[0], Mb.apply(d.m, P.G.corners[0])[1] - c[1]]) * this.R;
-      if (size < 0.6) continue;
+      if (size < min) return;
+      keys.add(centerKey(d.m));
       const f = P.face[d.e], i = pieceOn[f], g = state[i];
       let x = d.e, m = d.m;
       for (let j = 0; j < 4 && x !== g; j++) { x = H.right[0][x]; m = Mb.mul(m, P.G.A); }
-      let warp = null;
+      let warp = null, along = null;
       if (row && row.inRow[f]) {
         let y = d.e, ma = d.m;
         for (let j = 0; j < 4 && !(P.rowOf[y] === slide.axis && P.fwd[y] === 1); j++) { y = H.right[0][y]; ma = Mb.mul(ma, P.G.A); }
         const back = Mb.inv(ma), t = slide.theta;
         warp = (z) => Mb.apply(ma, slidePoint(P, Mb.apply(back, z), t));
+        along = { y, ma };
       }
-      shown.push({ d, m, i, size, warp });
+      shown.push({ d, m, i, size, warp, along });
+    };
+    for (const d of tiles) add(d, 0.6);
+    // (sliding: the row's squares just past what's listed, as many as the slide reaches, either way:
+    // they slide into view, and would leave holes, then pop in when it lands)
+    if (row) {
+      const reach = Math.ceil(Math.abs(slide.theta)) + 1, Ti = Mb.inv(P.Tg);
+      const back = (y) => H.right[0][H.rightInv[1][y]]; // (y·T⁻¹ = y·S⁻¹·R)
+      for (const s of shown.filter((s) => s.along)) for (const dir of [1, -1]) {
+        let { y, ma } = s.along;
+        for (let k = 0; k < reach; k++) {
+          y = dir > 0 ? H.right[1][H.right[0][H.right[0][H.right[0][y]]]] : back(y);
+          ma = Mb.norm(Mb.mul(ma, dir > 0 ? P.Tg : Ti));
+          if (!keys.has(centerKey(ma)) && abs(Mb.apply(ma, [0, 0])) < 0.9999) add({ m: ma, e: y }, 0.05);
+        }
+      }
     }
     // the pieces' pictures (WebGL, offscreen, then onto the canvas)
     const gl = this.ensureGL();
@@ -196,7 +213,8 @@ export class HSlideView extends HyperView {
       const atlas = this.makeAtlas(look.picture), { glp } = this;
       const pos = [], uv = [], idx = [];
       for (const { m, i, size, warp } of shown) {
-        const res = Math.max(1, Math.min(10, Math.ceil(size / 16))), grid = gridOf(P.G, res), base = pos.length / 2;
+        // (a sliding square bends: a finer mesh, so its straight-segment edges keep to the row's edge)
+        const res = warp ? Math.max(2, Math.min(28, Math.ceil(size / 6))) : Math.max(1, Math.min(10, Math.ceil(size / 16))), grid = gridOf(P.G, res), base = pos.length / 2;
         for (let k = 0; k < grid.pts.length; k++) {
           let z = Mb.apply(m, grid.pts[k]);
           if (warp) z = warp(z);
