@@ -66,6 +66,8 @@ export class HSlideView extends HyperView {
     this.drawn = ""; // what's on the canvas (skip drawing it again)
   }
   layout(P, safe) {
+    // (squares down to a pixel and a half: smaller leaves the rim black. Each is a few triangles)
+    if (this.minPx > 1.5 && !this.card) this.minPx = 1.5;
     super.layout(P, safe);
     // (a new surface starts turned: the middle square square to the screen)
     if (this.start.m === Mb.I) { this.start = { m: Mb.rot(VIEW_TURN), e: this.start.e }; this.visible = null; }
@@ -190,7 +192,10 @@ export class HSlideView extends HyperView {
         warp = (z) => Mb.apply(ma, slidePoint(P, Mb.apply(back, z), t));
         along = { y, ma };
       }
-      shown.push({ d, m, i, size, warp, along });
+      // (a sliding square's size where it is now, not where it started: one sliding in from the rim
+      // grows, and its mesh, outline and label go with what it looks like)
+      const now = warp ? (() => { const a = warp(Mb.apply(m, [0, 0])), b = warp(Mb.apply(m, P.G.corners[0])); return abs([b[0] - a[0], b[1] - a[1]]) * this.R; })() : size;
+      shown.push({ d, m, i, size: now, warp, along });
     };
     for (const d of tiles) add(d, 0.6);
     // (sliding: the row's squares just past what's listed, as many as the slide reaches, either way:
@@ -214,7 +219,9 @@ export class HSlideView extends HyperView {
       const pos = [], uv = [], idx = [];
       for (const { m, i, size, warp } of shown) {
         // (a sliding square bends: a finer mesh, so its straight-segment edges keep to the row's edge)
-        const res = warp ? Math.max(2, Math.min(28, Math.ceil(size / 6))) : Math.max(1, Math.min(10, Math.ceil(size / 16))), grid = gridOf(P.G, res), base = pos.length / 2;
+        // (and every square fine enough that its mesh's straight edges keep to its curved ones: no
+        // background showing through between neighbors)
+        const res = Math.max(1, Math.min(32, Math.ceil(size / (warp ? 5 : 6)))), grid = gridOf(P.G, res), base = pos.length / 2;
         for (let k = 0; k < grid.pts.length; k++) {
           let z = Mb.apply(m, grid.pts[k]);
           if (warp) z = warp(z);
@@ -282,16 +289,21 @@ export class HSlideView extends HyperView {
       }
     }
     // labels: each piece's home (ring · angle), upright at home, turned as the piece is
+    // (as the sliding grids' labels: a part of the piece, sized with its square wherever it is, so it
+    // grows and shrinks with it as it slides or the view moves; too small to read, it fades out)
     if (look.labels) {
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
       for (const { m, i, size, warp } of shown) {
-        if (size < 26) continue;
-        const f = P.face[P.reps[i]], text = P.ring[f] === 0 ? "0" : `${P.ring[f]} · ${P.degrees[f]}°`;
+        const f = P.face[P.reps[i]], text = P.ring[f] === 0 ? "0" : `${P.ring[f]}·${P.degrees[f]}°`;
+        // (size: middle to corner; a long label spans most of the square's width, a short one is as tall)
+        const fs = size * Math.min(0.3, 1.9 / text.length);
+        if (fs < 2.5) continue;
         let a = Mb.apply(m, [0, 0]), b = Mb.apply(m, this.labelUp(i));
         if (warp) { a = warp(a); b = warp(b); }
-        const [ax, ay] = px(a), [bx, by] = px(b), fs = Math.max(8, Math.min(18, size * 0.27));
-        ctx.save(); ctx.translate(ax, ay); ctx.rotate(Math.atan2(by - ay, bx - ax) + Math.PI / 2);
-        ctx.font = `700 ${fs}px ui-sans-serif, system-ui, sans-serif`;
+        const [ax, ay] = px(a), [bx, by] = px(b);
+        ctx.save(); ctx.globalAlpha = Math.min(1, (fs - 2.5) / 3.5);
+        ctx.translate(ax, ay); ctx.rotate(Math.atan2(by - ay, bx - ax) + Math.PI / 2);
+        ctx.font = `700 ${fs}px ui-monospace, "IBM Plex Mono", monospace`;
         ctx.lineWidth = fs * 0.2; ctx.strokeStyle = BODY; ctx.strokeText(text, 0, 0);
         ctx.fillStyle = "#fff"; ctx.fillText(text, 0, 0);
         ctx.restore();
@@ -312,7 +324,7 @@ export class HSlideView extends HyperView {
   // the solved puzzle, filling this (small) canvas: the corner card
   drawSolvedCard(P, look, top = 22) {
     const { canvas } = this, w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height, pad = 4;
-    this.minPx = 4;
+    this.card = true; this.minPx = 2;
     this.layout(P, { left: pad, top, right: w - pad, bottom: h - pad });
     this.origin = { x: 0, y: 0 };
     this.draw(P.reps, null, { picture: look.picture, labels: false });
