@@ -6,8 +6,8 @@
 // Every visible square shows its piece: a picture (the color wheel, or one of yours) painted across
 // the fundamental domain, so the piece shows the scrap of it that's at its home. A square's scrap
 // is bent by the disk's map, so it's drawn by WebGL (offscreen, then onto the canvas): each square a
-// small mesh, its texture each piece's scrap from an atlas (one cell per piece, its home square
-// sampled from the picture once). A row sliding moves its squares along the row, stretched to fit
+// small mesh whose points carry where they are on the picture, painted per pixel from the picture
+// itself (or the wheel, worked out per pixel). A row sliding moves its squares along the row, stretched to fit
 // it (hslide.mjs's slidePoint). The squares' outlines, the domain's edge and the labels (each
 // piece's home: ring · angle, turned as the piece is) are drawn on the canvas on top.
 import { HyperView } from "./hyper-view.mjs";
@@ -43,31 +43,44 @@ function gridOf(G, res, over = 0) {
     const at = (k) => -over + ((1 + 2 * over) * k) / res;
     for (let j = 0; j <= res; j++) for (let i = 0; i <= res; i++) { pts.push(squarePoint(G, at(i), at(j))); st.push([at(i), at(j)]); }
     for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) { const k = j * (res + 1) + i; idx.push(k, k + 1, k + res + 2, k, k + res + 2, k + res + 1); }
-    grids.set(key, { pts, st, idx });
+    grids.set(key, { key, pts, st, idx });
   }
   return grids.get(key);
 }
 
-// The default picture: a color wheel, hue by direction (0° red, to the right), light in the middle
-// and darker outward. p: a point on the turned view; R: how far the domain reaches.
-function hsl(h, s, l) {
-  const a = s * Math.min(l, 1 - l), f = (n) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
-  return [f(0), f(8), f(4)].map((v) => Math.round(v * 255));
-}
-export const wheelColor = (p, R) => hsl((((Math.atan2(p[1], p[0]) * 180) / Math.PI) + 360) % 360, 0.85, 0.78 - 0.4 * Math.min(1, abs(p) / R));
-
+// The pieces are painted per pixel by WebGL: each mesh point carries where it is on the picture (p, a
+// point of the turned view of the domain at the piece's home), and the fragment shader paints that
+// spot. The default picture is a color wheel: hue by direction (0° red, to the right), light in the
+// middle and darker outward (uR: how far the domain reaches). A picture of yours covers the domain's
+// box, cropped to fit (uScale: picture widths per disk unit), sampled from the picture at its own
+// size (up to the GPU's limit), mipmapped for squares smaller than their scrap of it.
 const VS = `#version 300 es
-in vec2 aPos; in vec2 aUv; uniform vec2 uSize; out vec2 vUv;
-void main() { vUv = aUv; gl_Position = vec4(aPos.x / uSize.x * 2.0 - 1.0, 1.0 - aPos.y / uSize.y * 2.0, 0.0, 1.0); }`;
+in vec2 aPos; in vec2 aP; uniform vec2 uSize; out vec2 vP;
+void main() { vP = aP; gl_Position = vec4(aPos.x / uSize.x * 2.0 - 1.0, 1.0 - aPos.y / uSize.y * 2.0, 0.0, 1.0); }`;
 const FS = `#version 300 es
-precision highp float; uniform sampler2D uTex; in vec2 vUv; out vec4 color;
-void main() { color = texture(uTex, vUv); }`;
+precision highp float;
+uniform int uMode; uniform float uR; uniform vec2 uScale; uniform sampler2D uTex;
+in vec2 vP; out vec4 color;
+vec3 hsl(float h, float s, float l) {
+  float a = s * min(l, 1.0 - l);
+  vec3 k = mod(vec3(0.0, 8.0, 4.0) + h / 30.0, 12.0);
+  return l - a * max(vec3(-1.0), min(min(k - 3.0, 9.0 - k), vec3(1.0)));
+}
+void main() {
+  if (uMode == 0) {
+    float h = mod(degrees(atan(vP.y, vP.x)) + 360.0, 360.0);
+    color = vec4(hsl(h, 0.85, 0.78 - 0.4 * min(1.0, length(vP) / uR)), 1.0);
+  } else {
+    vec2 uv = vec2(0.5 + vP.x * uScale.x, 0.5 - vP.y * uScale.y);
+    color = any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) ? vec4(20.0, 22.0, 28.0, 255.0) / 255.0 : texture(uTex, uv);
+  }
+}`;
 
 export class HSlideView extends HyperView {
   constructor(canvas) {
     super(canvas);
     this.gl = null; // (made the first time it draws)
-    this.atlas = null; // { key, cols, C, size }
+    this.pic = null; // (the picture on the GPU: { id, w, h })
     this.drawn = ""; // what's on the canvas (skip drawing it again)
   }
   layout(P, safe) {
@@ -105,44 +118,36 @@ export class HSlideView extends HyperView {
     return out;
   }
 
-  // ---- the atlas: each piece's home square, sampled from the picture once ----
-  // picture: { img } (painted across the domain, covering it) or null (the color wheel)
-  makeAtlas(picture) {
-    const { P } = this, key = `${P.surface.group}:${P.surface.tile}:${P.M}:${P.spec.surface}:${picture ? picture.id : "wheel"}`;
-    if (this.atlas && this.atlas.key === key) return this.atlas;
-    const cols = Math.ceil(Math.sqrt(P.n)), C = Math.max(24, Math.min(96, Math.floor(4096 / cols))), size = cols * C;
-    const data = new Uint8ClampedArray(size * size * 4), R = P.domainRadius;
-    // (the picture's pixels, and how it lies over the domain: covering its box, cropped to fit)
-    let pix = null, pw = 0, ph = 0, upp = 0;
-    if (picture) {
-      const img = picture.img, k = Math.min(1, 1024 / Math.max(img.width, img.height));
-      pw = Math.max(1, Math.round(img.width * k)); ph = Math.max(1, Math.round(img.height * k));
-      const cv = document.createElement("canvas"); cv.width = pw; cv.height = ph;
-      const cx = cv.getContext("2d"); cx.drawImage(img, 0, 0, pw, ph); pix = cx.getImageData(0, 0, pw, ph).data;
-      upp = Math.max((2 * R) / pw, (2 * R) / ph); // (disk units per picture pixel: the picture covers the domain's box, cropped to fit)
+  // ---- where each piece's points are on the picture (a grid's points, at the piece's home, on the
+  // turned view of the domain), worked out once per piece and grid ----
+  homePoints(i, grid) {
+    const { P } = this;
+    if (this.homeFor !== P) { this.homeFor = P; this.homes = new Map(); this.frames = []; }
+    const key = `${i}:${grid.key}`;
+    if (!this.homes.has(key)) {
+      const F = (this.frames[i] ??= domainFrame(P, P.reps[i]));
+      this.homes.set(key, grid.pts.map((w) => turnBy(Mb.apply(F, w), VIEW_TURN)));
     }
-    const paint = (p) => {
-      if (!pix) return wheelColor(p, R);
-      const x = Math.round(pw / 2 + p[0] / upp - 0.5), y = Math.round(ph / 2 - p[1] / upp - 0.5);
-      if (x < 0 || y < 0 || x >= pw || y >= ph) return [20, 22, 28];
-      const i = 4 * (y * pw + x); return [pix[i], pix[i + 1], pix[i + 2]];
-    };
-    const e = 0.06; // (a margin round each cell, sampled past the square: the mesh reaches a little past it, see OVER)
-    for (let i = 0; i < P.n; i++) {
-      const F = domainFrame(P, P.reps[i]), x0 = (i % cols) * C, y0 = Math.floor(i / cols) * C;
-      for (let py = 0; py < C; py++) for (let px = 0; px < C; px++) {
-        const s = ((px + 0.5) / C - e) / (1 - 2 * e), t = ((py + 0.5) / C - e) / (1 - 2 * e);
-        const c = paint(turnBy(Mb.apply(F, squarePoint(P.G, s, t)), VIEW_TURN)), o = 4 * ((y0 + py) * size + x0 + px);
-        data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
-      }
-    }
-    this.atlas = { key, cols, C, size, e, data, uploaded: false };
-    return this.atlas;
+    return this.homes.get(key);
   }
-  // a piece's (s, t) in its atlas cell, as texture coordinates
-  uvOf(i, s, t) {
-    const { cols, C, size, e } = this.atlas, x0 = (i % cols) * C, y0 = Math.floor(i / cols) * C;
-    return [(x0 + (e + s * (1 - 2 * e)) * C) / size, (y0 + (e + t * (1 - 2 * e)) * C) / size];
+  // the picture on the GPU, at its own size (up to the GPU's limit): { id, w, h } or null
+  pictureTexture(gl, picture) {
+    if (!picture) return null;
+    if (this.pic && this.pic.id === picture.id) return this.pic;
+    const img = picture.img, max = gl.getParameter(gl.MAX_TEXTURE_SIZE), k = Math.min(1, max / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+    const w = Math.max(1, Math.round((img.naturalWidth || img.width) * k)), h = Math.max(1, Math.round((img.naturalHeight || img.height) * k));
+    let src = img;
+    if (k < 1) { src = document.createElement("canvas"); src.width = w; src.height = h; src.getContext("2d").drawImage(img, 0, 0, w, h); }
+    gl.bindTexture(gl.TEXTURE_2D, this.glp.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const ext = gl.getExtension("EXT_texture_filter_anisotropic");
+    if (ext) gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+    this.pic = { id: picture.id, w, h };
+    return this.pic;
   }
 
   // ---- WebGL, offscreen ----
@@ -154,8 +159,9 @@ export class HSlideView extends HyperView {
     const prog = gl.createProgram();
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
     this.glCanvas = cv;
-    this.glp = { prog, aPos: gl.getAttribLocation(prog, "aPos"), aUv: gl.getAttribLocation(prog, "aUv"), uSize: gl.getUniformLocation(prog, "uSize"), uTex: gl.getUniformLocation(prog, "uTex"),
-      pos: gl.createBuffer(), uv: gl.createBuffer(), idx: gl.createBuffer(), tex: gl.createTexture() };
+    const u = (n) => gl.getUniformLocation(prog, n);
+    this.glp = { prog, aPos: gl.getAttribLocation(prog, "aPos"), aP: gl.getAttribLocation(prog, "aP"), uSize: u("uSize"), uTex: u("uTex"), uMode: u("uMode"), uR: u("uR"), uScale: u("uScale"),
+      pos: gl.createBuffer(), p: gl.createBuffer(), idx: gl.createBuffer(), tex: gl.createTexture() };
     this.gl = gl;
     return gl;
   }
@@ -223,18 +229,16 @@ export class HSlideView extends HyperView {
     // the pieces' pictures (WebGL, offscreen, then onto the canvas)
     const gl = this.ensureGL();
     if (gl) {
-      const atlas = this.makeAtlas(look.picture), { glp } = this;
-      const pos = [], uv = [], idx = [];
+      const { glp } = this, pos = [], home = [], idx = [];
       for (const { m, i, size, warp } of shown) {
-        // (a sliding square bends: a finer mesh, so its straight-segment edges keep to the row's edge)
-        // (and every square fine enough that its mesh's straight edges keep to its curved ones: no
-        // background showing through between neighbors)
-        const res = Math.max(1, Math.min(32, Math.ceil(size / (warp ? 5 : 6)))), grid = gridOf(P.G, res, overOf(size)), base = pos.length / 2;
+        // (fine enough that the mesh's straight edges keep to the square's curved ones: no background
+        // showing through between neighbors; finer still for a sliding square, which bends)
+        const res = Math.max(1, Math.min(32, Math.ceil(size / (warp ? 5 : 6)))), grid = gridOf(P.G, res, overOf(size)), base = pos.length / 2, at = this.homePoints(i, grid);
         for (let k = 0; k < grid.pts.length; k++) {
           let z = Mb.apply(m, grid.pts[k]);
           if (warp) z = warp(z);
           pos.push(this.cx + z[0] * this.R - o.x, this.cy - z[1] * this.R - o.y);
-          uv.push(...this.uvOf(i, grid.st[k][0], grid.st[k][1]));
+          home.push(at[k][0], at[k][1]);
         }
         for (const k of grid.idx) idx.push(base + k);
       }
@@ -243,21 +247,19 @@ export class HSlideView extends HyperView {
       gl.viewport(0, 0, cv.width, cv.height);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(glp.prog);
-      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, glp.tex);
-      if (!atlas.uploaded) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, atlas.size, atlas.size, 0, gl.RGBA, gl.UNSIGNED_BYTE, atlas.data);
-        gl.generateMipmap(gl.TEXTURE_2D);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        atlas.uploaded = true;
-      }
+      gl.activeTexture(gl.TEXTURE0);
+      const pic = this.pictureTexture(gl, look.picture), R = P.domainRadius;
+      gl.bindTexture(gl.TEXTURE_2D, glp.tex);
       gl.uniform1i(glp.uTex, 0);
+      gl.uniform1i(glp.uMode, pic ? 1 : 0);
+      gl.uniform1f(glp.uR, R);
+      // (picture widths per disk unit: the picture covers the domain's box, 2R across, cropped to fit)
+      if (pic) { const upp = Math.max((2 * R) / pic.w, (2 * R) / pic.h); gl.uniform2f(glp.uScale, 1 / (upp * pic.w), 1 / (upp * pic.h)); }
       gl.uniform2f(glp.uSize, W, Hh);
       gl.bindBuffer(gl.ARRAY_BUFFER, glp.pos); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.DYNAMIC_DRAW);
       gl.enableVertexAttribArray(glp.aPos); gl.vertexAttribPointer(glp.aPos, 2, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, glp.uv); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(uv), gl.DYNAMIC_DRAW);
-      gl.enableVertexAttribArray(glp.aUv); gl.vertexAttribPointer(glp.aUv, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glp.p); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(home), gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(glp.aP); gl.vertexAttribPointer(glp.aP, 2, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glp.idx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.DYNAMIC_DRAW);
       gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_INT, 0);
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cv, 0, 0); ctx.restore();
