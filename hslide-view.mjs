@@ -30,13 +30,18 @@ function squarePoint(G, s, t) {
   const q = 1 / (1 + Math.sqrt(Math.max(0, 1 - kx * kx - ky * ky)));
   return [kx * q, ky * q];
 }
-// a grid of a square's points, res × res cells: { pts (in the square's frame), st }
+// A grid of a square's points, res × res cells: { pts (in the square's frame), st }. It reaches `over`
+// past the square's edges (in (s, t)): a mesh's straight edges cut inside the square's curved ones,
+// most near the rim where they curve hard, and the background would show between neighbors; reaching
+// a little past, neighbors overlap instead, under the outlines. (A pixel or two: overOf.)
 const grids = new Map();
-function gridOf(G, res) {
-  const key = `${G.M},${res}`;
+const overOf = (size) => Math.round(Math.min(0.04, 1.4 / Math.max(1, size)) * 400) / 400; // (size: middle to corner, px)
+function gridOf(G, res, over = 0) {
+  const key = `${G.M},${res},${over}`;
   if (!grids.has(key)) {
     const pts = [], st = [], idx = [];
-    for (let j = 0; j <= res; j++) for (let i = 0; i <= res; i++) { pts.push(squarePoint(G, i / res, j / res)); st.push([i / res, j / res]); }
+    const at = (k) => -over + ((1 + 2 * over) * k) / res;
+    for (let j = 0; j <= res; j++) for (let i = 0; i <= res; i++) { pts.push(squarePoint(G, at(i), at(j))); st.push([at(i), at(j)]); }
     for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) { const k = j * (res + 1) + i; idx.push(k, k + 1, k + res + 2, k, k + res + 2, k + res + 1); }
     grids.set(key, { pts, st, idx });
   }
@@ -122,7 +127,7 @@ export class HSlideView extends HyperView {
       if (x < 0 || y < 0 || x >= pw || y >= ph) return [20, 22, 28];
       const i = 4 * (y * pw + x); return [pix[i], pix[i + 1], pix[i + 2]];
     };
-    const e = 1 / C; // (a texel's margin round each cell, sampled just past the square: no seams)
+    const e = 0.06; // (a margin round each cell, sampled past the square: the mesh reaches a little past it, see OVER)
     for (let i = 0; i < P.n; i++) {
       const F = domainFrame(P, P.reps[i]), x0 = (i % cols) * C, y0 = Math.floor(i / cols) * C;
       for (let py = 0; py < C; py++) for (let px = 0; px < C; px++) {
@@ -224,7 +229,7 @@ export class HSlideView extends HyperView {
         // (a sliding square bends: a finer mesh, so its straight-segment edges keep to the row's edge)
         // (and every square fine enough that its mesh's straight edges keep to its curved ones: no
         // background showing through between neighbors)
-        const res = Math.max(1, Math.min(32, Math.ceil(size / (warp ? 5 : 6)))), grid = gridOf(P.G, res), base = pos.length / 2;
+        const res = Math.max(1, Math.min(32, Math.ceil(size / (warp ? 5 : 6)))), grid = gridOf(P.G, res, overOf(size)), base = pos.length / 2;
         for (let k = 0; k < grid.pts.length; k++) {
           let z = Mb.apply(m, grid.pts[k]);
           if (warp) z = warp(z);
