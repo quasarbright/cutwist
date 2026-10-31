@@ -306,18 +306,16 @@ export class HSlideView extends HyperView {
     if (look.labels) {
       // Each part underlined when the piece has it right, as the sliding grids' labels are: the ring
       // when it's in its home ring, the angle when it's in its home direction (any ring); both, it's in
-      // its home square (maybe turned). Which square it's in: where it is, or sliding, where it's from.
+      // its home square (maybe turned). And as theirs, by the square it's drawn over: a sliding piece
+      // across two squares is drawn in each, clipped to it, with that square's underlines, so they
+      // change as it crosses the edge, not all at once when it lands.
       ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-      for (const { d, m, i, size, warp } of shown) {
-        const f = P.face[P.reps[i]], here = P.face[d.e];
+      const fwd = (y) => H.right[1][H.right[0][H.right[0][H.right[0][y]]]], bwd = (y) => H.right[0][H.rightInv[1][y]];
+      const outline = (mm) => { ctx.beginPath(); P.G.poly.forEach((z, k) => { const [x, y] = px(Mb.apply(mm, z)); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); };
+      const label = (i, here, a, b, fs) => {
+        const f = P.face[P.reps[i]];
         const parts = P.ring[f] === 0 ? [{ text: "0", home: P.ring[here] === 0 }]
           : [{ text: String(P.ring[f]), home: P.ring[here] === P.ring[f] }, { text: "·", home: false }, { text: `${P.degrees[f]}°`, home: P.ring[here] > 0 && P.degrees[here] === P.degrees[f] }]; // (the middle has no direction)
-        const len = parts.reduce((s, p) => s + p.text.length, 0);
-        // (size: middle to corner; a long label spans most of the square's width, a short one is as tall)
-        const fs = size * Math.min(0.3, 1.9 / len);
-        if (fs < 2.5) continue;
-        let a = Mb.apply(m, [0, 0]), b = Mb.apply(m, this.labelUp(i));
-        if (warp) { a = warp(a); b = warp(b); }
         const [ax, ay] = px(a), [bx, by] = px(b);
         ctx.save(); ctx.globalAlpha = Math.min(1, (fs - 2.5) / 3.5);
         ctx.translate(ax, ay); ctx.rotate(Math.atan2(by - ay, bx - ax) + Math.PI / 2);
@@ -330,6 +328,25 @@ export class HSlideView extends HyperView {
         parts.forEach((p, k) => { ctx.strokeText(p.text, xs[k], 0); if (p.home) ctx.strokeRect(xs[k], bar.dy, widths[k], bar.h); });
         parts.forEach((p, k) => { ctx.fillText(p.text, xs[k], 0); if (p.home) ctx.fillRect(xs[k], bar.dy, widths[k], bar.h); });
         ctx.restore();
+      };
+      for (const { d, m, i, size, warp, along } of shown) {
+        const f = P.face[P.reps[i]], len = P.ring[f] === 0 ? 1 : `${P.ring[f]}·${P.degrees[f]}°`.length;
+        // (size: middle to corner; a long label spans most of the square's width, a short one is as tall)
+        const fs = size * Math.min(0.3, 1.9 / len);
+        if (fs < 2.5) continue;
+        let a = Mb.apply(m, [0, 0]), b = Mb.apply(m, this.labelUp(i));
+        if (!warp) { label(i, P.face[d.e], a, b, fs); continue; }
+        a = warp(a); b = warp(b);
+        // (sliding: the squares of the row it's over, at rest, from a step behind to two ahead)
+        const k0 = Math.floor(slide.theta);
+        let y = along.y, mk = along.ma;
+        for (let k = 0; k < k0 - 1; k++) { y = fwd(y); mk = Mb.mul(mk, P.Tg); }
+        for (let k = 0; k > k0 - 1; k--) { y = bwd(y); mk = Mb.mul(mk, Mb.inv(P.Tg)); }
+        for (let k = k0 - 1; k <= k0 + 2; k++, y = fwd(y), mk = Mb.mul(mk, P.Tg)) {
+          ctx.save(); outline(mk); ctx.clip();
+          label(i, P.face[y], a, b, fs);
+          ctx.restore();
+        }
       }
     }
   }
