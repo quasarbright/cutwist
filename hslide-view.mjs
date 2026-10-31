@@ -30,20 +30,22 @@ function squarePoint(G, s, t) {
   const q = 1 / (1 + Math.sqrt(Math.max(0, 1 - kx * kx - ky * ky)));
   return [kx * q, ky * q];
 }
-// A grid of a square's points, res × res cells: { pts (in the square's frame), st }. It reaches `over`
-// past the square's edges (in (s, t)): a mesh's straight edges cut inside the square's curved ones,
-// most near the rim where they curve hard, and the background would show between neighbors; reaching
-// a little past, neighbors overlap instead, under the outlines. (A pixel or two: overOf.)
+// A grid of a square's points, res × res cells: { pts (in the square's frame), st, out }. A ring of
+// cells around it reaches `over` past the square's edges (in (s, t)): a mesh's straight edges cut
+// inside the square's curved ones, most near the rim where they curve hard, and the background would
+// show between neighbors. The ring's points are `out` (1): drawn behind every square's inside, so a
+// ring only fills what no square does, and never covers a neighbor (or, stretched by a slide, the
+// row beside it). (A pixel or two: overOf.)
 const grids = new Map();
 const overOf = (size) => Math.round(Math.min(0.04, 1.4 / Math.max(1, size)) * 400) / 400; // (size: middle to corner, px)
 function gridOf(G, res, over = 0) {
   const key = `${G.M},${res},${over}`;
   if (!grids.has(key)) {
-    const pts = [], st = [], idx = [];
-    const at = (k) => -over + ((1 + 2 * over) * k) / res;
-    for (let j = 0; j <= res; j++) for (let i = 0; i <= res; i++) { pts.push(squarePoint(G, at(i), at(j))); st.push([at(i), at(j)]); }
-    for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) { const k = j * (res + 1) + i; idx.push(k, k + 1, k + res + 2, k, k + res + 2, k + res + 1); }
-    grids.set(key, { key, pts, st, idx });
+    const pts = [], st = [], out = [], idx = [], n = res + 2;
+    const at = (k) => (k === 0 ? -over : k === n ? 1 + over : (k - 1) / res);
+    for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) { pts.push(squarePoint(G, at(i), at(j))); st.push([at(i), at(j)]); out.push(i === 0 || j === 0 || i === n || j === n ? 1 : 0); }
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const k = j * (n + 1) + i; idx.push(k, k + 1, k + n + 2, k, k + n + 2, k + n + 1); }
+    grids.set(key, { key, pts, st, out, idx });
   }
   return grids.get(key);
 }
@@ -55,8 +57,8 @@ function gridOf(G, res, over = 0) {
 // box, cropped to fit (uScale: picture widths per disk unit), sampled from the picture at its own
 // size (up to the GPU's limit), mipmapped for squares smaller than their scrap of it.
 const VS = `#version 300 es
-in vec2 aPos; in vec2 aP; uniform vec2 uSize; out vec2 vP;
-void main() { vP = aP; gl_Position = vec4(aPos.x / uSize.x * 2.0 - 1.0, 1.0 - aPos.y / uSize.y * 2.0, 0.0, 1.0); }`;
+in vec2 aPos; in vec2 aP; in float aOut; uniform vec2 uSize; out vec2 vP;
+void main() { vP = aP; gl_Position = vec4(aPos.x / uSize.x * 2.0 - 1.0, 1.0 - aPos.y / uSize.y * 2.0, aOut - 1.0, 1.0); }`;
 const FS = `#version 300 es
 precision highp float;
 uniform int uMode; uniform float uR; uniform vec2 uScale; uniform sampler2D uTex;
@@ -153,15 +155,15 @@ export class HSlideView extends HyperView {
   // ---- WebGL, offscreen ----
   ensureGL() {
     if (this.gl !== null) return this.gl;
-    const cv = document.createElement("canvas"), gl = cv.getContext("webgl2", { antialias: true, premultipliedAlpha: false });
+    const cv = document.createElement("canvas"), gl = cv.getContext("webgl2", { antialias: true, depth: true, premultipliedAlpha: false });
     if (!gl) { this.gl = false; console.warn("no WebGL 2: the sliding squares can't be drawn"); return false; }
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
     const prog = gl.createProgram();
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
     this.glCanvas = cv;
     const u = (n) => gl.getUniformLocation(prog, n);
-    this.glp = { prog, aPos: gl.getAttribLocation(prog, "aPos"), aP: gl.getAttribLocation(prog, "aP"), uSize: u("uSize"), uTex: u("uTex"), uMode: u("uMode"), uR: u("uR"), uScale: u("uScale"),
-      pos: gl.createBuffer(), p: gl.createBuffer(), idx: gl.createBuffer(), tex: gl.createTexture() };
+    this.glp = { prog, aPos: gl.getAttribLocation(prog, "aPos"), aP: gl.getAttribLocation(prog, "aP"), aOut: gl.getAttribLocation(prog, "aOut"), uSize: u("uSize"), uTex: u("uTex"), uMode: u("uMode"), uR: u("uR"), uScale: u("uScale"),
+      pos: gl.createBuffer(), p: gl.createBuffer(), out: gl.createBuffer(), idx: gl.createBuffer(), tex: gl.createTexture() };
     this.gl = gl;
     return gl;
   }
@@ -229,7 +231,7 @@ export class HSlideView extends HyperView {
     // the pieces' pictures (WebGL, offscreen, then onto the canvas)
     const gl = this.ensureGL();
     if (gl) {
-      const { glp } = this, pos = [], home = [], idx = [];
+      const { glp } = this, pos = [], home = [], out = [], idx = [];
       for (const { m, i, size, warp } of shown) {
         // (fine enough that the mesh's straight edges keep to the square's curved ones: no background
         // showing through between neighbors; finer still for a sliding square, which bends)
@@ -239,13 +241,15 @@ export class HSlideView extends HyperView {
           if (warp) z = warp(z);
           pos.push(this.cx + z[0] * this.R - o.x, this.cy - z[1] * this.R - o.y);
           home.push(at[k][0], at[k][1]);
+          out.push(grid.out[k]);
         }
         for (const k of grid.idx) idx.push(base + k);
       }
       const cv = this.glCanvas;
       if (cv.width !== canvas.width || cv.height !== canvas.height) { cv.width = canvas.width; cv.height = canvas.height; }
       gl.viewport(0, 0, cv.width, cv.height);
-      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.clearColor(0, 0, 0, 0); gl.clearDepth(1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS);
       gl.useProgram(glp.prog);
       gl.activeTexture(gl.TEXTURE0);
       const pic = this.pictureTexture(gl, look.picture), R = P.domainRadius;
@@ -260,6 +264,8 @@ export class HSlideView extends HyperView {
       gl.enableVertexAttribArray(glp.aPos); gl.vertexAttribPointer(glp.aPos, 2, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, glp.p); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(home), gl.DYNAMIC_DRAW);
       gl.enableVertexAttribArray(glp.aP); gl.vertexAttribPointer(glp.aP, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glp.out); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(out), gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(glp.aOut); gl.vertexAttribPointer(glp.aOut, 1, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glp.idx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.DYNAMIC_DRAW);
       gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_INT, 0);
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cv, 0, 0); ctx.restore();
