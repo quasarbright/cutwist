@@ -192,7 +192,7 @@ export class HSlideView extends HyperView {
     const shown = [], keys = new Set(), centerKey = (m) => Mb.apply(m, [0, 0]).map((v) => Math.round(v * 1e7)).join(",");
     // (a square's size on screen: middle to corner, averaged over its four corners, so it's the same
     // whichever way a piece on it is turned; f: where a point of it is drawn)
-    const sizeOf = (f) => { const c = f([0, 0]); return (P.G.corners.reduce((s, k) => { const q = f(k); return s + abs([q[0] - c[0], q[1] - c[1]]); }, 0) / 4) * this.R; };
+    const sizeOf = (f, to = P.G.corners) => { const c = f([0, 0]); return (to.reduce((s, k) => { const q = f(k); return s + abs([q[0] - c[0], q[1] - c[1]]); }, 0) / 4) * this.R; };
     const add = (d, min) => {
       const size = sizeOf((z) => Mb.apply(d.m, z));
       if (size < min) return;
@@ -210,8 +210,10 @@ export class HSlideView extends HyperView {
       }
       // (a sliding square's size where it is now, not where it started: one sliding in from the rim
       // grows, and its mesh, outline and label go with what it looks like)
-      const now = warp ? sizeOf((z) => warp(Mb.apply(m, z))) : size;
-      shown.push({ d, m, i, size: now, rest: size, warp, along });
+      const at = warp ? (z) => warp(Mb.apply(m, z)) : (z) => Mb.apply(m, z), now = warp ? sizeOf(at) : size;
+      // (and middle to its edges' middles: half its width, which with many squares at a corner is far
+      // less than to its corners)
+      shown.push({ d, m, i, size: now, half: sizeOf(at, P.G.mids), rest: size, warp, along });
     };
     for (const d of tiles) add(d, 0.6);
     // (sliding: the row's squares just past what's listed, as many as the slide reaches, either way:
@@ -335,10 +337,12 @@ export class HSlideView extends HyperView {
         parts.forEach((p, k) => { ctx.fillText(p.text, xs[k], 0); if (p.home) ctx.fillRect(xs[k], bar.dy, widths[k], bar.h); });
         ctx.restore();
       };
-      for (const { d, m, i, size, warp, along } of shown) {
+      for (const { d, m, i, size, half, warp, along } of shown) {
         const f = P.face[P.reps[i]], len = P.ring[f] === 0 ? 1 : `${P.ring[f]}·${P.degrees[f]}°`.length;
-        // (size: middle to corner; a long label spans most of the square's width, a short one is as tall)
-        const fs = size * Math.min(0.3, 1.9 / len);
+        // (size: middle to corner; a long label spans most of the square's width, a short one is as
+        // tall. But never wider than the square: a monospace letter is about 0.6 of the font size, so
+        // at most ~80% of the width, 2·half)
+        const fs = Math.min(size * Math.min(0.3, 1.9 / len), (2.6 * half) / len);
         if (fs < 2.5) continue;
         let a = Mb.apply(m, [0, 0]), b = Mb.apply(m, this.labelUp(i));
         if (!warp) { label(i, P.face[d.e], a, b, fs); continue; }
