@@ -76,3 +76,25 @@ test("rear view: off on a phone, even from a link that turns it on", async ({ pa
   expect((await info(page)).rear).toBe(false);
   await expect(page.locator("#rearSplit")).toBeHidden();
 });
+
+test("the metrics button opens a panel of the puzzle's metrics, kept open across puzzles; the Sierpinski puzzle has none", async ({ page }) => {
+  await expect(page.locator("#metricsPop")).toBeHidden();
+  await page.click("#metrics");
+  await expect(page.locator("#metrics")).toHaveAttribute("aria-pressed", "true");
+  const turns = page.locator("#metricsTable tr", { hasText: "turns" });
+  await expect(turns.locator(".v")).toHaveText("6"); // (a cube's faces; no slices)
+  await expect(turns.locator(".k")).toHaveAttribute("title", /how many possible turns/);
+  await page.evaluate(() => window.cutwist.load("megaminx"));
+  await expect(turns.locator(".v")).toHaveText("12");
+  await page.evaluate(() => window.cutwist.load("sliding-torus"));
+  await expect(turns.locator(".v")).toHaveText("10"); // (5 rows and 5 columns)
+  await page.evaluate(() => window.cutwist.load("tiles-hex"));
+  await expect(turns.locator(".v")).toHaveText("12");
+  await page.evaluate(() => window.cutwist.load("sierpinski"));
+  await expect(page.locator("#metrics")).toBeHidden();
+  await expect(page.locator("#metricsPop")).toBeHidden();
+  await page.evaluate(() => window.cutwist.load("cube"));
+  await expect(page.locator("#metricsPop")).toBeVisible();
+  await page.click("#metrics");
+  await expect(page.locator("#metricsPop")).toBeHidden();
+});

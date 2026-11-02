@@ -122,6 +122,12 @@
     .nx-poptoggles { display: flex; flex-wrap: wrap; gap: 6px; font-family: var(--font-mono); }
     .nx-poptoggles .btn { padding: 5px 9px; font-size: .8rem; }
     .nx-poptoggles:empty { display: none; }
+    /* the metrics: numbers for comparing how puzzles feel to turn (metrics.mjs), each name's
+       definition on hover */
+    .nx-metrics { border-collapse: collapse; font: .78rem var(--font-mono); }
+    .nx-metrics td { padding: 2px 0; white-space: nowrap; }
+    .nx-metrics .k { color: var(--muted); cursor: help; }
+    .nx-metrics .v { color: var(--text); text-align: right; padding-left: 18px; }
     /* the algorithms: a list down the left, its newest row by the tape */
     #nx-algs {
       /* (as wide as its widest row, and every row stretched to that) */
@@ -574,6 +580,9 @@
     </div>
   </div>
 
+  <!-- the metrics, under the toggles top right (every puzzle but the Sierpinski; filled by showMetrics) -->
+  <div class="nx-pop" id="metricsPop" hidden><table class="nx-metrics" id="metricsTable"></table></div>
+
   <!-- the view dropdown, under its button top right: a sliding puzzle's views and look, and on
        a phone the toggles too (moved in by placeToggles) -->
   <div class="nx-pop" id="viewPop" hidden>
@@ -661,6 +670,7 @@
     <button class="btn is-active" id="axes" title="show the turn axes: click a segment to turn that layer clockwise, right-click for counterclockwise" aria-pressed="true">axes</button>
     <button class="btn is-active" id="textures" title="patterns on the stickers, to tell similar colors apart (on by default past 12 faces)" aria-pressed="true">textures</button>
     <button class="btn" id="rear" title="show the back beside the front: the right view is the puzzle seen from behind, and turns and drags there work the same (only when the 3D view is the only one on screen)" aria-pressed="false">rear view</button>
+    <button class="btn" id="metrics" title="numbers for comparing how puzzles feel to turn: how much a turn moves, which turns commute, and more" aria-pressed="false">metrics</button>
     <about-modal label="about">
       <h2 class="title">Cutwist</h2>
       <p class="intro">A twisty puzzle is a solid cut by flat planes. Every 3D puzzle here is made by
@@ -815,6 +825,7 @@
       piecesInLayer, layerOf, closestOrientation, TEXTURE_MIN_FACES, SOLIDS, buildSolid, splitPiece, randomMoves, moveLabel, applyMat, mulMat, rotMat, dot, add, sub, scale, cross, normalize, len,
     } from "./puzzle.mjs";
     import { History, SolveTimer, formatTime } from "./session.mjs";
+    import { puzzleMetrics, pieceCount } from "./metrics.mjs";
     import {
       PLANAR_PRESETS, buildPlanar, solvedPlanarState, isPlanarSolved, applyPlanarMove, inversePlanarMove, planarScrambleMoves,
     } from "./planar.mjs";
@@ -2057,7 +2068,9 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
 
     // how many pieces show (not blacked out, nor inside out of sight): what the numbers line and the
     // editor's tag both say, on every kind of puzzle
-    const piecesShown = () => (isHyper() ? hyperStats(P) : isTiles() ? tileStats(P) : isSphere() ? sphereStats(P) : puzzleStats(P)).pieces;
+    // (counted as the metrics count them: a piece whose stickers don't all touch, once for each
+    // group that does)
+    const piecesShown = () => pieceCount(P) ?? (isHyper() ? hyperStats(P) : isTiles() ? tileStats(P) : isSphere() ? sphereStats(P) : puzzleStats(P)).pieces;
     // Saying so when a design's circles were made smaller to fit (bigger, a circle would reach round
     // the torus or surface to overlap itself, or there'd be too many to work out): in the hint line,
     // a few seconds
@@ -2074,19 +2087,19 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       if (isHyper()) {
         const st = hyperStats(P), pct = st.smallest * 100;
         $("bStats").title = "how many pieces show, the smallest sticker as a share of its tile (red: slivers), and the surface";
-        $("bStats").innerHTML = `${st.pieces} pieces · smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`) + ` · ${P.tiles} tiles · genus ${P.surface.genus}`;
+        $("bStats").innerHTML = `${piecesShown()} pieces · smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`) + ` · ${P.tiles} tiles · genus ${P.surface.genus}`;
         return;
       }
       if (isTiles()) {
         const st = tileStats(P), pct = st.smallest * 100;
         $("bStats").title = "how many pieces, and the smallest one as a share of a tile (red: slivers)";
-        $("bStats").innerHTML = `${st.pieces} pieces · smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
+        $("bStats").innerHTML = `${piecesShown()} pieces · smallest ` + (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
         return;
       }
       const st = isSphere() ? sphereStats(P) : puzzleStats(P);
       const pct = st.smallest * 100;
       $("bStats").title = `how many pieces show, and the smallest sticker as a share of its ${isSphere() ? "tile" : "face"} (red: slivers)`;
-      $("bStats").innerHTML = `${st.pieces} pieces · smallest ` +
+      $("bStats").innerHTML = `${piecesShown()} pieces · smallest ` +
         (pct < 1 ? `<span class="warn">${pct.toFixed(2)}%</span>` : `${pct.toFixed(1)}%`);
     }
 
@@ -2409,6 +2422,7 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       $("reflectRow").hidden = !isPlanar() || !(P.T.x || P.T.y); // a torus never flips anything
       $("textures").hidden = isPlanar() || isHSlide(); // (planar cells' textures: the view menu's look options)
       $("texturesRow").hidden = isHSlide(); // (sliding squares: a picture or the color wheel, no textures)
+      showMetrics();
       if (!isFlat()) {
         buildMeshes();
         if (resetView) root.quaternion.copy(startView());
@@ -5868,10 +5882,62 @@ diffuseColor.rgb = inkOver(diffuseColor.rgb, int(vTex + 0.5));`);
       pop.hidden = !pop.hidden;
       Object.assign(pop.style, { left: Math.max(16, Math.min(r.left, innerWidth - 16 - pop.offsetWidth)) + "px", top: r.bottom + 6 + "px" });
     };
+    // The metrics (metrics.mjs) of the puzzle up, in a panel under the toggles that stays open
+    // across puzzles till its button's pressed again. The Sierpinski puzzle has none (which turns
+    // it has depends on how it's mixed up). Worked out when the panel opens, once per puzzle.
+    const METRICS = [
+      ["pieces", "how many pieces the puzzle has. A piece whose stickers don't all touch counts once for each group of stickers that do (under each corner of the corner-turning cube: three centers)", (m) => m.pieces],
+      ["turns", "how many possible turns the puzzle has, a turn being one layer moving by the smallest angle it can, or one row sliding by one. Left out: layers of one piece (a pyraminx's tips), and on a solid or ball, middle layers (the puzzle's center inside them: a cube's slices) and layers of more than half the pieces, since those are the rest of the puzzle turning the other way", (m) => m.turns],
+      ["destructiveness", "the proportion of the pieces a turn moves, averaged over the turns", (m) => m.destructiveness.toFixed(2)],
+      ["commutativity", "for each turn, the proportion of other turns that commute with it, on average (turns on its own axis left out, since they always commute)", (m) => m.commutativity.toFixed(2)],
+      ["overlap", "for each pair of turns that don't commute, the proportion of the first one's pieces that the second moves too, averaged. Low: they only meet at a few pieces", (m) => m.overlap.toFixed(2)],
+      ["vastness", "the most turns that all commute with each other (layers on one axis count, so more cuts means more vast). ≥: a big surface's, the most found before the search stopped", (m) => (m.vastnessExact ? "" : "≥ ") + m.vastness],
+      ["vulnerability", "for each piece, how many axes have a turn that moves it, averaged", (m) => m.vulnerability.toFixed(2)],
+      ["degree", "how many turns make 360° (or slides bring a row back), averaged over the axes that have a turn", (m) => m.degree.toFixed(2)],
+      // (each count names its type on hover, and lights its pieces up on the puzzle)
+      ["piece types", "types of pieces and how many of them there are of that type. Hover a number for its name, from how many stickers its pieces have: center (1), edge (2), corner(N)", (m) => m.variety.map((n, k) => [n, m.typeNames[k], m.typePieces[k]])],
+    ];
+    let metricsOf = null, metricsFor = null;
+    function showMetrics() {
+      const pop = $("metricsPop"), fits = !!P && !isSier();
+      $("metrics").hidden = !fits;
+      pop.hidden = !fits || $("metrics").getAttribute("aria-pressed") !== "true";
+      if (pop.hidden) return;
+      if (metricsFor !== P) { metricsOf = puzzleMetrics(P); metricsFor = P; }
+      $("metricsTable").innerHTML = "";
+      for (const [name, def, value] of METRICS) {
+        const row = $("metricsTable").insertRow(), k = row.insertCell(), v = row.insertCell();
+        k.className = "k"; k.textContent = name; k.title = def;
+        v.className = "v";
+        const val = value(metricsOf);
+        if (!Array.isArray(val)) { v.textContent = val; continue; }
+        val.forEach(([text, title, pieces], j) => {
+          if (j) v.append(" · ");
+          const s = document.createElement("span");
+          s.textContent = text; s.title = title; s.style.cursor = "help";
+          // (lit while hovered, steady on a solid, and then back to an algorithm's highlight, if
+          // one's on; a flat puzzle draws what's lit each frame, so it stands in for that one)
+          let held = null;
+          if (pieces) {
+            s.onpointerenter = () => { if (isFlat()) { held = algLit; algLit = new Set(pieces); } else lightPieces(new Set(pieces)); };
+            s.onpointerleave = () => { if (isFlat()) algLit = held; else lightPieces(algLit, true); };
+          }
+          v.append(s);
+        });
+      }
+      Object.assign(pop.style, { right: "16px", left: "auto", top: $("nx-toggles").getBoundingClientRect().bottom + 6 + "px" });
+    }
+    $("metrics").onclick = () => {
+      const on = $("metrics").getAttribute("aria-pressed") !== "true";
+      $("metrics").setAttribute("aria-pressed", on);
+      $("metrics").classList.toggle("is-active", on);
+      nx.pop.hidden = true; // (on a phone the button's in the view dropdown, which would cover the panel)
+      showMetrics();
+    };
     // on a phone the toggles go in the view dropdown, so the name fits on the top row beside
     // two buttons (view and about)
     function placeToggles() {
-      const toggles = [$("axes"), $("textures"), $("rear")];
+      const toggles = [$("axes"), $("textures"), $("rear"), $("metrics")];
       if (phone.matches) $("popToggles").append(...toggles);
       else document.querySelector("#nx-toggles about-modal").before(...toggles);
     }
